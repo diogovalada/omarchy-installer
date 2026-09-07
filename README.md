@@ -25,6 +25,14 @@ Direct installation on Linux and Intel Macs is not implemented.
 See the [support matrix](docs/support-matrix.md) for testing status and
 [platform behavior](docs/platform-behavior.md) for installation requirements.
 
+## Future work
+
+The goal is a cross-platform Omarchy installer that runs on Windows, Linux and
+macOS. On Apple Silicon Macs, it will reuse the installation backend from
+[Omarchy MX Mac](https://github.com/maralcbr/omarchy-mx-mac) through the same
+interface. Completing and testing that integration, and adding direct
+installation from Linux, are planned next steps.
+
 ## Development
 
 Use Rust 1.93, Node.js 22 or 24, pnpm 10.2.1, and the
