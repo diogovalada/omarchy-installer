@@ -33,7 +33,7 @@ mod platform {
     use std::time::{Duration, Instant};
     use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::Security::Authorization::*;
-    use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+    use windows_sys::Win32::Security::*;
     use windows_sys::Win32::Storage::FileSystem::*;
     use windows_sys::Win32::System::Pipes::*;
     use windows_sys::Win32::System::Threading::*;
@@ -198,20 +198,32 @@ mod platform {
         })
     }
     pub fn protected_directory(parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {
+        // Keep ancestor handles open without FILE_SHARE_DELETE so none can be
+        // replaced between validation and creation of the operation directory.
+        let mut guards = Vec::new();
         let base = if let Some(parent) = parent {
+            guards.push(lock_directory(parent, true)?);
             parent.to_path_buf()
         } else {
-            crate::provider_process::program_files()?
+            let data = crate::provider_process::program_data()?;
+            guards.push(lock_directory(&data, false)?);
+            let app = data.join("OmarchySetup");
+            create_protected(&app, true)?;
+            guards.push(lock_directory(&app, true)?);
+            let operations = app.join("Operations");
+            create_protected(&operations, true)?;
+            guards.push(lock_directory(&operations, true)?);
+            operations
         };
-        if std::fs::symlink_metadata(&base)
-            .map_err(|e| e.to_string())?
-            .file_type()
-            .is_symlink()
-        {
-            return Err("Operation parent is a symbolic link".into());
-        }
         let path = base.join(name);
-        let descriptor = wide("O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+        create_protected(&path, false)?;
+        Ok(path)
+    }
+
+    const WORKSPACE_SDDL: &str = "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+    fn create_protected(path: &Path, reuse: bool) -> Result<(), String> {
+        let descriptor = wide(WORKSPACE_SDDL);
         let mut security: PSECURITY_DESCRIPTOR = null_mut();
         if unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -229,23 +241,186 @@ mod platform {
             lpSecurityDescriptor: security,
             bInheritHandle: 0,
         };
-        let created = unsafe { CreateDirectoryW(wide(&path).as_ptr(), &attributes) };
+        let created = unsafe { CreateDirectoryW(wide(path).as_ptr(), &attributes) };
+        let code = unsafe { GetLastError() };
         let error = os_error();
         unsafe {
             LocalFree(security);
         }
-        if created == 0 {
+        if created == 0 && !(reuse && code == ERROR_ALREADY_EXISTS) {
             return Err(format!(
                 "Could not create protected operation directory: {error}"
             ));
         }
-        Ok(path)
+        Ok(())
+    }
+
+    fn lock_directory(path: &Path, protected: bool) -> Result<File, String> {
+        let handle = unsafe {
+            CreateFileW(
+                wide(path).as_ptr(),
+                READ_CONTROL | FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(format!("Could not open operation parent: {}", os_error()));
+        }
+        let file = unsafe { File::from_raw_handle(handle) };
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0
+            || info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+            || info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            return Err("Operation parent must be a directory without reparse points".into());
+        }
+        if protected {
+            let mut security: PSECURITY_DESCRIPTOR = null_mut();
+            let result = unsafe {
+                GetSecurityInfo(
+                    handle,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    &mut security,
+                )
+            };
+            if result != ERROR_SUCCESS {
+                return Err(format!(
+                    "Could not inspect operation parent permissions: {result}"
+                ));
+            }
+            let valid = unsafe { workspace_permissions(security) };
+            unsafe {
+                LocalFree(security);
+            }
+            if !valid {
+                return Err("Operation parent must be owned by Administrators and accessible only to Administrators and SYSTEM".into());
+            }
+        }
+        Ok(file)
+    }
+
+    // Reject pre-created writable namespaces; never repair an untrusted ACL and
+    // then reuse its contents. Compare the owner and exact explicit allow ACL.
+    unsafe fn workspace_permissions(security: PSECURITY_DESCRIPTOR) -> bool {
+        let mut expected: PSECURITY_DESCRIPTOR = null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide(WORKSPACE_SDDL).as_ptr(),
+            SDDL_REVISION_1,
+            &mut expected,
+            null_mut(),
+        ) == 0
+        {
+            return false;
+        }
+        let valid = (|| {
+            let mut control = 0;
+            let mut revision = 0;
+            if GetSecurityDescriptorControl(security, &mut control, &mut revision) == 0
+                || control & SE_DACL_PROTECTED == 0
+            {
+                return false;
+            }
+            let mut owner = null_mut();
+            let mut expected_owner = null_mut();
+            let mut defaulted = 0;
+            if GetSecurityDescriptorOwner(security, &mut owner, &mut defaulted) == 0
+                || GetSecurityDescriptorOwner(expected, &mut expected_owner, &mut defaulted) == 0
+                || owner.is_null()
+                || EqualSid(owner, expected_owner) == 0
+            {
+                return false;
+            }
+            let mut acl: *mut ACL = null_mut();
+            let mut expected_acl: *mut ACL = null_mut();
+            let mut present = 0;
+            if GetSecurityDescriptorDacl(security, &mut present, &mut acl, &mut defaulted) == 0
+                || present == 0
+                || acl.is_null()
+                || GetSecurityDescriptorDacl(
+                    expected,
+                    &mut present,
+                    &mut expected_acl,
+                    &mut defaulted,
+                ) == 0
+                || (*acl).AclSize != (*expected_acl).AclSize
+            {
+                return false;
+            }
+            std::slice::from_raw_parts(acl.cast::<u8>(), (*acl).AclSize as usize)
+                == std::slice::from_raw_parts(
+                    expected_acl.cast::<u8>(),
+                    (*expected_acl).AclSize as usize,
+                )
+        })();
+        LocalFree(expected);
+        valid
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
         use std::os::windows::io::BorrowedHandle;
+
+        #[test]
+        fn operation_parent_rejects_untrusted_permissions() {
+            for (sddl, accepted) in [
+                (WORKSPACE_SDDL, true),
+                ("O:SYG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", false),
+                ("O:BAG:BAD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", false),
+                (
+                    "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)",
+                    false,
+                ),
+                ("O:BAG:BAD:P", false),
+                ("O:BAG:BAD:NO_ACCESS_CONTROL", false),
+            ] {
+                unsafe {
+                    let mut security = null_mut();
+                    assert_ne!(
+                        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                            wide(sddl).as_ptr(),
+                            SDDL_REVISION_1,
+                            &mut security,
+                            null_mut()
+                        ),
+                        0
+                    );
+                    assert_eq!(workspace_permissions(security), accepted, "{sddl}");
+                    LocalFree(security);
+                }
+            }
+            let temp = tempfile::tempdir().unwrap();
+            assert!(lock_directory(temp.path(), true).is_err());
+        }
+
+        #[test]
+        #[ignore = "Requires administrator access; creates and removes empty operation folders"]
+        fn operation_directory_uses_reusable_protected_program_data_root() {
+            let expected = crate::provider_process::program_data()
+                .unwrap()
+                .join("OmarchySetup")
+                .join("Operations");
+            for _ in 0..2 {
+                let name = format!("Omarchy-Setup-{}", uuid::Uuid::new_v4());
+                let path = protected_directory(None, &name).unwrap();
+                assert_eq!(path.parent(), Some(expected.as_path()));
+                assert!(protected_directory(None, &name).is_err());
+                drop(lock_directory(&path, true).unwrap());
+                let child = protected_directory(Some(&path), "providers").unwrap();
+                drop(lock_directory(&child, true).unwrap());
+                std::fs::remove_dir(child).unwrap();
+                std::fs::remove_dir(path).unwrap();
+            }
+        }
 
         // Real Windows pipe handles, with no UAC prompt or privileged operation.
         // This exercises the same accept/mode transition as the launched helper.

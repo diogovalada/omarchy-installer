@@ -20,6 +20,9 @@ experimental and have not completed physical hardware and boot testing.
 
 On Windows, the app runs from one portable executable. It keeps verified
 application files in a local cache and uses the downloaded ISO in place.
+Windows operation receipts and retained records live under
+`%ProgramData%\OmarchySetup\Operations\Omarchy-Setup-<operation-id>`, with
+administrator-only access. They survive moving or deleting the portable app.
 Direct installation on Linux and Intel Macs is not implemented.
 
 See the [support matrix](docs/support-matrix.md) for testing status and

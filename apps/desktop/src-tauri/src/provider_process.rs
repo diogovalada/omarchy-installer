@@ -49,19 +49,22 @@ pub fn system_powershell() -> Result<std::path::PathBuf, String> {
 
 #[cfg(windows)]
 pub fn program_files() -> Result<std::path::PathBuf, String> {
-    use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramFiles, SHGetKnownFolderPath};
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles)
+}
+
+#[cfg(windows)]
+pub fn program_data() -> Result<std::path::PathBuf, String> {
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramData)
+}
+
+#[cfg(windows)]
+fn known_folder(id: &windows_sys::core::GUID) -> Result<std::path::PathBuf, String> {
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     let mut pointer = std::ptr::null_mut();
-    if unsafe {
-        SHGetKnownFolderPath(
-            &FOLDERID_ProgramFiles,
-            0,
-            std::ptr::null_mut(),
-            &mut pointer,
-        )
-    } < 0
+    if unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut pointer) } < 0
         || pointer.is_null()
     {
-        return Err("Program Files directory is unavailable".into());
+        return Err("Windows application directory is unavailable".into());
     }
     let mut length = 0;
     unsafe {

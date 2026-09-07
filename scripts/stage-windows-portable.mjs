@@ -88,6 +88,9 @@ Direct Omarchy installation also requires Docker Desktop with its Linux engine,
 85 GiB of working storage after ISO staging and 10 GiB of free memory.
 The application still stores downloads, cache and operation/recovery records
 in their normal locations and requests administrator access for privileged work.
+Operation receipts and retained records are stored under
+%ProgramData%/OmarchySetup/Operations/Omarchy-Setup-<operation-id>.
+These records remain available if the portable executable is moved or deleted.
 
 This is an unsigned, unofficial preview. Complete installation and boot/recovery
 qualification remain pending. The portable packaging does not change those limits.
