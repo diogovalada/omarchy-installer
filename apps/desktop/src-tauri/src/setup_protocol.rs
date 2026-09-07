@@ -135,6 +135,136 @@ pub fn usb_confirmation_plan(request: &OperationRequest) -> Result<Option<Value>
     })
 }
 
+/// A successful child exit is necessary, but the completion record must also
+/// prove that this exact approved image and target were written and verified.
+pub fn validate_usb_receipt(request: &OperationRequest, receipt: &Value) -> Result<(), String> {
+    let Destination::Usb { identity } = &request.destination else {
+        return Err("A USB receipt requires a USB write request".into());
+    };
+    let plan = usb_confirmation_plan(request)?.ok_or("Missing USB approval plan")?;
+    let valid = request.source.length > 0
+        && receipt["engine"] == "etcher-sdk"
+        && receipt["engineVersion"] == "10.2.14"
+        && receipt["destinationKind"] == "usb-whole-device"
+        && &receipt["target"] == identity
+        && receipt["sha256"]
+            .as_str()
+            .is_some_and(|digest| digest.eq_ignore_ascii_case(&request.source.sha256))
+        && ["bytesWritten", "readbackBytes"]
+            .iter()
+            .all(|key| receipt[key].as_u64() == Some(request.source.length))
+        && ["writeSpanBytes", "readbackSpanBytes"]
+            .iter()
+            .all(|key| receipt[key] == plan["writeSpanBytes"])
+        && receipt["paddingBytes"] == plan["paddingBytes"]
+        && [
+            "sdkVerification",
+            "flushed",
+            "fullReadbackVerification",
+            "paddingVerification",
+        ]
+        .iter()
+        .all(|key| receipt[key] == true)
+        && matches!(
+            receipt["eject"]["status"].as_str(),
+            Some("ejected" | "unmounted" | "failed")
+        )
+        && receipt["eject"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.trim().is_empty());
+    if !valid {
+        return Err("The USB provider returned an incomplete or inconsistent verification receipt. Treat the USB as unverified and retry.".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod usb_receipt_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn fixture() -> (OperationRequest, Value) {
+        let identity = json!({"blockSize":512,"size":8192,"fingerprint":"selected-usb"});
+        let request = OperationRequest {
+            protocol: 1,
+            source: SourceImage {
+                path: "fixture.iso".into(),
+                file_name: "fixture.iso".into(),
+                length: 1025,
+                sha256: "a".repeat(64),
+                signature: vec![],
+            },
+            destination: Destination::Usb {
+                identity: identity.clone(),
+            },
+        };
+        let receipt = json!({"engine":"etcher-sdk","engineVersion":"10.2.14",
+            "destinationKind":"usb-whole-device","target":identity,"sha256":"a".repeat(64),
+            "bytesWritten":1025,"writeSpanBytes":1536,"paddingBytes":511,
+            "readbackBytes":1025,"readbackSpanBytes":1536,"sdkVerification":true,
+            "flushed":true,"fullReadbackVerification":true,"paddingVerification":true,
+            "eject":{"status":"ejected","message":"Device removed."}});
+        (request, receipt)
+    }
+
+    #[test]
+    fn accepts_complete_bound_receipt_including_manual_ejection() {
+        let (request, mut receipt) = fixture();
+        validate_usb_receipt(&request, &receipt).unwrap();
+        receipt["eject"] = json!({"status":"failed","message":"Use safely remove."});
+        validate_usb_receipt(&request, &receipt).unwrap();
+    }
+
+    #[test]
+    fn rejects_missing_checks_or_changed_image_target_and_byte_counts() {
+        let (request, receipt) = fixture();
+        for field in receipt.as_object().unwrap().keys() {
+            let mut missing = receipt.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                validate_usb_receipt(&request, &missing).is_err(),
+                "missing {field}"
+            );
+        }
+        for field in [
+            "sdkVerification",
+            "flushed",
+            "fullReadbackVerification",
+            "paddingVerification",
+        ] {
+            let mut changed = receipt.clone();
+            changed[field] = json!(false);
+            assert!(
+                validate_usb_receipt(&request, &changed).is_err(),
+                "false {field}"
+            );
+        }
+        for field in [
+            "bytesWritten",
+            "writeSpanBytes",
+            "readbackBytes",
+            "readbackSpanBytes",
+            "paddingBytes",
+        ] {
+            let mut changed = receipt.clone();
+            changed[field] = json!(0);
+            assert!(
+                validate_usb_receipt(&request, &changed).is_err(),
+                "wrong {field}"
+            );
+        }
+        let mut changed = receipt.clone();
+        changed["target"]["fingerprint"] = json!("another-usb");
+        assert!(validate_usb_receipt(&request, &changed).is_err());
+        let mut changed = receipt.clone();
+        changed["sha256"] = json!("b".repeat(64));
+        assert!(validate_usb_receipt(&request, &changed).is_err());
+        let mut changed = receipt;
+        changed["eject"]["status"] = json!("unknown");
+        assert!(validate_usb_receipt(&request, &changed).is_err());
+    }
+}
+
 pub fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
     let mut bytes = Vec::new();
     loop {

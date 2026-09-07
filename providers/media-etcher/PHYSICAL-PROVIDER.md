@@ -17,6 +17,10 @@ checks. A read-only Windows probe reproduced the September 7 raw-device open
 failure: the correct device name opened, whereas an appended backslash produced
 Win32 error 31. Full physical writing and host qualification remain outstanding.
 See [the diagnostic evidence](../../docs/evidence/windows-usb-open-2026-09-07.md).
+The subsequent [USB path audit](../../docs/evidence/windows-usb-path-audit-2026-09-07.md)
+adds execution of the actual USB pipeline against temporary files, native-volume
+helper scenarios, and CLI cancellation checks. This covers software behavior
+without claiming physical USB or boot qualification.
 
 ## Protocol 1
 
@@ -94,6 +98,9 @@ same child-exit requirement for callers that use its API.
   opened handle. Failure to re-enumerate a locked device aborts without relaxing
   identity policy. Only mounted-path stat failures caused by held Windows volume
   locks are exempted at the latter checkpoints.
+  The Windows lock helper uses a filtered CIM partition query, which accepts a
+  genuinely empty partition set for a blank disk. Query failures still abort,
+  and the result count must match `Get-Disk.NumberOfPartitions` before locking.
 - Some USB drivers reject `StorageAccessAlignmentProperty` with Win32 error 1
   or 50. Only these unsupported-query responses allow a Windows fallback.
   `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` must still return the capacity and logical

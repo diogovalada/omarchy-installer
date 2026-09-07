@@ -36,7 +36,13 @@ public static class OmarchyVolumeLock {
 }
 '@
   # AccessPaths includes volume GUID names, including volumes without drive letters.
-  $partitions = @(Get-Partition -DiskNumber $DiskNumber -ErrorAction Stop)
+  # Get-Partition -DiskNumber raises ObjectNotFound for a valid blank disk.
+  # A filtered CIM enumeration returns an empty set without suppressing real
+  # query failures. Reconcile it with Get-Disk's partition count before locking.
+  $partitions = @(Get-CimInstance -Namespace root/Microsoft/Windows/Storage -ClassName MSFT_Partition -Filter "DiskNumber = $DiskNumber" -ErrorAction Stop)
+  if ($null -eq $disk.NumberOfPartitions -or $partitions.Count -ne $disk.NumberOfPartitions) {
+    throw 'Target partition inventory is incomplete or changed before volume locking.'
+  }
   $volumePattern = '^\\\\\?\\Volume\{[0-9a-fA-F-]{36}\}\\$'
   foreach ($partition in $partitions) {
     $accessPaths = @($partition.AccessPaths | Where-Object { $_ })

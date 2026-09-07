@@ -858,14 +858,16 @@ fn execute(
                     value["sourceVerification"] = source.guard.reader_binding()?;
                     value
                 };
-                provider_process::run(
+                let receipt = provider_process::run(
                     command,
                     Some(media_request),
                     Arc::clone(&cancel),
                     None,
                     true,
                     callback,
-                )?
+                )?;
+                crate::setup_protocol::validate_usb_receipt(&request, &receipt)?;
+                receipt
             }
             Destination::DirectX86 {
                 disk_number,
