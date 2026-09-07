@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "model": "gpt-6-astra",
+  "observedAt": "2026-09-05T22:54:21.0927479Z",
+  "basisRunId": "20260905T222043Z-f8574f3b",
+  "builderUsedByInstallSha256": "9bf1fe4acf48db467ee988ea6f6f1c5fc37258dfd31900ce1f837d458149f702",
+  "builderAfterHardeningSha256": "251a0c5768213ed103f7030b42fd3d70b01e0389e6534e43f3f4661d22b913fb",
+  "testsSha256": "e642b40fa348a1c319a90b575d0c03915590936263a4b545470fba6a16122166",
+  "changes": [
+    "Discard each failed live-ISO SSH discovery key; promote only after unique-client-key authentication and installed-root checks.",
+    "Enforce StrictHostKeyChecking=yes and the promoted key for independent boot.",
+    "Treat subprocess.TimeoutExpired as a transient failed SSH probe within the outer wait bound.",
+    "Accept only /dev/vda2 with an optional Btrfs subvolume suffix as installed-root proof; reject prefix collisions."
+  ],
+  "testCommand": "wsl -d Ubuntu -- sh -lc 'cd /mnt/c/Users/example/Documents/Code/omarchy/providers/image-builder-x86; python3 -m unittest -v'",
+  "testsPassed": 12,
+  "testsFailed": 0,
+  "testsDurationSeconds": 0.025,
+  "fullInstallationAfterChanges": false,
+  "installedSystemProven": false,
+  "independentBootProven": false,
+  "deploymentAllowed": false
+}

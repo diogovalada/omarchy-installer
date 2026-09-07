@@ -1,0 +1,17 @@
+[files]
+extend-exclude = [
+    "catalog/test-vectors/**",
+    "testkit/synthetic-disks/**",
+    "**/*.snap",
+    "**/dist/**",
+    "**/target/**",
+]
+
+[default]
+locale = "en-us"
+
+[default.extend-words]
+Asahi = "Asahi"
+OmaCom = "OmaCom"
+Omarchy = "Omarchy"
+UDisks = "UDisks"

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "shortDescription": "Community preview installer for Omarchy",
+    "longDescription": "Community preview — not an official Omarchy release. Direct installation requires supported hardware and separate installation qualification.",
+    "windows": {
+      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true},
+      "nsis": {"installMode": "currentUser", "displayLanguageSelector": false}
+    }
+  }
+}

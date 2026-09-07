@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "version": "4.0.2",
+  "architecture": "x86_64",
+  "isoUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso",
+  "signatureUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sig",
+  "checksumUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sha256",
+  "sizeBytes": 6227752960,
+  "sha256": "2ef8e624aa1bec7e277e28056b8535a6c9373ba48d7ede3f1a01cb6d2373cfb8",
+  "signingKeyFingerprint": "40DFB630FF42BCFFB047046CF0134EE680CAC571",
+  "recipeRepository": "https://github.com/omacom/omarchy-iso",
+  "recipeCommit": "2673c613d9a71e23920e43fbb951238145e0f1e8",
+  "recipePath": "test/integration.d/base-test.sh",
+  "recipeStatus": "reference-only until inspected inside this released ISO",
+  "observedAt": "2026-09-05",
+  "model": "gpt-6-astra"
+}

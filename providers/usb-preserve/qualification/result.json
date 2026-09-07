@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "profile": "GPT, NTFS data + FAT32 EFI; x64 UEFI; Secure Boot off",
+  "evidence": "Official ISO loopback mounted; live root mounted; Omarchy serial login reached",
+  "isoSha256": "2ef8e624aa1bec7e277e28056b8535a6c9373ba48d7ede3f1a01cb6d2373cfb8",
+  "loaderSha256": "6aee4ec8cb45c274e9798d0700efa041fd5d7baa1aa83b9ad507fbfd9a23e155",
+  "physicalHardwareQualified": false
+}

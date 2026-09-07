@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-09-06T02:07:44.885Z",
+  "model": "gpt-6-astra",
+  "commands": [
+    "pnpm desktop:build:native",
+    "cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --features tauri/custom-protocol"
+  ],
+  "nativeLaunched": false,
+  "executable": "apps/desktop/src-tauri/target/debug/omarchy-setup-desktop.exe",
+  "executableSha256": "88e9e852e4fc7111fe4f394d26534334c050e172126b57e13f2481e8d76600dd",
+  "executableModifiedAt": "2026-09-06T02:06:05.728Z",
+  "providerManifestSha256": "0e885737cdbd9cfb5c60e3f16a7e116a21470a5cce961c9e7032e7c8e2f46343",
+  "providerFilesVerified": 6143,
+  "sourceAndStagedAndPackagedProvidersMatch": true,
+  "sourceFiles": {
+    "apps/desktop/src-tauri/src/setup.rs": "04b01a0820a18b6eb9873fe0780965240008da8305def0f9e8e6e850aadecf09",
+    "apps/desktop/src-tauri/src/setup_helper.rs": "60b1763fa2679352b4b711e15147be8efdc79cab9be8ba47d0817c34da832233",
+    "apps/desktop/src-tauri/src/setup_protocol.rs": "28ca254cb83736099334f2c1c72be114d2b591867b97ed5b41916c3f509b8259",
+    "apps/desktop/src-tauri/src/provider_process.rs": "f57d51ddf984f9e47298becf29a9c7430911fee9b83821169e4b737be2f0f872",
+    "apps/desktop/src-tauri/Cargo.toml": "2ab24de8aac628694d3459d0d87e42d2f9679b1a46286178b1b689a1550ad2f9",
+    "apps/desktop/src-tauri/Cargo.lock": "893d6f355ae515aca671951942027cd9e064a447ca8c3363adf0d4ecec803f5d",
+    "apps/desktop/src/lib/setup.ts": "0bbd5f9a6752ac2ca8167881093ad2c6b0df0815b9ce040612a7e90ec6c48a9c",
+    "apps/desktop/src/lib/SetupPanel.svelte": "f8be32be3bd0a0a8a9ea421f85f29a532ad1845988c3d20c98e3b8e84123e1a5"
+  },
+  "checks": [
+    "Svelte type check: 0 errors, 4 pre-existing warnings",
+    "Production frontend build",
+    "Native Windows executable compilation",
+    "PowerShell source parsing and C# compilation (delegated)",
+    "Python and Bash source syntax checks (delegated)",
+    "Staged and packaged provider length/SHA-256 comparison"
+  ],
+  "deferred": [
+    "Test suites",
+    "Crypto interoperability execution",
+    "Image construction and boot",
+    "Native installer launch and elevation",
+    "NTFS shrinking",
+    "BitLocker suspension/recovery/restoration execution",
+    "Host storage or firmware mutation",
+    "Reboot"
+  ]
+}

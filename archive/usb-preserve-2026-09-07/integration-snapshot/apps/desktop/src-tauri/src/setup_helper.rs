@@ -1,0 +1,1030 @@
+use crate::elevation;
+use crate::provider_process;
+use crate::provider_runtime;
+use crate::setup_protocol::{
+    read_frame, write_frame, Destination, DirectTarget, OperationRequest, SourceImage,
+};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs::{self, OpenOptions};
+use std::io::{BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use zeroize::Zeroizing;
+
+type Emitter = Arc<Mutex<Box<dyn Write + Send>>>;
+fn emit(output: &Emitter, value: Value) {
+    if let Ok(mut writer) = output.lock() {
+        let _ = write_frame(&mut *writer, &value);
+    }
+}
+fn provider_event(output: &Emitter, mut value: Value) {
+    let kind = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    if kind == "result" {
+        return;
+    }
+    if let Some(fields) = value.as_object_mut() {
+        fields.insert("protocol".into(), json!(1));
+        fields.remove("protocolVersion");
+        fields.insert("type".into(), json!("event"));
+        if !fields.contains_key("bytes") {
+            if let Some(bytes) = fields.get("completedBytes").cloned() {
+                fields.insert("bytes".into(), bytes);
+            }
+        }
+        if kind == "error" {
+            // Only entry() emits terminal helper messages, after run() has
+            // drained and reaped its child. A nested error must not make the
+            // desktop close IPC while disk/volume cleanup is still active.
+            fields.insert("stage".into(), json!("finishing"));
+            fields.insert("cancelAvailable".into(), json!(false));
+            fields.insert("providerError".into(), json!(true));
+        }
+        emit(output, value);
+    }
+}
+fn stage(output: &Emitter, name: &str, message: &str, cancel_available: bool) {
+    emit(
+        output,
+        json!({"protocol":1,"type":"event","stage":name,"message":message,"cancelAvailable":cancel_available}),
+    );
+}
+fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        Err("Operation cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn entry(id: &str, parent: u32) -> Result<(), String> {
+    let connection = elevation::connect(id, parent)?;
+    let output = Arc::new(Mutex::new(connection.writer));
+    let mut reader = BufReader::new(connection.reader);
+    let request: OperationRequest =
+        serde_json::from_value(read_frame(&mut reader)?.ok_or("Missing operation request")?)
+            .map_err(|e| e.to_string())?;
+    if request.protocol != 1 {
+        return Err("Unsupported operation protocol".into());
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancellation = Arc::clone(&cancel);
+    let (confirm_sender, confirmations) = mpsc::channel();
+    std::thread::spawn(move || loop {
+        match read_frame(&mut reader) {
+            Ok(Some(message)) if message.get("type").and_then(Value::as_str) == Some("cancel") => {
+                cancellation.store(true, Ordering::Relaxed);
+            }
+            Ok(Some(message))
+                if message.get("type").and_then(Value::as_str) == Some("confirmation") =>
+            {
+                if confirm_sender.send(message).is_err() {
+                    break;
+                }
+            }
+            Ok(Some(_)) => {
+                cancellation.store(true, Ordering::Relaxed);
+                break;
+            }
+            _ => {
+                cancellation.store(true, Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+    match execute(request, &output, Arc::clone(&cancel), &confirmations) {
+        Ok(result) => {
+            emit(
+                &output,
+                json!({"protocol":1,"type":"result","result":result}),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            emit(
+                &output,
+                json!({"protocol":1,"type":"error","message":error,"cancelled":cancel.load(Ordering::Relaxed)}),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn confirm(
+    output: &Emitter,
+    receiver: &mpsc::Receiver<Value>,
+    cancel: &AtomicBool,
+    summary: &str,
+    plan: &Value,
+) -> Result<(), String> {
+    cancelled(cancel)?;
+    let binding = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(plan).map_err(|e| e.to_string())?)
+    );
+    emit(
+        output,
+        json!({"protocol":1,"type":"confirmation_required","binding":binding,"summary":summary,"plan":plan}),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(900);
+    loop {
+        cancelled(cancel)?;
+        match receiver.recv_timeout(Duration::from_millis(200)) {
+            Ok(response)
+                if response.get("binding").and_then(Value::as_str) == Some(binding.as_str()) =>
+            {
+                return if response.get("approved").and_then(Value::as_bool) == Some(true) {
+                    Ok(())
+                } else {
+                    Err("Operation was not confirmed".into())
+                };
+            }
+            Ok(_) => return Err("Operation confirmation did not match the plan".into()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Desktop disconnected before confirmation".into())
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("Operation confirmation expired".into());
+        }
+    }
+}
+
+fn copy_source(
+    source: &SourceImage,
+    directory: &Path,
+    output: &Emitter,
+    cancel: &AtomicBool,
+) -> Result<PathBuf, String> {
+    if !source.path.is_absolute()
+        || source.length == 0
+        || source.length > 64 * 1024 * 1024 * 1024
+        || source.signature.is_empty()
+        || source.signature.len() > 16384
+        || source.file_name.len() > 128
+        || !source.file_name.starts_with("omarchy-")
+        || !source.file_name.ends_with(".iso")
+        || !source
+            .file_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || [b'.', b'-'].contains(&byte))
+    {
+        return Err("Invalid verified-image request".into());
+    }
+    let mut cursor = PathBuf::new();
+    for component in source.path.components() {
+        cursor.push(component);
+        if matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        ) {
+            continue;
+        }
+        if fs::symlink_metadata(&cursor)
+            .map_err(|e| e.to_string())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(
+                "The original image path contains a symbolic link or directory junction".into(),
+            );
+        }
+    }
+    if !fs::symlink_metadata(&source.path)
+        .map_err(|e| e.to_string())?
+        .is_file()
+    {
+        return Err("The selected image is not a regular file".into());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ);
+    }
+    let mut input = options.open(&source.path).map_err(|e| e.to_string())?;
+    let metadata = input.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() != source.length {
+        return Err("The selected image changed or is not a regular file".into());
+    }
+    let path = directory.join(&source.file_name);
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut total = 0_u64;
+    loop {
+        cancelled(cancel)?;
+        let read = input.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        if total > source.length {
+            return Err("The image grew while preparing it".into());
+        }
+        file.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+        if total % (64 * 1024 * 1024) < buffer.len() as u64 {
+            emit(
+                output,
+                json!({"protocol":1,"type":"event","stage":"preparing","message":"Preparing the verified image…","bytes":total,"totalBytes":source.length,"cancelAvailable":true}),
+            );
+        }
+    }
+    file.sync_all().map_err(|e| e.to_string())?;
+    if total != source.length {
+        return Err("The image ended before its expected size".into());
+    }
+    drop(file);
+    stage(
+        output,
+        "authenticating",
+        "Checking the official image signature…",
+        true,
+    );
+    omarchy_release_client::authenticate_iso_offline(
+        &path,
+        source.length,
+        &source.sha256,
+        &source.signature,
+        cancel,
+        |_| {},
+    )
+    .map_err(|e| e.to_string())?;
+    let mut signature = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(directory.join(format!("{}.sig", source.file_name)))
+        .map_err(|e| e.to_string())?;
+    signature
+        .write_all(&source.signature)
+        .map_err(|e| e.to_string())?;
+    signature.sync_all().map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn safe_label(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown device")
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !('\u{202a}'..='\u{202e}').contains(c)
+                && !('\u{2066}'..='\u{2069}').contains(c)
+        })
+        .take(160)
+        .collect()
+}
+
+fn write_request(directory: &Path, name: &str, value: &Value) -> Result<PathBuf, String> {
+    let path = directory.join(name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    if bytes.len() > crate::setup_protocol::MAX_FRAME {
+        return Err("Operation request is too large".into());
+    }
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn revalidate_usb(
+    runtime: &Path,
+    manifest: &provider_runtime::RuntimeManifest,
+    workspace: &Path,
+    source: &Path,
+    identity: &Value,
+    cancel: &Arc<AtomicBool>,
+    output: &Emitter,
+) -> Result<(), String> {
+    cancelled(cancel)?;
+    let mut command = provider_process::media_command(runtime, manifest)?;
+    provider_process::privileged_environment(&mut command, workspace)?;
+    let listed = provider_process::run(
+        command,
+        Some(json!({"protocol":1,"action":"list","sourcePath":source})),
+        Arc::clone(cancel),
+        None,
+        false,
+        |value| provider_event(output, value),
+    )?;
+    let fingerprint = identity
+        .get("fingerprint")
+        .and_then(Value::as_str)
+        .ok_or("No USB identity was selected")?;
+    let drives = listed
+        .get("drives")
+        .and_then(Value::as_array)
+        .ok_or("Provider did not return drive discovery")?;
+    let matches: Vec<_> = drives
+        .iter()
+        .filter(|drive| {
+            drive
+                .pointer("/identity/fingerprint")
+                .and_then(Value::as_str)
+                == Some(fingerprint)
+        })
+        .collect();
+    if matches.len() != 1 {
+        return Err("The selected USB drive is no longer uniquely identified".into());
+    }
+    let drive = matches[0];
+    if drive.get("eligible").and_then(Value::as_bool) != Some(true)
+        || drive.get("identity") != Some(identity)
+    {
+        return Err("The USB drive changed, contains the original or staged image, or is no longer eligible".into());
+    }
+    Ok(())
+}
+
+fn execute(
+    request: OperationRequest,
+    output: &Emitter,
+    cancel: Arc<AtomicBool>,
+    confirmations: &mpsc::Receiver<Value>,
+) -> Result<Value, String> {
+    let manifest = provider_runtime::manifest()?;
+    let runtime_source = provider_runtime::locate(&manifest)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let workspace = elevation::protected_directory(None, &format!("Omarchy-Setup-{id}"))?;
+    let outcome: Result<Value, String> = (|| {
+        let runtime = elevation::protected_directory(Some(&workspace), "providers")?;
+        stage(
+            output,
+            "preparing",
+            "Preparing the installation tools…",
+            true,
+        );
+        provider_runtime::copy_protected(&runtime_source, &runtime, &manifest, &cancel)?;
+        let protected_paths = vec![
+            request.source.path.clone(),
+            std::env::current_exe().map_err(|e| e.to_string())?,
+            workspace.clone(),
+        ];
+        if let Destination::InspectUsb { identity } = &request.destination {
+            revalidate_usb(
+                &runtime,
+                &manifest,
+                &workspace,
+                &request.source.path,
+                identity,
+                &cancel,
+                output,
+            )?;
+            let inspection = crate::usb_preserve::inspect(
+                identity,
+                request.source.length,
+                &request.source.sha256,
+            );
+            return Ok(json!({"usbInspection":inspection}));
+        }
+        if let Destination::UsbPreserve {
+            identity,
+            plan,
+            restore,
+        } = &request.destination
+        {
+            revalidate_usb(
+                &runtime,
+                &manifest,
+                &workspace,
+                &request.source.path,
+                identity,
+                &cancel,
+                output,
+            )?;
+            let fresh = crate::usb_preserve::recheck(identity, plan)?;
+            if !*restore {
+                crate::usb_preserve::validate_addition(
+                    &fresh,
+                    request.source.length,
+                    &request.source.sha256,
+                )?;
+            }
+            let action = if *restore {
+                "Restore the previous boot setup"
+            } else {
+                "Keep existing files and add the Omarchy installer"
+            };
+            let summary = if *restore {
+                format!("{action} on {}?\n\nDevice: {}\n\nThe saved bootloader will be restored to its original location and verified. Existing files, the ISO and the recovery archive will be retained.",safe_label(identity.get("description")),safe_label(identity.get("device")))
+            } else {
+                format!("{action} on {}?\n\nDevice: {}\nImage: {}\nExisting files and partitions will be retained. The ISO needs {:.2} GiB plus a safety reserve.\n\nIf a previous UEFI bootloader exists, it will be backed up on this USB before replacement. Its previous boot option will be unavailable until you use Restore previous boot setup in this app.\n\nThis installer boots on x64 UEFI with Secure Boot off.",safe_label(identity.get("description")),safe_label(identity.get("device")),request.source.file_name,request.source.length as f64/1_073_741_824.0)
+            };
+            confirm(
+                output,
+                confirmations,
+                &cancel,
+                &summary,
+                &json!({"kind":if *restore {"usb_restore"} else {"usb_preserve"},"target":identity,"plan":fresh,"sourceSha256":request.source.sha256}),
+            )?;
+            revalidate_usb(
+                &runtime,
+                &manifest,
+                &workspace,
+                &request.source.path,
+                identity,
+                &cancel,
+                output,
+            )?;
+            let receipt = if *restore {
+                stage(
+                    output,
+                    "restoring",
+                    "Restoring and verifying the previous USB boot setup…",
+                    false,
+                );
+                crate::usb_preserve::restore(identity, plan)?
+            } else {
+                let source = copy_source(&request.source, &workspace, output, &cancel)?;
+                revalidate_usb(
+                    &runtime,
+                    &manifest,
+                    &workspace,
+                    &request.source.path,
+                    identity,
+                    &cancel,
+                    output,
+                )?;
+                crate::usb_preserve::install(
+                    identity,
+                    plan,
+                    &source,
+                    request.source.length,
+                    &request.source.sha256,
+                    &runtime.join("usb-preserve/boot/BOOTX64.EFI"),
+                    &cancel,
+                    |mut value| {
+                        value["protocol"] = json!(1);
+                        value["type"] = json!("event");
+                        emit(output, value);
+                    },
+                )?
+            };
+            let receipt_path = write_request(
+                &workspace,
+                "receipt.json",
+                &json!({"operationId":id,"destination":request.destination,"receipt":receipt}),
+            )?;
+            return Ok(json!({"receipt":receipt,"receiptPath":receipt_path}));
+        }
+        if matches!(request.destination, Destination::PrepareFirmware) {
+            let info_path = write_request(&workspace, "firmware-info.json", &json!({}))?;
+            let mut command =
+                provider_process::direct_command(&runtime, &manifest, "firmware-info", &info_path)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            let info =
+                provider_process::run(command, None, Arc::clone(&cancel), None, false, |_| {})?;
+            let hash = info["sha256"]
+                .as_str()
+                .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+                .ok_or("Invalid firmware preparation plan")?;
+            confirm(output, confirmations, &cancel,
+                "Restart this computer into UEFI firmware settings now? Save your work and have your Windows recovery key available. The helper will temporarily suspend active Windows OS BitLocker protection for this transition and arrange restoration when Windows returns. Existing suspension is preserved. In firmware, disable Secure Boot, leave TPM enabled, save, and return to Windows. Reopen Omarchy Setup and check with administrator access before installing. No partitions are changed by this step.", &info)?;
+            let path = write_request(
+                &workspace,
+                "firmware-request.json",
+                &json!({"operationId":id,"expectedSha256":hash}),
+            )?;
+            let mut command =
+                provider_process::direct_command(&runtime, &manifest, "prepare-firmware", &path)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            stage(
+                output,
+                "firmware-preparation",
+                "Preparing Windows protection and restarting into firmware settings…",
+                false,
+            );
+            return provider_process::run(
+                command,
+                None,
+                Arc::clone(&cancel),
+                None,
+                false,
+                |mut value| {
+                    if let Some(fields) = value.as_object_mut() {
+                        fields.insert("cancelAvailable".into(), json!(false));
+                    }
+                    provider_event(output, value)
+                },
+            );
+        }
+        if matches!(request.destination, Destination::PrepareRuntime) {
+            confirm(output, confirmations, &cancel,
+                "Import the verified, packaged Linux construction runtime into Docker? Docker Desktop must already be installed and running with its Linux engine. This imports the application’s pinned image; it does not change Windows features, disks, firmware or BitLocker.", &json!({"action":"prepare-runtime","archiveSha256":manifest.files.iter().find(|file| file.path == "image-builder-x86/runtime.tar").map(|file| &file.sha256)}))?;
+            let path = write_request(&workspace, "runtime-request.json", &json!({}))?;
+            let mut command =
+                provider_process::direct_command(&runtime, &manifest, "prepare-runtime", &path)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            stage(
+                output,
+                "runtime-preparation",
+                "Importing the verified construction runtime…",
+                false,
+            );
+            return provider_process::run(
+                command,
+                None,
+                Arc::clone(&cancel),
+                None,
+                false,
+                |value| provider_event(output, value),
+            );
+        }
+        if matches!(request.destination, Destination::InspectDirect) {
+            let probe_request = write_request(
+                &workspace,
+                "probe-request.json",
+                &json!({"protectedPaths":protected_paths}),
+            )?;
+            let mut command =
+                provider_process::direct_command(&runtime, &manifest, "probe", &probe_request)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            let probe =
+                provider_process::run(command, None, Arc::clone(&cancel), None, false, |value| {
+                    provider_event(output, value)
+                })?;
+            return Ok(json!({"inspection":probe}));
+        }
+        // Expensive construction starts only after elevated target/prerequisite
+        // inspection; a selected extent never overrides the provider's own policy.
+        if let Destination::DirectX86 {
+            disk_number,
+            disk_unique_id,
+            target,
+            allocation_bytes,
+            boot_menu,
+        } = &request.destination
+        {
+            boot_menu.validate()?;
+            let probe_request = write_request(
+                &workspace,
+                "probe-request.json",
+                &json!({"protectedPaths":protected_paths}),
+            )?;
+            let mut command =
+                provider_process::direct_command(&runtime, &manifest, "probe", &probe_request)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            let probe =
+                provider_process::run(command, None, Arc::clone(&cancel), None, false, |value| {
+                    provider_event(output, value)
+                })?;
+            if let Some(missing) = probe
+                .get("prerequisites")
+                .and_then(Value::as_array)
+                .and_then(|items| items.iter().find(|item| item["available"] != true))
+            {
+                return Err(missing["message"]
+                    .as_str()
+                    .unwrap_or("A construction prerequisite is missing")
+                    .to_owned());
+            }
+            let disk = probe
+                .get("disks")
+                .and_then(Value::as_array)
+                .and_then(|disks| {
+                    disks.iter().find(|disk| {
+                        disk["diskNumber"].as_u64() == Some(u64::from(*disk_number))
+                            && disk["diskUniqueId"].as_str() == Some(disk_unique_id.as_str())
+                    })
+                })
+                .ok_or("The selected disk identity changed")?;
+            if disk["eligible"] != true {
+                return Err(format!(
+                    "The selected disk is not eligible: {}",
+                    disk["blockers"]
+                ));
+            }
+            let minimum = probe["minimumUnallocatedBytes"]
+                .as_u64()
+                .ok_or("The provider did not report its required space")?;
+            if *allocation_bytes < minimum || allocation_bytes % 1_048_576 != 0 {
+                return Err("The selected installation size is invalid".into());
+            }
+            if probe["bitLocker"]["known"] != true
+                || !probe["bitLocker"]["blockers"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+            {
+                return Err("BitLocker status is unavailable or prevents this installation".into());
+            }
+            let valid = match target {
+                DirectTarget::Free { start_offset_bytes } => {
+                    disk["freeExtents"].as_array().is_some_and(|extents| {
+                        extents.iter().any(|extent| {
+                            extent["offsetBytes"].as_u64() == Some(*start_offset_bytes)
+                                && extent["sizeBytes"]
+                                    .as_u64()
+                                    .is_some_and(|size| size >= *allocation_bytes)
+                        })
+                    })
+                }
+                DirectTarget::Shrink {
+                    partition_number,
+                    partition_guid,
+                } => disk["shrinkCandidates"]
+                    .as_array()
+                    .is_some_and(|candidates| {
+                        candidates.iter().any(|candidate| {
+                            candidate["eligible"] == true
+                                && candidate["partitionNumber"].as_u64()
+                                    == Some(u64::from(*partition_number))
+                                && candidate["partitionGuid"].as_str()
+                                    == Some(partition_guid.as_str())
+                                && candidate["maximumAllocationBytes"]
+                                    .as_u64()
+                                    .is_some_and(|maximum| maximum >= *allocation_bytes)
+                        })
+                    }),
+                DirectTarget::Delete {
+                    partition_number,
+                    partition_guid,
+                    start_offset_bytes,
+                    partition_size_bytes,
+                    confirmation,
+                } => {
+                    let expected = format!("Disk {disk_number} Partition {partition_number}");
+                    confirmation == &expected
+                        && disk["deleteCandidates"]
+                            .as_array()
+                            .is_some_and(|candidates| {
+                                candidates.iter().any(|candidate| {
+                                    candidate["eligible"] == true
+                                        && candidate["partitionNumber"].as_u64()
+                                            == Some(u64::from(*partition_number))
+                                        && candidate["partitionGuid"].as_str()
+                                            == Some(partition_guid.as_str())
+                                        && candidate["offsetBytes"].as_u64()
+                                            == Some(*start_offset_bytes)
+                                        && candidate["sizeBytes"].as_u64()
+                                            == Some(*partition_size_bytes)
+                                        && candidate["maximumAllocationBytes"]
+                                            .as_u64()
+                                            .is_some_and(|maximum| maximum >= *allocation_bytes)
+                                })
+                            })
+                }
+            };
+            if !valid {
+                return Err(
+                    "The selected installation space or shrink limit changed; refresh the choices"
+                        .into(),
+                );
+            }
+        }
+        let source = copy_source(&request.source, &workspace, output, &cancel)?;
+        let callback = |value: Value| provider_event(output, value);
+        let receipt = match &request.destination {
+            Destination::InspectUsb { .. }
+            | Destination::UsbPreserve { .. }
+            | Destination::InspectDirect
+            | Destination::PrepareFirmware
+            | Destination::PrepareRuntime => return Err("Unexpected preparation state".into()),
+            Destination::Usb { identity } => {
+                // Staging moves the input onto protected storage. Both locations
+                // remain excluded: the user's original download disk is not expendable.
+                revalidate_usb(
+                    &runtime,
+                    &manifest,
+                    &workspace,
+                    &request.source.path,
+                    identity,
+                    &cancel,
+                    output,
+                )?;
+                revalidate_usb(
+                    &runtime, &manifest, &workspace, &source, identity, &cancel, output,
+                )?;
+                let sector = identity
+                    .get("blockSize")
+                    .and_then(Value::as_u64)
+                    .filter(|n| (512..=4096).contains(n) && n.is_power_of_two())
+                    .ok_or("USB physical sector size is unavailable")?;
+                let padding = (sector - request.source.length % sector) % sector;
+                let span = request
+                    .source
+                    .length
+                    .checked_add(padding)
+                    .ok_or("USB image span overflow")?;
+                if identity
+                    .get("size")
+                    .and_then(Value::as_u64)
+                    .is_none_or(|capacity| span > capacity)
+                {
+                    return Err("The USB cannot hold the image and its final-sector padding".into());
+                }
+                let summary = format!("Erase all data on {}?\n\nDevice: {}\nCapacity: {} bytes\nImage: {}\n\nThe image will be written and verified. Other disks will not be modified.", safe_label(identity.get("description")), safe_label(identity.get("device")), identity.get("size").and_then(Value::as_u64).unwrap_or(0), request.source.file_name);
+                let plan = json!({"kind":"usb","target":identity,"sourceSha256":request.source.sha256,"length":request.source.length,"writeSpanBytes":span,"paddingBytes":padding});
+                confirm(output, confirmations, &cancel, &summary, &plan)?;
+                revalidate_usb(
+                    &runtime,
+                    &manifest,
+                    &workspace,
+                    &request.source.path,
+                    identity,
+                    &cancel,
+                    output,
+                )?;
+                stage(output, "writing", "Creating the bootable USB…", true);
+                let mut command = provider_process::media_command(&runtime, &manifest)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                provider_process::run(
+                    command,
+                    Some(
+                        json!({"protocol":1,"action":"write","sourcePath":source,"length":request.source.length,"sha256":request.source.sha256,"target":identity}),
+                    ),
+                    Arc::clone(&cancel),
+                    None,
+                    true,
+                    callback,
+                )?
+            }
+            Destination::DirectX86 {
+                disk_number,
+                disk_unique_id,
+                target,
+                allocation_bytes,
+                boot_menu,
+            } => {
+                let mut staging_key = Zeroizing::new([0_u8; 32]);
+                getrandom::fill(staging_key.as_mut())
+                    .map_err(|_| "Could not generate the private staging key")?;
+                let output_directory = elevation::protected_directory(Some(&workspace), "image")?;
+                let preliminary = json!({"kind":"direct_x86","diskNumber":disk_number,"diskUniqueId":disk_unique_id,"target":target,"allocationBytes":allocation_bytes,"bootMenu":boot_menu,"sourceSha256":request.source.sha256,"encryption":"luks2"});
+                let space_description = match target {
+                    DirectTarget::Free { start_offset_bytes } => format!("Use existing unallocated space at offset {start_offset_bytes} bytes."),
+                    DirectTarget::Shrink { partition_number, .. } => format!("Make room for {allocation_bytes} bytes by shrinking Windows partition {partition_number} after final confirmation."),
+                    DirectTarget::Delete { partition_number, partition_size_bytes, .. } => format!("DELETE Disk {disk_number} Partition {partition_number} ({partition_size_bytes} bytes) and all its files and operating system after final confirmation. Deletion affects the entire partition, regardless of the Omarchy allocation. The installer cannot undo it."),
+                };
+                let boot_review = boot_menu.summary();
+                let preliminary_summary = format!("Prepare Omarchy for installation on disk {disk_number}?\n\nDisk identity: {}\nOmarchy allocation: {allocation_bytes} bytes\n{space_description}\n\n{boot_review}\n\nEncryption: LUKS2. You will set your personal encryption password during first boot.\n\nAn installed system will be built locally. You will review the exact partition and BitLocker plan before disk changes begin.", safe_label(Some(&Value::String(disk_unique_id.clone()))));
+                confirm(
+                    output,
+                    confirmations,
+                    &cancel,
+                    &preliminary_summary,
+                    &preliminary,
+                )?;
+                let build = json!({"operationId":id,"sourceIsoPath":source,"sourceSignaturePath":workspace.join(format!("{}.sig", request.source.file_name)),"outputDirectory":output_directory,"bootMenu":boot_menu});
+                let build_request = write_request(&workspace, "build-request.json", &build)?;
+                let mut command =
+                    provider_process::direct_command(&runtime, &manifest, "build", &build_request)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                stage(
+                    output,
+                    "building",
+                    "Building Omarchy from the official image…",
+                    true,
+                );
+                let built = provider_process::run_with_staging_key(
+                    command,
+                    staging_key.as_ref(),
+                    Arc::clone(&cancel),
+                    Some(output_directory.join("cancel.requested")),
+                    true,
+                    callback,
+                )?;
+                cancelled(&cancel)?;
+                let mut plan_input = json!({"operationId":id,"diskNumber":disk_number,"diskUniqueId":disk_unique_id,"allocationBytes":allocation_bytes,"manifestPath":built.get("manifestPath").ok_or("Builder did not return its manifest")?,"manifestSha256":built.get("manifestSha256").ok_or("Builder did not return its manifest digest")?,"encryption":"luks2"});
+                plan_input["protectedPaths"] = json!(protected_paths);
+                plan_input["bootMenu"] = json!(boot_menu);
+                match target {
+                    DirectTarget::Free { start_offset_bytes } => {
+                        plan_input["targetKind"] = json!("free");
+                        plan_input["startOffsetBytes"] = json!(start_offset_bytes);
+                    }
+                    DirectTarget::Shrink {
+                        partition_number,
+                        partition_guid,
+                    } => {
+                        plan_input["targetKind"] = json!("shrink");
+                        plan_input["shrinkPartitionNumber"] = json!(partition_number);
+                        plan_input["shrinkPartitionGuid"] = json!(partition_guid);
+                    }
+                    DirectTarget::Delete {
+                        partition_number,
+                        partition_guid,
+                        start_offset_bytes,
+                        partition_size_bytes,
+                        confirmation,
+                    } => {
+                        plan_input["targetKind"] = json!("delete");
+                        plan_input["deletePartitionNumber"] = json!(partition_number);
+                        plan_input["deletePartitionGuid"] = json!(partition_guid);
+                        plan_input["deleteOffsetBytes"] = json!(start_offset_bytes);
+                        plan_input["deleteSizeBytes"] = json!(partition_size_bytes);
+                        plan_input["deleteConfirmation"] = json!(confirmation);
+                    }
+                }
+                let plan_request = write_request(&workspace, "plan-request.json", &plan_input)?;
+                let mut command =
+                    provider_process::direct_command(&runtime, &manifest, "plan", &plan_request)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                let planned = provider_process::run_with_staging_key(
+                    command,
+                    staging_key.as_ref(),
+                    Arc::clone(&cancel),
+                    None,
+                    false,
+                    callback,
+                )?;
+                let partitions = planned["partitions"]
+                    .as_array()
+                    .filter(|items| items.len() == 2)
+                    .ok_or("The installation plan omitted its exact partitions")?;
+                let mut extents = String::new();
+                for partition in partitions {
+                    let offset = partition["offsetBytes"]
+                        .as_u64()
+                        .ok_or("The plan omitted a partition offset")?;
+                    let size = partition["sizeBytes"]
+                        .as_u64()
+                        .ok_or("The plan omitted a partition size")?;
+                    extents.push_str(&format!(
+                        "{}: {size} bytes at offset {offset}\n",
+                        safe_label(partition.get("role"))
+                    ));
+                }
+                if planned["allocationBytes"].as_u64() != Some(*allocation_bytes) {
+                    return Err("The provider changed the requested allocation".into());
+                }
+                let resize_review = match target {
+                    DirectTarget::Free { .. } => {
+                        "Existing partitions keep their current sizes.".to_owned()
+                    }
+                    DirectTarget::Shrink {
+                        partition_number,
+                        partition_guid,
+                    } => {
+                        let shrink = &planned["shrink"];
+                        let before = shrink["beforeSizeBytes"]
+                            .as_u64()
+                            .ok_or("The plan omitted the current Windows size")?;
+                        let after = shrink["afterSizeBytes"]
+                            .as_u64()
+                            .ok_or("The plan omitted the new Windows size")?;
+                        let released = before
+                            .checked_sub(after)
+                            .ok_or("The plan did not shrink Windows")?;
+                        let expected_after = before / 1_048_576 * 1_048_576;
+                        let expected_after = expected_after
+                            .checked_sub(*allocation_bytes)
+                            .ok_or("The plan shrinks beyond the Windows partition")?;
+                        if shrink["partitionNumber"].as_u64() != Some(u64::from(*partition_number))
+                            || shrink["partitionGuid"].as_str() != Some(partition_guid.as_str())
+                            || shrink["shrinkBytes"].as_u64() != Some(released)
+                            || after != expected_after
+                        {
+                            return Err("The provider changed the selected shrink operation".into());
+                        }
+                        format!("Windows {} (partition {partition_number}): {before} → {after} bytes.\nSpace released: {released} bytes. Omarchy allocation: {allocation_bytes} bytes.", safe_label(shrink.get("driveLetter")))
+                    }
+                    DirectTarget::Delete {
+                        partition_number,
+                        partition_guid,
+                        start_offset_bytes,
+                        partition_size_bytes,
+                        confirmation,
+                    } => {
+                        let deletion = &planned["delete"];
+                        if planned["targetKind"] != "delete"
+                            || !planned["shrink"].is_null()
+                            || deletion["partitionNumber"].as_u64()
+                                != Some(u64::from(*partition_number))
+                            || deletion["partitionGuid"].as_str() != Some(partition_guid.as_str())
+                            || deletion["offsetBytes"].as_u64() != Some(*start_offset_bytes)
+                            || deletion["sizeBytes"].as_u64() != Some(*partition_size_bytes)
+                            || deletion["confirmation"].as_str() != Some(confirmation.as_str())
+                            || deletion["allocationBytes"].as_u64() != Some(*allocation_bytes)
+                            || partitions[0]["offsetBytes"].as_u64() != Some(*start_offset_bytes)
+                        {
+                            return Err(
+                                "The provider changed the confirmed partition deletion".into()
+                            );
+                        }
+                        format!("PERMANENT DATA LOSS: delete Disk {disk_number} Partition {partition_number}.\nName: {}\nFilesystem: {}\nEntire partition: {partition_size_bytes} bytes. Omarchy allocation: {allocation_bytes} bytes.\nAll files and any operating system on this partition will be lost. The installer cannot undo this deletion.", safe_label(deletion.get("label")), safe_label(deletion.get("fileSystem")))
+                    }
+                };
+                let suspend = planned["bitLocker"]["suspendVolumes"]
+                    .as_array()
+                    .ok_or("The plan omitted the BitLocker protection changes")?;
+                let bitlocker_review = if suspend.is_empty() {
+                    "No BitLocker protection changes are required.".to_owned()
+                } else {
+                    let names = suspend
+                        .iter()
+                        .map(|volume| {
+                            safe_label(
+                                volume
+                                    .get("driveLetter")
+                                    .filter(|value| {
+                                        value.as_str().is_some_and(|name| !name.is_empty())
+                                    })
+                                    .or_else(|| volume.get("volumeId")),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("Temporarily suspend BitLocker protection on: {names}. Windows data remains encrypted. Protection is restored and verified when installation finishes, with a recovery task if the installer is interrupted.")
+                };
+                if planned["bootMenu"] != json!(boot_menu)
+                    || planned["bootPolicy"].as_str()
+                        != Some("menu-first-preserve-existing-entries")
+                {
+                    return Err("The startup settings changed while preparing the plan".into());
+                }
+                let summary = format!("Install Omarchy without USB on disk {disk_number}?\n\nDisk identity: {}\n\n{extents}\n{resize_review}\n\nEncryption: LUKS2. First boot replaces the initial setup key with your personal password.\n\n{bitlocker_review}\n\n{boot_review}\nThe menu becomes the first firmware boot entry; all existing entries remain available. Do not interrupt the computer during installation.", safe_label(Some(&Value::String(disk_unique_id.clone()))));
+                confirm(output, confirmations, &cancel, &summary, &planned)?;
+                cancelled(&cancel)?;
+                let deploy_request = write_request(
+                    &workspace,
+                    "deploy-request.json",
+                    &json!({"planPath":planned.get("planPath").ok_or("No direct-install plan path")?,"planSha256":planned.get("planSha256").ok_or("No direct-install plan digest")?,"manifestPath":built["manifestPath"],"manifestSha256":built["manifestSha256"]}),
+                )?;
+                let mut command = provider_process::direct_command(
+                    &runtime,
+                    &manifest,
+                    "deploy",
+                    &deploy_request,
+                )?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                stage(
+                    output,
+                    "allocating",
+                    "Installing Omarchy into the selected space…",
+                    false,
+                );
+                // This invocation has no cooperative cancellation channel. Do not
+                // advertise the provider's pre-allocation cancel flag to the UI.
+                provider_process::run_with_staging_key(
+                    command,
+                    staging_key.as_ref(),
+                    Arc::clone(&cancel),
+                    None,
+                    false,
+                    |mut value| {
+                        if let Some(fields) = value.as_object_mut() {
+                            fields.insert("cancelAvailable".into(), json!(false));
+                        }
+                        provider_event(output, value);
+                    },
+                )?
+            }
+        };
+        // Durable helper-owned receipt. Keep work products for explicit recovery;
+        // no broad cleanup or automatic host reboot is performed.
+        let record = json!({"protocol":1,"operationId":id,"sourceSha256":request.source.sha256,"destination":request.destination,"receipt":receipt,"workspace":workspace});
+        let receipt_path = write_request(&workspace, "receipt.json", &record)?;
+        Ok(json!({"operationId":id,"receipt":receipt,"receiptPath":receipt_path}))
+    })();
+    let cleanup = crate::operation_cleanup::finish(
+        &workspace,
+        &id,
+        &request.source.file_name,
+        &manifest,
+        outcome.is_ok(),
+    );
+    let _ = write_request(&workspace, "cleanup.json", &cleanup);
+    let recovery = json!({"filesPath":workspace,"mutationStarted":workspace.join("image/deployment-started.json").is_file(),
+    "cleanup":cleanup,"message":if outcome.is_ok() { "Operation records are retained." } else {
+        "Keep the operation records. If storage changes started, inspect the recorded target before retrying. Use the existing Windows Boot Manager firmware entry to return to Windows if needed."
+    }});
+    emit(
+        output,
+        json!({"protocol":1,"type":"event","stage":"finished","recovery":recovery,"cancelAvailable":false}),
+    );
+    match outcome {
+        Ok(mut result) => {
+            result["cleanup"] = cleanup;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = write_request(
+                &workspace,
+                "failure.json",
+                &json!({"operationId":id,"error":error,"recovery":recovery}),
+            );
+            Err(format!("{error}\nOperation files: {}", workspace.display()))
+        }
+    }
+}

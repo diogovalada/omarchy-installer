@@ -1,0 +1,21 @@
+{
+  "name": "omarchy-setup-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.2.1",
+  "scripts": {
+    "providers:stage": "node scripts/stage-desktop-providers.mjs",
+    "assets:sync": "node scripts/sync-omarchy-assets.mjs",
+    "assets:check": "node scripts/sync-omarchy-assets.mjs --check",
+    "desktop:dev": "pnpm --filter @omarchy-setup/desktop dev",
+    "desktop:build": "pnpm --filter @omarchy-setup/desktop build",
+    "desktop:check": "pnpm --filter @omarchy-setup/desktop check",
+    "desktop:test": "pnpm --filter @omarchy-setup/desktop test",
+    "desktop:native": "pnpm --dir apps/desktop exec tauri dev",
+    "desktop:build:native": "pnpm --dir apps/desktop exec tauri build --debug --no-bundle",
+    "desktop:package:windows": "powershell.exe -NoProfile -File scripts/build-windows-portable.ps1",
+    "desktop:package:windows:installed": "powershell.exe -NoProfile -File scripts/build-windows-package.ps1",
+    "desktop:test:native": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked",
+    "media:test": "npm --prefix providers/media-etcher test",
+    "media:probe": "npm --prefix providers/media-etcher run probe"
+  }
+}

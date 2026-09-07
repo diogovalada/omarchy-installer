@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omarchy-setup/testkit/host-fixture.schema.json",
+  "title": "Omarchy Setup synthetic host fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixture_version", "id", "description", "policy_id", "host", "disk_fixture", "expect"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "fixture_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$" },
+    "description": { "type": "string", "minLength": 1 },
+    "policy_id": { "const": "synthetic-policy-v1" },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "os", "firmware", "hardware", "storage", "power", "session"],
+      "properties": {
+        "platform": { "enum": ["windows", "macos", "linux"] },
+        "architecture": { "enum": ["x86_64", "aarch64"] },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" },
+            "build": { "type": "string" },
+            "kernel": { "type": "string" }
+          }
+        },
+        "firmware": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "secure_boot"],
+          "properties": {
+            "mode": { "enum": ["uefi", "legacy-bios", "apple-iboot"] },
+            "secure_boot": { "enum": ["enabled", "disabled", "full", "medium", "reduced", "unknown", "not-applicable"] },
+            "external_boot_allowed": { "enum": [true, false, "unknown", "not-applicable"] }
+          }
+        },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manufacturer", "model"],
+          "properties": {
+            "manufacturer": { "type": "string" },
+            "model": { "type": "string" },
+            "model_identifier": { "type": "string" },
+            "apple_soc": { "type": "string" },
+            "apple_security_chip": { "enum": ["none", "t1", "t2", "integrated", "not-applicable", "unknown"] }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["controller", "root_layout", "encryption"],
+          "properties": {
+            "controller": { "type": "string" },
+            "root_layout": { "type": "string" },
+            "encryption": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "state"],
+              "properties": {
+                "kind": { "enum": ["none", "bitlocker", "filevault", "luks", "native-zfs", "unknown"] },
+                "state": { "enum": ["off", "on", "suspended", "unlocked", "locked", "unknown"] },
+                "recovery_material_backed_up": { "enum": [true, false, "unknown", "not-applicable"] }
+              }
+            }
+          }
+        },
+        "power": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ac_connected", "battery_percent"],
+          "properties": {
+            "ac_connected": { "type": "boolean" },
+            "battery_percent": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 }
+          }
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["elevated", "elevation_available"],
+          "properties": {
+            "elevated": { "const": false },
+            "elevation_available": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "disk_fixture": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]+\\.json$" },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_class", "usb_writer", "direct_install_preflight", "finding_codes"],
+      "properties": {
+        "host_class": { "type": "string" },
+        "usb_writer": { "enum": ["eligible", "blocked"] },
+        "direct_install_preflight": { "enum": ["pass", "caution", "block"] },
+        "finding_codes": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

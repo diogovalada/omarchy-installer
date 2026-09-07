@@ -1,0 +1,27 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "removable-mbr-32gib",
+  "description": "A previously formatted 32 GiB removable USB with an MBR/FAT32 partition.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "usb-mbr-01",
+      "path": "/synthetic/disk/usb-mbr-01",
+      "stable_id": "usb:ffff:0002:SYNTH-USB-0002",
+      "serial": "SYNTH-USB-0002",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 34359738368,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 512,
+      "partition_table": "mbr",
+      "partitions": [
+        { "number": 1, "start_lba": 2048, "end_lba": 67106815, "type": "mbr-fat32-lba", "name": "OLD-DATA", "filesystem": "fat32", "mount_points": ["/synthetic/mount/old-data"], "encryption": null }
+      ]
+    }
+  ],
+  "expect": { "eligible_candidate_ids": ["usb-mbr-01"], "refused": [] }
+}

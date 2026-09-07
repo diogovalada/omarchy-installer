@@ -1,0 +1,11 @@
+{
+  "observedAt": "2026-09-05T21:59:29.9171395Z",
+  "action": "install",
+  "status": "host-preflight-blocked",
+  "reason": "Only 4067 MiB memory is currently free; 8192 MiB is required for this guest and overhead.",
+  "installedSystemProven": false,
+  "independentBootProven": false,
+  "baremetalReady": false,
+  "physicalDevices": [],
+  "model": "gpt-6-astra"
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "linux-zfs-root",
+  "description": "UEFI Linux host with an encrypted native-ZFS root pool.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "linux",
+    "architecture": "x86_64",
+    "os": { "name": "Ubuntu", "version": "26.04", "kernel": "6.17.0-synthetic" },
+    "firmware": { "mode": "uefi", "secure_boot": "disabled", "external_boot_allowed": true },
+    "hardware": { "manufacturer": "Synthetic Systems", "model": "LinuxZFS-01", "apple_security_chip": "not-applicable" },
+    "storage": { "controller": "sata-ahci", "root_layout": "gpt-zfs-root", "encryption": { "kind": "native-zfs", "state": "unlocked", "recovery_material_backed_up": "unknown" } },
+    "power": { "ac_connected": true, "battery_percent": null },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "linux-zfs-system-plus-removable.json",
+  "expect": { "host_class": "linux-x64-uefi", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["direct-linux-provider-unavailable", "zfs-root-layout"] }
+}

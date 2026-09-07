@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "intel-mac-no-security-chip",
+  "description": "Intel Mac without T1/T2 and with external boot available.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "macos",
+    "architecture": "x86_64",
+    "os": { "name": "macOS", "version": "13.7.1", "build": "22H221" },
+    "firmware": { "mode": "uefi", "secure_boot": "not-applicable", "external_boot_allowed": true },
+    "hardware": { "manufacturer": "Apple Inc.", "model": "MacBook Pro", "model_identifier": "MacBookPro14,3", "apple_security_chip": "none" },
+    "storage": { "controller": "apple-nvme", "root_layout": "gpt-apfs", "encryption": { "kind": "filevault", "state": "off", "recovery_material_backed_up": "not-applicable" } },
+    "power": { "ac_connected": true, "battery_percent": 84 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "intel-mac-apfs-plus-removable.json",
+  "expect": { "host_class": "mac-intel-pre-t1", "usb_writer": "eligible", "direct_install_preflight": "pass", "finding_codes": [] }
+}

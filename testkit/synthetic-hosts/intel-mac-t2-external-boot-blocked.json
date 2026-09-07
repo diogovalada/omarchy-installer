@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "intel-mac-t2-external-boot-blocked",
+  "description": "Intel Mac with T2, full security, and external boot disabled.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "macos",
+    "architecture": "x86_64",
+    "os": { "name": "macOS", "version": "15.6", "build": "24G84" },
+    "firmware": { "mode": "uefi", "secure_boot": "full", "external_boot_allowed": false },
+    "hardware": { "manufacturer": "Apple Inc.", "model": "MacBook Pro", "model_identifier": "MacBookPro16,1", "apple_security_chip": "t2" },
+    "storage": { "controller": "apple-t2-nvme", "root_layout": "gpt-apfs", "encryption": { "kind": "filevault", "state": "on", "recovery_material_backed_up": true } },
+    "power": { "ac_connected": true, "battery_percent": 96 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "intel-mac-apfs-plus-removable.json",
+  "expect": { "host_class": "mac-intel-t2", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["external-boot-disabled", "filevault-protected", "t2-full-security"] }
+}

@@ -1,0 +1,96 @@
+name: Safety incident or near miss
+description: Report possible wrong-target, out-of-plan, verification, recovery, or privilege-boundary behavior.
+title: "[Safety]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Stop the operation and do not retry it on physical hardware.** Preserve the application journal and reviewed, redacted diagnostics if it is safe to do so.
+
+        This public form is for non-exploitable safety incidents and near misses. For signature bypass, privilege escalation, update compromise, or another exploitable vulnerability, follow `SECURITY.md` and contact the repository owner privately. Do not publish secrets, disk contents, recovery keys, or exploit details.
+
+  - type: dropdown
+    id: incident_type
+    attributes:
+      label: Incident type
+      options:
+        - A system or internal disk appeared eligible
+        - The displayed plan and requested operation differed
+        - A non-target device or file may have changed
+        - Verification or success status may be incorrect
+        - Cancellation, crash, resume, or recovery was unsafe
+        - Privilege was requested too early or too broadly
+        - Artifact identity, signature, or catalog validation was unexpected
+        - Other safety concern
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Dry-run or provider simulator
+        - File-backed fake block device
+        - Physical disposable external media
+        - Physical internal disk (stop; do not retry)
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0-dev or full commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS, version, and architecture
+      placeholder: macOS 15.4, Apple M2
+    validations:
+      required: true
+
+  - type: textarea
+    id: observation
+    attributes:
+      label: What happened or almost happened?
+      description: Describe what the UI showed, what you expected, and when you stopped. Use redacted device aliases such as target-A and sentinel-B.
+    validations:
+      required: true
+
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan and operation stage
+      description: State whether this occurred during discovery, planning, authorization, writing, verification, cancellation, resume, recovery, or ejection. Include a plan digest only if it is safe to share.
+    validations:
+      required: true
+
+  - type: textarea
+    id: effects
+    attributes:
+      label: Known effects
+      description: Report whether any bytes may have been written or data may have been lost. Do not inspect or rerun a possibly affected physical disk just to answer this question.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Paste the minimum locally reviewed journal or diagnostic excerpt needed to triage the report.
+      render: shell
+
+  - type: checkboxes
+    id: stop_confirmation
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I stopped physical testing and will not retry until a maintainer provides a fixed build or safe instructions.
+          required: true
+        - label: I reviewed this report and removed secrets, recovery material, private file contents, raw disk contents, and personally identifying device data.
+          required: true

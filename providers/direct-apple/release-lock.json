@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "releaseTag": "v4.0.1-mac.2.9.090126",
+  "releaseURL": "https://github.com/maralcbr/omarchy-mx-mac/releases/tag/v4.0.1-mac.2.9.090126",
+  "package": {
+    "url": "https://github.com/maralcbr/omarchy-mx-mac/releases/download/v4.0.1-mac.2.9.090126/Omarchy-MX-Mac-Installer-4.0.1-mac.2.9.090126.pkg",
+    "sizeBytes": 19402851,
+    "sha256": "6aea628d7ca679fb7c8d15bc0c1d97b88ee4f7e7d12080728ea4137badaab9b8"
+  },
+  "engine": {
+    "version": "v0.9.0-omarchy.7",
+    "fileName": "installer-v0.9.0-omarchy.7.tar.gz",
+    "url": "https://github.com/maralcbr/omarchy-mx-mac/releases/download/v4.0.1-mac.2.9.090126/installer-v0.9.0-omarchy.7.tar.gz",
+    "sizeBytes": 17904504,
+    "sha256": "063fd0765fb2057384d9653f7bf547b0471af31fc764e039d578d4fef6dce4d5"
+  },
+  "resources": {
+    "catalog.json": {"sizeBytes": 2593, "sha256": "e36b0f986262912c3b511f76cc01c168c5c2dea137bf2f5d0aa1c47452446e93"},
+    "catalog.json.sig": {"sizeBytes": 64, "sha256": "d965662128080af62e1b44060f7b1f07483d0bc0f337ad70bbae69a3f7ca00a9"},
+    "release.json": {"sizeBytes": 482, "sha256": "1e1ad0164e56cb9942b0466e3195d6a4c7fc08ae78c363b34e5e81c8750a8ec1"},
+    "trust-root.ed25519.pub": {"sizeBytes": 32, "sha256": "ef073d71048f90295a6bfade93ab8bc258ff108d9fd7674d7a848c7836454869"}
+  },
+  "catalog": {
+    "sequence": 1788229589,
+    "expiresAt": "2026-11-30T02:26:29Z",
+    "enabledModels": ["apple,j314s"],
+    "trustRootFingerprint": "sha256:ef073d71048f90295a6bfade93ab8bc258ff108d9fd7674d7a848c7836454869",
+    "payloadSha256": "ccd48c3ce69962cae6a574f630feca32072f18f610a2b5b84b07993fd2cc18e9",
+    "payloadSizeBytes": 3638034944
+  },
+  "sourceTagDescribesReleasedEngine": false,
+  "releasedAppBuildCommitProven": false,
+  "releasedHelperTeamIdentifier": "T2C384FJBD",
+  "qualification": "Release resources inspected without installing. Bridge and helper signing, macOS compilation, and physical installation remain untested."
+}

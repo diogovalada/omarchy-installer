@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "linux-luks-lvm-ext4",
+  "description": "UEFI Linux host with an ext4 root logical volume inside LVM on LUKS.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "linux",
+    "architecture": "x86_64",
+    "os": { "name": "Fedora Linux", "version": "42", "kernel": "6.14.0-synthetic" },
+    "firmware": { "mode": "uefi", "secure_boot": "enabled", "external_boot_allowed": true },
+    "hardware": { "manufacturer": "Synthetic Systems", "model": "LinuxLVM-01", "apple_security_chip": "not-applicable" },
+    "storage": { "controller": "nvme-standard", "root_layout": "gpt-luks-lvm-ext4", "encryption": { "kind": "luks", "state": "unlocked", "recovery_material_backed_up": "unknown" } },
+    "power": { "ac_connected": true, "battery_percent": null },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "linux-luks-lvm-system-plus-removable.json",
+  "expect": { "host_class": "linux-x64-uefi", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["direct-linux-provider-unavailable", "luks-lvm-layout"] }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "windows-x64-legacy-bios",
+  "description": "Windows x64 booted in legacy BIOS mode; USB writing remains independent.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "windows",
+    "architecture": "x86_64",
+    "os": { "name": "Windows 10 Pro", "version": "22H2", "build": "19045.5000" },
+    "firmware": { "mode": "legacy-bios", "secure_boot": "not-applicable", "external_boot_allowed": "unknown" },
+    "hardware": { "manufacturer": "Synthetic Systems", "model": "WinBIOS-01", "apple_security_chip": "not-applicable" },
+    "storage": { "controller": "sata-ahci", "root_layout": "mbr-basic", "encryption": { "kind": "bitlocker", "state": "off", "recovery_material_backed_up": "not-applicable" } },
+    "power": { "ac_connected": true, "battery_percent": null },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "windows-legacy-system-plus-removable.json",
+  "expect": { "host_class": "windows-x64-legacy", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["uefi-required"] }
+}

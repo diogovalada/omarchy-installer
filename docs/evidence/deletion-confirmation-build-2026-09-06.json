@@ -1,0 +1,16 @@
+{
+  "recordedAt": "2026-09-06T02:46:44.1273053Z",
+  "model": "gpt-6-astra",
+  "feature": "explicit-partition-deletion",
+  "nativeExecutableSha256": "333dd1fea6c2cd010db51a7b07d7aacf9617fb10e4db5bf5e6134d3607d269fd",
+  "providerManifestSha256": "d5155fe95ed9efcf0cb0cef4b2e86909aed33de84100014a9b3590b7bebbe435",
+  "stagedProviderCount": 6144,
+  "verifiedDirectProviderCount": 10,
+  "commands": [
+    "pnpm desktop:check",
+    "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked",
+    "pnpm desktop:build:native",
+    "Windows PowerShell syntax parsing and NativeDisk.cs compilation"
+  ],
+  "executionTestsPerformed": false
+}

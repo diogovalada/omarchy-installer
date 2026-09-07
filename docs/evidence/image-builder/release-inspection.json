@@ -1,0 +1,25 @@
+{
+  "files": {
+    "cidata-loader": {
+      "path": "usr/local/bin/omarchy-cidata-load",
+      "present": true,
+      "sha256": "b4ef3a6db9b62d3dbc01835cce27439713276ac1de4a0e5dbefe488489bcf7c8"
+    },
+    "installer-context": {
+      "path": "usr/share/omarchy-iso/orchestrator/context.py",
+      "present": true,
+      "sha256": "10fa0871c95dc951794cc2c5bae0b4228137dea3c4ed9a25ff43e0e3f8edb832"
+    },
+    "installer-phases": {
+      "path": "usr/share/omarchy-iso/orchestrator/phases_impl.py",
+      "present": true,
+      "sha256": "e75c17efbaba464f976ef88719a8ca726f7fedbda5c6260b813eb97eac81713e"
+    }
+  },
+  "squashfsOffsetBytes": 270831616,
+  "inspectionMethod": "read-only direct offset; contiguous ISO extents checked; no extracted filesystem copy",
+  "cidataSupported": true,
+  "deferredProvisioningSourcePresent": true,
+  "installedSystemProven": false,
+  "note": "Presence checks are a compatibility prerequisite, not proof of behavior."
+}

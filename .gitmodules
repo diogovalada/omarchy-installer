@@ -1,0 +1,3 @@
+[submodule "providers/direct-apple/upstream"]
+	path = providers/direct-apple/upstream
+	url = https://github.com/maralcbr/omarchy-mx-mac.git

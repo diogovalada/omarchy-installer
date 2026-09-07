@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "apple-silicon-allowlisted",
+  "description": "Apple-Silicon Mac allowlisted by the synthetic policy; its USB target is for another x86 machine.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "macos",
+    "architecture": "aarch64",
+    "os": { "name": "macOS", "version": "15.6", "build": "24G84" },
+    "firmware": { "mode": "apple-iboot", "secure_boot": "full", "external_boot_allowed": "not-applicable" },
+    "hardware": { "manufacturer": "Apple Inc.", "model": "MacBook Pro", "model_identifier": "MacBookPro18,3", "apple_soc": "M1 Pro", "apple_security_chip": "integrated" },
+    "storage": { "controller": "apple-ans", "root_layout": "gpt-apfs-apple-firmware", "encryption": { "kind": "filevault", "state": "on", "recovery_material_backed_up": true } },
+    "power": { "ac_connected": true, "battery_percent": 92 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "apple-silicon-apfs-plus-removable.json",
+  "expect": { "host_class": "mac-apple-silicon", "usb_writer": "eligible", "direct_install_preflight": "pass", "finding_codes": ["x86-usb-not-bootable-on-host"] }
+}

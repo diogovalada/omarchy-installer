@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "recordedAtUtc": "2026-09-06T12:57:44.5532207Z",
+  "feature": "Configurable normal-startup Omarchy/Windows menu and documented platform behavior",
+  "status": "development-build-only; boot execution unqualified",
+  "build": {
+    "command": "pnpm desktop:build:native",
+    "result": "passed",
+    "platform": "Windows x64",
+    "profile": "debug",
+    "executable": "apps/desktop/src-tauri/target/debug/omarchy-setup-desktop.exe",
+    "length": 26568704,
+    "sha256": "9d7e0ea9860d18e7d9f3f3a7d5144a00efbac1280a75ad663070e0b7dcc6c012",
+    "providerManifestSha256": "016d8d78c99a586110245a80798378841ccd06e86bed48628669801a8d4576a9",
+    "stagedFileCount": 6146
+  },
+  "staticChecks": [
+    "pnpm desktop:check: zero errors, four pre-existing warnings",
+    "cargo fmt and cargo check --lib --locked: passed",
+    "PowerShell 5.1 syntax parsing: passed",
+    "NativeDisk.cs and EncryptedImage.cs C# compilation: passed",
+    "Python AST parsing: passed",
+    "Bash syntax and embedded Python parsing: passed"
+  ],
+  "providerIntegrity": [
+    {
+      "path": "direct-x86/BitLocker.ps1",
+      "length": 17608,
+      "sha256": "4109abe97a859331e54bb23de4b92e0b58016e2bc9eac748cfcf1779c0bbbd6c",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/BitLockerRecovery.ps1",
+      "length": 10286,
+      "sha256": "aa6bfeaa7333f3a7fa92dabdb59ec6ca88ba45a60d47accc7b55c411ab5e4961",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/BootPlan.ps1",
+      "length": 1971,
+      "sha256": "7a3fb6ab25720d80ba88f8db64a52a6f0686701a9918981ecb332dc98e6ae146",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/DeletionPlan.ps1",
+      "length": 10738,
+      "sha256": "9dc117854a8e81300f17d500ee853f0d31a3343dae6f76e8798cbee07281f914",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/Deployment.ps1",
+      "length": 18021,
+      "sha256": "9db315910bfc1ab818de4440bac009eb0f548017b668da874d0b44364c3592f2",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/EncryptedImage.cs",
+      "length": 16614,
+      "sha256": "f3cc91a6e57ba281a9cbc466bd7d696570d3a4292ff2a6a858a653badc9fca0c",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/EncryptedInputs.ps1",
+      "length": 6972,
+      "sha256": "4887da2b70e77310bde74a5fb3233f8b1ba11aac35f2e90a740b7d7d7960e75f",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/implementation-status.json",
+      "length": 3849,
+      "sha256": "e1ab2b423fbe2758ce6d446a240791dc682361a4f789866c2c76060967366867",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/Invoke-DirectX86.ps1",
+      "length": 12274,
+      "sha256": "b220a3baaeb609c32035e2654c33bdac6d3e8cea7876a00e8ef86a0375eaec1a",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/NativeDisk.cs",
+      "length": 38415,
+      "sha256": "d8efe47a0d198599d85cc0f2092cb6b1501b654a88533a01b3b95ed10c14debd",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "direct-x86/StoragePlan.ps1",
+      "length": 14228,
+      "sha256": "ea85429080248008a0aa555078594bf3d0e6aa391ac24772159dc53320918731",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/artifact_crypto.py",
+      "length": 12726,
+      "sha256": "9bbc93678db2125a77a6c9d3731cfe17b1152a7aa4d7408a18a0946f9b2e911b",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/boot_menu.py",
+      "length": 9408,
+      "sha256": "b413118d9f2c7a05c2a3a93c861f7f2fd9d7ecf7b52b309cb796b8e8af010992",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/Build-Runtime.ps1",
+      "length": 2407,
+      "sha256": "a8af2d67ea60442c848080423f3245fdaa4eb7cd31f8e04fe3b0ac562e00ef6d",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/builder.py",
+      "length": 21781,
+      "sha256": "251a0c5768213ed103f7030b42fd3d70b01e0389e6534e43f3f4661d22b913fb",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/configuration.py",
+      "length": 3641,
+      "sha256": "26b85226b05a14a210cef4709a4d013442d4a819aa1420c0bb54e5fde77809f9",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/Dockerfile",
+      "length": 816,
+      "sha256": "3c2dc99dd192640938ab8408d8e677318265d2ef5fa76e847e969e10e9c987dd",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/Invoke-ImageProof.ps1",
+      "length": 4059,
+      "sha256": "fe2ed5b9066b56c86b7460cd3c3204f4574a000a9b5fd0c7ef0e8723960f3bbe",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/NOTICE",
+      "length": 1536,
+      "sha256": "8e9cab081e8b9d22a13fdefe34544e0ac24498f927db1f4297b66d22b0b7cea4",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/omarchy-signing-key.asc",
+      "length": 632,
+      "sha256": "15d6aac44df688165b2ea35fe0b23af239bbc66a6909c10a5c219e8d94b707de",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/omarchy-signing-key.gpg",
+      "length": 407,
+      "sha256": "763114ca466f5d850a39743b2f2f9572e33aacd1039aeed93e44654da919894d",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product_builder.py",
+      "length": 16409,
+      "sha256": "45152cacaec657b5620f2df0044d5a5cc01125ad49626dd73dc0f52f99abde60",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product_nbd.py",
+      "length": 4850,
+      "sha256": "29d3f3fdb898ea883970441d878313baeb5ef6c3e82f2846f2a453ba5697f0cf",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product-firstboot.sh",
+      "length": 6069,
+      "sha256": "61da6ce85dec6eea7f4cbce18656eafdfa29f4bd35e4bd517f1143c6afaa7520",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product-guest.sh",
+      "length": 7311,
+      "sha256": "8e086ef7e341ea358e6fe5adc0fc69bf0f7e8a10d183461b4876d316b4b0c5dc",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product-source-lock.json",
+      "length": 1628,
+      "sha256": "ea4f69269eee0ba4b08d7905ee0da4fda067b1f122793e67b8ba081cf577cda6",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/product-validate.py",
+      "length": 9692,
+      "sha256": "a54da7191f0d376d30f8a94416cefed348247ba9c3a5bbe8b39cc68b5e191604",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/base-test.sh",
+      "length": 16580,
+      "sha256": "e758298e431e9ee325fe3a4c97d42a281c8a047951a75bf9410004cc65cedef9",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/context.py",
+      "length": 8977,
+      "sha256": "10fa0871c95dc951794cc2c5bae0b4228137dea3c4ed9a25ff43e0e3f8edb832",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/phases_impl.py",
+      "length": 81006,
+      "sha256": "e75c17efbaba464f976ef88719a8ca726f7fedbda5c6260b813eb97eac81713e",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/released-installer.py",
+      "length": 72985,
+      "sha256": "904b7112da74823c04f317143745b6357bcc8ddeb37ff9a865ce7d905cbc41d8",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/released-luks.py",
+      "length": 7425,
+      "sha256": "3bfc4e14f07317da25e1dfe6d6157f4c18c3f66b84321030568aea3bb13456d9",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/references/released-phases_impl.py",
+      "length": 81006,
+      "sha256": "e75c17efbaba464f976ef88719a8ca726f7fedbda5c6260b813eb97eac81713e",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/release-lock.json",
+      "length": 755,
+      "sha256": "4e572871ac797143c2c38a50529c5178760def55df4e0ea3dd73aff6410b13c2",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/runtime-lock.json",
+      "length": 593,
+      "sha256": "a5523b250c73a9cd304c65ec0d7b413b0d5fbb805ee96d5eea8bb8eb309d5b2f",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/runtime-packages.lock",
+      "length": 4356,
+      "sha256": "cd50c620577493e791aff3a7333d2bfc34607a65ea7d29796dbaf2eb793ffff5",
+      "sourceStagedPackagedMatch": true
+    },
+    {
+      "path": "image-builder-x86/test_builder.py",
+      "length": 9466,
+      "sha256": "e642b40fa348a1c319a90b575d0c03915590936263a4b545470fba6a16122166",
+      "sourceStagedPackagedMatch": true
+    }
+  ],
+  "inspection": "Pinned ISO packages inspected read-only; inspection container stopped after source review",
+  "notPerformed": [
+    "Test suite execution",
+    "Application UI execution",
+    "Image-construction VM",
+    "Host disk or firmware probe",
+    "Elevation",
+    "Partition or firmware mutation",
+    "BitLocker operation",
+    "Reboot or boot qualification",
+    "Mac compilation or hardware qualification",
+    "Signed release packaging"
+  ]
+}

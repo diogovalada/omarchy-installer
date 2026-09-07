@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""Bounded, local, file-only feasibility experiment. Never a deployment provider."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import signal
+import socket
+import stat
+import subprocess
+import time
+import uuid
+
+from configuration import configuration, DISK_BYTES, GIB
+
+PROOF = Path(__file__).resolve().parent
+INPUT = Path('/input')
+RUNS = Path('/runs')
+KEY_SHA256 = '763114ca466f5d850a39743b2f2f9572e33aacd1039aeed93e44654da919894d'
+CODE = Path('/usr/share/OVMF/OVMF_CODE_4M.fd')
+VARS = Path('/usr/share/OVMF/OVMF_VARS_4M.fd')
+
+
+def sha256(path):
+    with path.open('rb') as file:
+        return hashlib.file_digest(file, 'sha256').hexdigest()
+
+
+def write_json(path, value):
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(json.dumps(value, indent=2) + '\n')
+    temporary.replace(path)
+
+
+def regular_file(path, root):
+    """Reject devices, aliases, links, and paths outside the declared input root."""
+    path = Path(path)
+    root = Path(root).resolve(strict=True)
+    if not path.is_absolute():
+        raise ValueError('An absolute file path is required')
+    if path.resolve(strict=True).parent != root:
+        raise ValueError('Input must be an immediate child of its owned directory')
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError('Only an ordinary, non-linked file is allowed')
+    return path
+
+
+def command(args, *, timeout=30, input=None, check=True, text_mode=True):
+    return subprocess.run([str(v) for v in args], input=input, text=text_mode,
+                          capture_output=True, timeout=timeout, check=check)
+
+
+def verify_source(lock, run):
+    iso = regular_file(INPUT / f"omarchy-{lock['version']}.iso", INPUT)
+    signature = regular_file(INPUT / f"omarchy-{lock['version']}.iso.sig", INPUT)
+    if iso.stat().st_size != lock['sizeBytes']:
+        raise ValueError('Released ISO length does not match the pin')
+    print('Verifying complete ISO checksum and detached signature', flush=True)
+    if sha256(iso) != lock['sha256']:
+        raise ValueError('Released ISO checksum does not match the pin')
+    key = PROOF / 'omarchy-signing-key.gpg'
+    if sha256(key) != KEY_SHA256:
+        raise ValueError('Bundled signing key bytes changed')
+    verified = command(['gpgv', '--status-fd', '1', '--keyring', key, signature, iso], timeout=900)
+    valid = '[GNUPG:] VALIDSIG ' + lock['signingKeyFingerprint'] + ' '
+    if valid not in verified.stdout:
+        raise ValueError('Signature was not made by the pinned primary key')
+    (run / 'signature-verification.txt').write_text(verified.stdout + verified.stderr)
+    return iso
+
+
+def squashfs_offset(report, iso_size):
+    """Only accept contiguous ISO extents bounded by the verified source file."""
+    extents = re.findall(
+        r"^File data lba:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*"
+        r"'/arch/x86_64/airootfs.sfs'\s*$", report, re.MULTILINE)
+    if not extents:
+        raise ValueError('SquashFS ISO extent information is absent')
+    extents = [tuple(map(int, extent)) for extent in extents]
+    start, size = extents[0][1], extents[0][3]
+    expected = start
+    for index, (number, lba, blocks, length) in enumerate(extents):
+        if number != index or lba != expected or length != size or blocks <= 0:
+            raise ValueError('SquashFS extents are not a contiguous bounded file')
+        expected += blocks
+    offset = start * 2048
+    extent_bytes = (expected - start) * 2048
+    if start < 16 or size <= 0 or not 0 <= extent_bytes - size < 2048 or expected * 2048 > iso_size:
+        raise ValueError('SquashFS extents exceed verified ISO bounds')
+    return offset
+
+
+def inspect_iso(iso, run):
+    """Inspect actual release contents, never infer support from a branch name."""
+    print('Inspecting installer files inside the signed released ISO', flush=True)
+    report = command(['xorriso', '-indev', iso, '-find', '/arch/x86_64/airootfs.sfs',
+                      '-exec', 'report_lba', '--'], timeout=60)
+    offset = squashfs_offset(report.stdout, iso.stat().st_size)
+    paths = {
+        'cidata-loader': 'usr/local/bin/omarchy-cidata-load',
+        'installer-context': 'usr/share/omarchy-iso/orchestrator/context.py',
+        'installer-phases': 'usr/share/omarchy-iso/orchestrator/phases_impl.py',
+    }
+    contents = {}
+    files = {}
+    for label, path in paths.items():
+        result = command(['unsquashfs', '-offset', str(offset), '-cat', iso, path],
+                         timeout=60, check=False, text_mode=False)
+        contents[label] = result.stdout.decode('utf-8', errors='replace') if result.returncode == 0 else ''
+        files[label] = {'path': path, 'present': result.returncode == 0,
+                        'sha256': hashlib.sha256(result.stdout).hexdigest()
+                        if result.returncode == 0 else None}
+    result = {
+        'files': files,
+        'squashfsOffsetBytes': offset,
+        'inspectionMethod': 'read-only direct offset; contiguous ISO extents checked; no extracted filesystem copy',
+        'cidataSupported': 'user_configuration.json' in contents['cidata-loader']
+                           and 'user_credentials.json' in contents['cidata-loader'],
+        'deferredProvisioningSourcePresent': 'defer-provisioning' in contents['cidata-loader']
+                                            and 'defer_provisioning' in contents['installer-context'],
+        'installedSystemProven': False,
+        'note': 'Presence checks are a compatibility prerequisite, not proof of behavior.',
+    }
+    write_json(run / 'release-inspection.json', result)
+    return result
+
+
+def qemu_arguments(run, disk, *, iso=None, memory=6144):
+    """Arguments are constructed internally; no caller can pass QEMU flags/devices."""
+    args = [
+        'qemu-system-x86_64', '-machine', 'q35,accel=tcg', '-cpu', 'max',
+        '-smp', '4', '-m', str(memory), '-no-user-config', '-nodefaults',
+        '-drive', f'if=pflash,format=raw,readonly=on,file={CODE}',
+        '-drive', f'if=pflash,format=raw,file={run / "OVMF_VARS.fd"}',
+        '-drive', f'file={disk},format=qcow2,if=none,id=drive0',
+        '-device', 'virtio-blk-pci,drive=drive0,bootindex=1',
+        '-device', 'virtio-vga', '-display', 'none',
+        '-device', 'qemu-xhci', '-device', 'usb-tablet',
+        '-netdev', 'user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:2322-:22',
+        '-device', 'virtio-net-pci,netdev=net0',
+        '-qmp', 'unix:/tmp/qmp.sock,server=on,wait=off',
+        '-serial', f'file:{run / "serial.log"}',
+    ]
+    if iso is not None:
+        args += ['-drive', f'file={iso},media=cdrom,if=none,format=raw,readonly=on,id=cdrom0',
+                 '-device', 'ide-cd,drive=cdrom0,bootindex=2',
+                 '-drive', f'file={run / "cidata.img"},format=raw,readonly=on,if=none,id=cidata',
+                 '-device', 'usb-storage,drive=cidata']
+    return args
+
+
+class VM:
+    def __init__(self, run, disk, iso=None, memory=6144):
+        self.run = run
+        self.args = qemu_arguments(run, disk, iso=iso, memory=memory)
+        self.process = None
+        self.log = None
+
+    def __enter__(self):
+        Path('/tmp/qmp.sock').unlink(missing_ok=True)
+        self.log = (self.run / 'qemu.log').open('a')
+        self.process = subprocess.Popen(self.args, stdout=self.log, stderr=self.log)
+        deadline = time.monotonic() + 20
+        while not Path('/tmp/qmp.sock').exists():
+            if self.process.poll() is not None or time.monotonic() > deadline:
+                self.__exit__(None, None, None)
+                raise RuntimeError('QEMU failed to expose its private QMP socket; inspect qemu.log')
+            time.sleep(0.1)
+        return self
+
+    def qmp(self, operation, arguments=None):
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.settimeout(5)
+            sock.connect('/tmp/qmp.sock')
+            stream = sock.makefile('rwb')
+            stream.readline()
+            for request in [{'execute': 'qmp_capabilities'},
+                            {'execute': operation, 'arguments': arguments or {}}]:
+                stream.write(json.dumps(request).encode() + b'\n')
+                stream.flush()
+                while True:
+                    line = stream.readline()
+                    if not line:
+                        raise RuntimeError('QMP closed before responding')
+                    response = json.loads(line)
+                    if 'error' in response:
+                        raise RuntimeError(str(response['error']))
+                    if 'return' in response:
+                        break
+            return response['return']
+
+    def screenshot(self, name):
+        path = self.run / (name + '.png')
+        self.qmp('screendump', {'filename': str(path), 'format': 'png'})
+        return path
+
+    def __exit__(self, *unused):
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.qmp('quit')
+            except (OSError, RuntimeError):
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        if self.log is not None:
+            self.log.close()
+
+
+def build_cidata(run, *, deferred=False):
+    directory = run / 'cidata'
+    directory.mkdir(mode=0o700)
+    config = configuration(deferred=deferred)
+    write_json(directory / 'user_configuration.json', config)
+    (directory / 'user_encrypt_installation.txt').write_text('false\n')
+    password = None
+    if deferred:
+        (directory / 'defer-provisioning').touch()
+    else:
+        # Unique test credentials for this single disposable VM; never a shared template.
+        password = secrets.token_urlsafe(32)
+        encoded = command(['openssl', 'passwd', '-6', '-stdin'], input=password + '\n').stdout.strip()
+        write_json(directory / 'user_credentials.json', {
+            'root_enc_password': encoded,
+            'users': [{'enc_password': encoded, 'groups': [], 'sudo': True, 'username': 'proof'}],
+        })
+        command(['ssh-keygen', '-t', 'ed25519', '-N', '', '-C', 'local-image-proof',
+                 '-f', run / 'id_ed25519'])
+        shutil.copyfile(run / 'id_ed25519.pub', directory / 'authorized_keys')
+    image = run / 'cidata.img'
+    with image.open('xb') as file:
+        file.truncate(4 * 1024**2)
+    command(['mkfs.vfat', '-n', 'CIDATA', image])
+    command(['mcopy', '-i', image, *sorted(directory.iterdir()), '::/'])
+    return config, password
+
+
+def ssh(run, script, *, input=None, check=True):
+    return command([
+        'ssh', '-i', run / 'id_ed25519', '-p', '2322',
+        '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
+        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', f'UserKnownHostsFile={run / "known_hosts"}',
+        '-o', 'ConnectTimeout=3', '-o', 'LogLevel=ERROR', 'proof@127.0.0.1', script,
+    ], input=input, check=check, timeout=15)
+
+
+def wait_installed(vm, run, timeout):
+    deadline = time.monotonic() + timeout
+    next_screen = 0
+    while time.monotonic() < deadline:
+        if vm.process.poll() is not None:
+            raise RuntimeError(f'VM exited with code {vm.process.returncode} before installation was verified')
+        answer = ssh(run, 'test -d /usr/share/omarchy && test ! -d /run/archiso', check=False)
+        if answer.returncode == 0:
+            return
+        if time.monotonic() >= next_screen:
+            shot = vm.screenshot('latest-screen')
+            text = command(['tesseract', shot, 'stdout', '--psm', '6'], check=False).stdout
+            (run / 'latest-screen.txt').write_text(text)
+            print('Waiting for installed guest; screen: ' + ' '.join(text.split())[:180], flush=True)
+            if 'installation stopped' in text.lower():
+                raise RuntimeError('Official installer reports installation stopped')
+            if 'reboot now' in text.lower():
+                vm.qmp('send-key', {'keys': [{'type': 'qcode', 'data': 'ret'}]})
+            next_screen = time.monotonic() + 45
+        time.sleep(5)
+    raise TimeoutError(f'Installed guest did not become verifiable within {timeout}s')
+
+
+def clean_shutdown(vm, run, password):
+    ssh(run, 'sudo -S -p "" systemctl poweroff', input=password + '\n', check=False)
+    try:
+        vm.process.wait(timeout=45)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('Guest did not shut down cleanly; output is not qualified') from error
+    if vm.process.returncode != 0:
+        raise RuntimeError('QEMU failed while shutting down')
+
+
+def assert_guest_proof(value):
+    lines = value.strip().splitlines()
+    if len(lines) != 4 or lines[0] != 'btrfs' or not lines[1].startswith('/dev/vda2'):
+        raise ValueError('Guest root is not the expected installed Btrfs partition')
+    if not re.fullmatch('[0-9a-f]{32}', lines[2]) or not lines[3].startswith('omarchy '):
+        raise ValueError('Guest identity or installed Omarchy package proof is missing')
+
+
+def preflight():
+    for name in ['qemu-system-x86_64', 'qemu-img', 'gpgv', 'xorriso', 'unsquashfs',
+                 'ssh', 'ssh-keygen', 'openssl', 'mcopy', 'mkfs.vfat', 'tesseract']:
+        if not shutil.which(name):
+            raise ValueError('Missing runtime dependency: ' + name)
+    for path in [CODE, VARS]:
+        if not path.is_file():
+            raise ValueError('Missing UEFI firmware: ' + str(path))
+    return {'qemu': command(['qemu-system-x86_64', '--version']).stdout.splitlines()[0],
+            'outputFreeBytes': shutil.disk_usage(RUNS).free,
+            'uid': os.getuid(), 'accelerator': 'tcg', 'physicalDevices': [],
+            'network': 'container none; guest restricted user network, loopback SSH only'}
+
+
+def resource_counters():
+    counters = {}
+    for name in ['memory.max', 'memory.peak', 'memory.events', 'memory.swap.max', 'pids.max', 'cpu.max']:
+        path = Path('/sys/fs/cgroup') / name
+        if path.is_file():
+            counters[name] = path.read_text().strip()
+    return counters
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['preflight', 'smoke', 'inspect', 'install'])
+    parser.add_argument('--memory', type=int, default=6144, choices=[4096, 6144, 8192])
+    parser.add_argument('--timeout', type=int, default=1800, choices=range(60, 2401))
+    args = parser.parse_args()
+    os.umask(0o077)
+    # Container mounts are fixed by the host runner; user paths/extra flags are not accepted.
+    lock = json.loads((PROOF / 'release-lock.json').read_text(encoding='utf-8-sig'))
+    run = RUNS / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
+    run.mkdir(mode=0o700)
+    receipt = {'schemaVersion': 1, 'model': 'gpt-6-astra', 'action': args.action,
+               'status': 'running', 'source': lock, 'baremetalReady': False,
+               'installedSystemProven': False, 'independentBootProven': False,
+               'deferredProvisioningProven': False, 'encryptedTemplate': False,
+               'deploymentAllowed': False, 'startedAt': time.time()}
+    receipt['runtimeLock'] = json.loads((PROOF / 'runtime-lock.json').read_text(encoding='utf-8-sig'))
+    receipt['builderFiles'] = {name: sha256(PROOF / name) for name in
+                               ['builder.py', 'configuration.py', 'Invoke-ImageProof.ps1',
+                                'release-lock.json', 'omarchy-signing-key.gpg']}
+    print('Evidence directory: ' + str(run), flush=True)
+    try:
+        receipt['runtime'] = preflight()
+        receipt['initialResourceCounters'] = resource_counters()
+        receipt['firmwareSha256'] = {path.name: sha256(path) for path in [CODE, VARS]}
+        receipt['runtimePackagesSha256'] = sha256(Path('/runtime-packages.tsv'))
+        write_json(run / 'receipt.json', receipt)
+        if args.action == 'preflight':
+            receipt['status'] = 'preflight-passed'
+        elif args.action == 'smoke':
+            disk = run / 'smoke.qcow2'
+            command(['qemu-img', 'create', '-f', 'qcow2', disk, '64M'])
+            shutil.copyfile(VARS, run / 'OVMF_VARS.fd')
+            with VM(run, disk, memory=512) as vm:
+                deadline = time.monotonic() + 60
+                while True:
+                    time.sleep(5)
+                    shot = vm.screenshot('firmware-screen')
+                    text = command(['tesseract', shot, 'stdout', '--psm', '6']).stdout
+                    if 'uefi' in text.lower() and 'shell' in text.lower():
+                        receipt['firmwareConsole'] = text.strip()
+                        break
+                    if time.monotonic() > deadline:
+                        raise TimeoutError('UEFI shell did not become visible in the empty-disk smoke test')
+                receipt['qmpStatus'] = vm.qmp('query-status')
+                receipt['blockDevices'] = vm.qmp('query-block')
+            receipt['status'] = 'firmware-smoke-passed'
+        else:
+            if shutil.disk_usage(RUNS).free < 50 * GIB:
+                raise ValueError('At least 50 GiB free output space is required before ISO inspection/install')
+            iso = verify_source(lock, run)
+            receipt['inspection'] = inspect_iso(iso, run)
+            if args.action == 'inspect':
+                receipt['status'] = 'release-inspected'
+            else:
+                if not receipt['inspection']['cidataSupported']:
+                    raise ValueError('Pinned release lacks the required cidata contract; installation is blocked')
+                config, password = build_cidata(run)
+                receipt['configSha256'] = sha256(run / 'cidata/user_configuration.json')
+                receipt['guestMemoryMiB'] = args.memory
+                disk = run / 'image.building.qcow2'
+                command(['qemu-img', 'create', '-f', 'qcow2', disk, str(DISK_BYTES)])
+                shutil.copyfile(VARS, run / 'OVMF_VARS.fd')
+                with VM(run, disk, iso, args.memory) as vm:
+                    receipt['installArguments'] = vm.args
+                    write_json(run / 'receipt.json', receipt)
+                    wait_installed(vm, run, args.timeout)
+                    receipt['installedSystemProven'] = True
+                    clean_shutdown(vm, run, password)
+                # Fresh firmware NVRAM proves fallback boot, with ISO AND cidata absent.
+                shutil.copyfile(VARS, run / 'OVMF_VARS.fd')
+                with VM(run, disk, memory=args.memory) as vm:
+                    receipt['independentBootArguments'] = vm.args
+                    wait_installed(vm, run, min(args.timeout, 600))
+                    proof = ssh(run, 'findmnt -n -o FSTYPE /; findmnt -n -o SOURCE /; '
+                                     'cat /etc/machine-id; pacman -Q omarchy').stdout
+                    assert_guest_proof(proof)
+                    receipt['guestProof'] = proof.strip().splitlines()
+                    receipt['independentBootProven'] = True
+                    vm.screenshot('independent-boot')
+                    clean_shutdown(vm, run, password)
+                final_disk = run / 'image.qcow2'
+                disk.rename(final_disk)
+                receipt['outputSha256'] = sha256(final_disk)
+                receipt['outputBytes'] = final_disk.stat().st_size
+                receipt['outputFile'] = final_disk.name
+                receipt['status'] = 'vm-install-and-independent-boot-proven'
+                receipt['credentialDisposition'] = 'Unique test credentials remain in this local disposable VM; never deploy it'
+    except (Exception, KeyboardInterrupt) as error:
+        receipt['status'] = 'failed'
+        receipt['error'] = str(error)
+        print('Proof failed: ' + str(error), flush=True)
+        return 1
+    finally:
+        receipt['finalResourceCounters'] = resource_counters()
+        if receipt['status'] == 'failed' and re.search(
+                r'^oom_kill [1-9][0-9]*$', receipt['finalResourceCounters'].get('memory.events', ''), re.MULTILINE):
+            receipt['status'] = 'resource-limit-failed'
+        receipt['finishedAt'] = time.time()
+        write_json(run / 'receipt.json', receipt)
+        print('Recorded result: ' + receipt['status'], flush=True)
+    return 0
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    raise SystemExit(main())

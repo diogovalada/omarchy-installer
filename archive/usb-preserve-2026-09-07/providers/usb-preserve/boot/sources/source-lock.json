@@ -1,0 +1,22 @@
+{
+  "sourcePackage": "grub2",
+  "version": "2.12-1ubuntu7.3",
+  "authentication": "Ubuntu APT signed source indexes; apt-get source --download-only",
+  "files": [
+    {
+      "path": "sources/grub2_2.12-1ubuntu7.3.debian.tar.xz",
+      "length": 1179724,
+      "sha256": "1e78cbb97d86461e8cb4789658cdeffeef32a784a006253dcc3b1b97d7056338"
+    },
+    {
+      "path": "sources/grub2_2.12-1ubuntu7.3.dsc",
+      "length": 7340,
+      "sha256": "e23bd4184ea731a890c338fbc8b73e18d53cf4c47b0e8dffd6a55b0d13798ffa"
+    },
+    {
+      "path": "sources/grub2_2.12.orig.tar.xz",
+      "length": 6675608,
+      "sha256": "f3c97391f7c4eaa677a78e090c7e97e6dc47b16f655f04683ebd37bef7fe0faa"
+    }
+  ]
+}

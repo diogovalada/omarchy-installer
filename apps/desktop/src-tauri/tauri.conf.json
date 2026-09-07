@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Omarchy Setup",
+  "version": "0.1.0",
+  "identifier": "community.omarchy.setup",
+  "build": {
+    "beforeDevCommand": "node ../../scripts/stage-desktop-providers.mjs && pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "node ../../scripts/stage-desktop-providers.mjs && pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Omarchy Setup — Community Preview",
+        "width": 1180,
+        "height": 790,
+        "minWidth": 820,
+        "minHeight": 620,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "resources": { "../.native-providers/bundle/": "providers/" }
+  }
+}

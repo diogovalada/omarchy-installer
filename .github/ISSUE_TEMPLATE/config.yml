@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Official Omarchy documentation
+    url: https://omarchy.org/manual
+    about: Use the official manual for questions about an existing Omarchy installation.
+  - name: Security reporting guidance
+    url: https://github.com/omacom/omarchy/security
+    about: Read this repository's SECURITY.md first; do not publish exploitable details or secrets in an issue.

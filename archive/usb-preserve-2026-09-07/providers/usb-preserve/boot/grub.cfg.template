@@ -1,0 +1,6 @@
+set iso_path=/@ISO_NAME@
+search --no-floppy --file --set=omarchy_data $iso_path
+loopback loop ($omarchy_data)$iso_path
+set root=(loop)
+export iso_path
+configfile (loop)/boot/grub/loopback.cfg

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "isoVersion": "4.0.2",
+  "isoSha256": "2ef8e624aa1bec7e277e28056b8535a6c9373ba48d7ede3f1a01cb6d2373cfb8",
+  "model": "gpt-6-astra",
+  "inspection": "Read directly from the released ISO SquashFS and its bundled runtime package; no install or VM execution",
+  "isoFiles": {
+    "var/cache/omarchy/mirror/offline/limine-12.6.0-1-x86_64.pkg.tar.zst": "aa00937954e3ccba576732fdc3c0c71396ad1bffd930a6f24d6da1029363f0db",
+    "var/cache/omarchy/mirror/offline/limine-mkinitcpio-hook-1.37.1-1-x86_64.pkg.tar.zst": "3cb45542e1308a0703c9e61467aa3cd6792fecb4f5070bda9b65b9077d5bc2e9",
+    "root/configurator": "0dcf67931d71c2c45f1f56fa9bf7d1b6a583600fad26441c2e5042a0631c461e",
+    "usr/share/omarchy-iso/orchestrator/context.py": "10fa0871c95dc951794cc2c5bae0b4228137dea3c4ed9a25ff43e0e3f8edb832",
+    "usr/share/omarchy-iso/orchestrator/phases_impl.py": "e75c17efbaba464f976ef88719a8ca726f7fedbda5c6260b813eb97eac81713e",
+    "usr/lib/python3.14/site-packages/archinstall/lib/disk/luks.py": "3bfc4e14f07317da25e1dfe6d6157f4c18c3f66b84321030568aea3bb13456d9",
+    "var/cache/omarchy/mirror/offline/omarchy-4.0.2-1-any.pkg.tar.zst": "cb24bb99a4b890fed643b4c92ab729daf353b6c632c29634d8cac09827ce5863"
+  },
+  "installedFiles": {
+    "usr/bin/omarchy-provision-owner": "5c71fd5730473850a598628e1d82dda3b5517a31b8a8b1e64e24e08ee73b7dea",
+    "usr/share/omarchy/install/provisioning/omarchy-provision-owner.service": "a80d640de9e957ccf1022e0c097adc2dd3c20e07e2ae50998aa59e32b6929d5f"
+  },
+  "bootstrapKey": "upstream-per-install",
+  "ownerRekey": "passphrase-slots-only",
+  "protectionState": "owner-setup-required"
+}

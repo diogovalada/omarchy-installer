@@ -1,0 +1,57 @@
+# Rust
+/target/
+target-*/
+**/src-tauri/target/
+/scripts/portable-cache-helper/target/
+**/src-tauri/gen/
+/apps/desktop/src-tauri/icons/android/
+/apps/desktop/src-tauri/icons/ios/
+/apps/desktop/src-tauri/icons/Square*.png
+/apps/desktop/src-tauri/icons/StoreLogo.png
+**/*.rs.bk
+
+# JavaScript / Tauri
+node_modules/
+dist/
+.svelte-kit/
+.build/
+/apps/desktop/.native-providers/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+
+# Generated artifacts, caches, and diagnostics
+/artifacts/
+/coverage/
+/support-bundles/
+*.log
+*.tmp
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/archive/usb-preserve-2026-09-07/providers/usb-preserve/qualification/*.img
+/archive/usb-preserve-2026-09-07/providers/usb-preserve/qualification/*.fd
+/archive/usb-preserve-2026-09-07/providers/usb-preserve/qualification/repro/
+/archive/usb-preserve-2026-09-07/providers/usb-preserve/qualification/existing-user-file.txt
+/archive/usb-preserve-2026-09-07/providers/usb-preserve/qualification/grub.cfg
+/providers/image-builder-x86/runtime.tar
+/providers/image-builder-x86/runtime-*.partial
+/providers/usb-preserve/qualification/*.img
+/providers/usb-preserve/qualification/*.fd
+/providers/usb-preserve/qualification/repro/
+/providers/usb-preserve/qualification/existing-user-file.txt
+/providers/usb-preserve/qualification/grub.cfg
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

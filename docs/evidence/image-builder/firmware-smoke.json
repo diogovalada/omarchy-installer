@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "model": "gpt-6-astra",
+  "action": "smoke",
+  "status": "firmware-smoke-passed",
+  "source": {
+    "schemaVersion": 1,
+    "version": "4.0.2",
+    "architecture": "x86_64",
+    "isoUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso",
+    "signatureUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sig",
+    "checksumUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sha256",
+    "sizeBytes": 6227752960,
+    "sha256": "2ef8e624aa1bec7e277e28056b8535a6c9373ba48d7ede3f1a01cb6d2373cfb8",
+    "signingKeyFingerprint": "40DFB630FF42BCFFB047046CF0134EE680CAC571",
+    "recipeRepository": "https://github.com/omacom/omarchy-iso",
+    "recipeCommit": "2673c613d9a71e23920e43fbb951238145e0f1e8",
+    "recipePath": "test/integration.d/base-test.sh",
+    "recipeStatus": "reference-only until inspected inside this released ISO",
+    "observedAt": "2026-09-05",
+    "model": "gpt-6-astra"
+  },
+  "baremetalReady": false,
+  "installedSystemProven": false,
+  "independentBootProven": false,
+  "deferredProvisioningProven": false,
+  "encryptedTemplate": false,
+  "deploymentAllowed": false,
+  "startedAt": 1788645953.399651,
+  "runtimeLock": {
+    "schemaVersion": 1,
+    "imageId": "sha256:020be814fec7b78e7f9baa3a49a53227cd10a98d210d621f9d4fd4f4457a3c8b",
+    "observedAt": "2026-09-05T22:05:21.3013496Z",
+    "baseImage": "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+    "packageIntegrity": "APT signed repository metadata and package hashes; all added/changed package versions pinned",
+    "dockerfileSha256": "3c2dc99dd192640938ab8408d8e677318265d2ef5fa76e847e969e10e9c987dd",
+    "packageLockSha256": "cd50c620577493e791aff3a7333d2bfc34607a65ea7d29796dbaf2eb793ffff5",
+    "model": "gpt-6-astra"
+  },
+  "builderFiles": {
+    "builder.py": "a4b6247adcde49776e3ee1ea89c9d0512ced26a2c640df7130c75ed31c0935fa",
+    "configuration.py": "39fa644ff044455ffadef902c45b5b0ec706b1ba531101ff3b13072da21beddb",
+    "Invoke-ImageProof.ps1": "55a1993af77e8bc6176e3eda35b6ac46ad615f8150262029ce9acfe58bb0946c",
+    "release-lock.json": "4e572871ac797143c2c38a50529c5178760def55df4e0ea3dd73aff6410b13c2",
+    "omarchy-signing-key.gpg": "763114ca466f5d850a39743b2f2f9572e33aacd1039aeed93e44654da919894d"
+  },
+  "runtime": {
+    "qemu": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+    "outputFreeBytes": 78079123456,
+    "uid": 1000,
+    "accelerator": "tcg",
+    "physicalDevices": [],
+    "network": "container none; guest restricted user network, loopback SSH only"
+  },
+  "firmwareSha256": {
+    "OVMF_CODE_4M.fd": "949bfa5389c4c48582737481e7d24f46b3a16b276ef44c4089a56858c6a0a446",
+    "OVMF_VARS_4M.fd": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "runtimePackagesSha256": "aa4675bc1d243498949140400da628063ed06ee96184dce692275e8c0ba97020",
+  "firmwareConsole": "UEFI Interactive Shell v2.2\nEDK II\nUEFI v2.70 (Ubuntu distribution of EDK II, 6x00010000\nMapping table\nBLKO: Alias(s) :\nPciRoot (0x0) /Pci (0x1 , 0x0\nPress ESC in 4 seconds to skip startup.nsh or any other key to continue.",
+  "qmpStatus": {
+    "status": "running",
+    "singlestep": false,
+    "running": true
+  },
+  "blockDevices": [
+    {
+      "device": "pflash0",
+      "locked": false,
+      "removable": false,
+      "inserted": {
+        "iops_rd": 0,
+        "detect_zeroes": "off",
+        "image": {
+          "virtual-size": 3653632,
+          "filename": "/usr/share/OVMF/OVMF_CODE_4M.fd",
+          "format": "raw",
+          "actual-size": 3653632,
+          "dirty-flag": false
+        },
+        "iops_wr": 0,
+        "ro": true,
+        "node-name": "#block161",
+        "backing_file_depth": 0,
+        "drv": "raw",
+        "iops": 0,
+        "bps_wr": 0,
+        "write_threshold": 0,
+        "encrypted": false,
+        "bps": 0,
+        "bps_rd": 0,
+        "cache": {
+          "no-flush": false,
+          "direct": false,
+          "writeback": true
+        },
+        "file": "/usr/share/OVMF/OVMF_CODE_4M.fd"
+      },
+      "qdev": "/machine/system.flash0",
+      "type": "unknown"
+    },
+    {
+      "device": "pflash1",
+      "locked": false,
+      "removable": false,
+      "inserted": {
+        "iops_rd": 0,
+        "detect_zeroes": "off",
+        "image": {
+          "virtual-size": 540672,
+          "filename": "/runs/20260905T220553Z-3d772979/OVMF_VARS.fd",
+          "format": "raw",
+          "actual-size": 540672,
+          "dirty-flag": false
+        },
+        "iops_wr": 0,
+        "ro": false,
+        "node-name": "#block389",
+        "backing_file_depth": 0,
+        "drv": "raw",
+        "iops": 0,
+        "bps_wr": 0,
+        "write_threshold": 0,
+        "encrypted": false,
+        "bps": 0,
+        "bps_rd": 0,
+        "cache": {
+          "no-flush": false,
+          "direct": false,
+          "writeback": true
+        },
+        "file": "/runs/20260905T220553Z-3d772979/OVMF_VARS.fd"
+      },
+      "qdev": "/machine/system.flash1",
+      "type": "unknown"
+    },
+    {
+      "io-status": "ok",
+      "device": "drive0",
+      "locked": false,
+      "removable": false,
+      "inserted": {
+        "iops_rd": 0,
+        "detect_zeroes": "off",
+        "image": {
+          "virtual-size": 67108864,
+          "filename": "/runs/20260905T220553Z-3d772979/smoke.qcow2",
+          "cluster-size": 65536,
+          "format": "qcow2",
+          "actual-size": 200704,
+          "format-specific": {
+            "type": "qcow2",
+            "data": {
+              "compat": "1.1",
+              "compression-type": "zlib",
+              "lazy-refcounts": false,
+              "refcount-bits": 16,
+              "corrupt": false,
+              "extended-l2": false
+            }
+          },
+          "dirty-flag": false
+        },
+        "iops_wr": 0,
+        "ro": false,
+        "node-name": "#block564",
+        "backing_file_depth": 0,
+        "drv": "qcow2",
+        "iops": 0,
+        "bps_wr": 0,
+        "write_threshold": 0,
+        "encrypted": false,
+        "bps": 0,
+        "bps_rd": 0,
+        "cache": {
+          "no-flush": false,
+          "direct": false,
+          "writeback": true
+        },
+        "file": "/runs/20260905T220553Z-3d772979/smoke.qcow2"
+      },
+      "qdev": "/machine/peripheral-anon/device[0]/virtio-backend",
+      "type": "unknown"
+    }
+  ],
+  "finishedAt": 1788645964.6013515
+}

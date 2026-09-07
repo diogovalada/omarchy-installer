@@ -1,0 +1,17 @@
+{
+  "recordedAt": "2026-09-06T04:00:59.2645512Z",
+  "feature": "shared-windows-macos-storage-controls",
+  "nativeExecutableSha256": "7f382b206269cd2056d8643126067c9daf8452d7895f0d6e80bfe0188a16f8b0",
+  "frontendAsset": "index-A-bDlibq.js",
+  "stagedProviderCount": 6144,
+  "checks": [
+    "pnpm desktop:check: zero errors, four pre-existing warnings",
+    "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked",
+    "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "pnpm desktop:build:native",
+    "cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml --locked after final state validator edit"
+  ],
+  "macOSCompiled": false,
+  "executionTestsPerformed": false,
+  "upstreamSubmoduleModified": false
+}

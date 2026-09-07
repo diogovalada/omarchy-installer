@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "omarchy": {
+      "repository": "omacom/omarchy",
+      "revision": "36e56f4fb463547dd877849bd3bd951410c442e9"
+    },
+    "fonts": {
+      "repository": "JetBrains/JetBrainsMono",
+      "revision": "cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9"
+    }
+  },
+  "files": [
+    {
+      "file": "logo.svg",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/logo.svg",
+      "bytes": 1554,
+      "sha256": "e05ab723c3b9df19d4140b1d97eff0303ba07366aa1fe431b4ad0c8af7fc51f0"
+    },
+    {
+      "file": "icon.png",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/icon.png",
+      "bytes": 1555,
+      "sha256": "edd69e61d711d8b423555f27a5afc64935c299f6e7f779112d2ce970ec0236e4"
+    },
+    {
+      "file": "desktop-preview.png",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/themes/tokyo-night/preview.png",
+      "bytes": 382202,
+      "sha256": "1e2a87a2d948af1d195b0d2f03bd743d5ae72671ae8ad38825fd4c494e82d8fb"
+    },
+    {
+      "file": "quattro.webp",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/themes/tokyo-night/backgrounds/1-quattro.webp",
+      "bytes": 625422,
+      "sha256": "c9b96c106d2758113986a8ddb621f3867edf65e09a89dad51abb9fc5f3447146"
+    },
+    {
+      "file": "winding-road.webp",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/themes/tokyo-night/backgrounds/0-winding-road.webp",
+      "bytes": 653482,
+      "sha256": "b149c3e1c8ce383812e7bc3170c2cf8b160ca583d72d59173cd42efdb79ced2b"
+    },
+    {
+      "file": "LICENSE-Omarchy.txt",
+      "url": "https://raw.githubusercontent.com/omacom/omarchy/36e56f4fb463547dd877849bd3bd951410c442e9/LICENSE",
+      "bytes": 1063,
+      "sha256": "717ba1949502290f8e47688ae2e323acd06c8ca47aec9f7596b15f678c1af4a2"
+    },
+    {
+      "file": "JetBrainsMono-Regular.woff2",
+      "url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/fonts/webfonts/JetBrainsMono-Regular.woff2",
+      "bytes": 92164,
+      "sha256": "a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2"
+    },
+    {
+      "file": "JetBrainsMono-Bold.woff2",
+      "url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/fonts/webfonts/JetBrainsMono-Bold.woff2",
+      "bytes": 94588,
+      "sha256": "c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2"
+    },
+    {
+      "file": "OFL-JetBrainsMono.txt",
+      "url": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/OFL.txt",
+      "bytes": 4399,
+      "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
+    }
+  ]
+}

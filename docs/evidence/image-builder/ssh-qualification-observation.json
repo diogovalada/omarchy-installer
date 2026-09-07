@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "model": "gpt-6-astra",
+  "observedAt": "2026-09-05T22:54:21.0927479Z",
+  "runId": "20260905T222043Z-f8574f3b",
+  "mainRunStatus": "failed",
+  "mainRunError": "Installed guest did not become verifiable within 1800s",
+  "continuationLastRecordedStatus": "waiting-for-authenticated-installed-key",
+  "continuationLastProbeExitCode": 255,
+  "continuationProcessExitCode": 1,
+  "continuationFinishedReceipt": false,
+  "installedKeyPromotionArchiveExists": false,
+  "promotedImageExists": false,
+  "stagingBytes": 2542927872,
+  "activeProofContainerCount": 0,
+  "continuationSourceSha256": "255739af9f34c653c0429657d9cece3aa6f235a3580fa7379cea6ad827ee7d9b",
+  "note": "The continuation ended when the operation container ended, without an installed-key promotion or final receipt. Its last written receipt is preserved unchanged. The archived source's broad host-storage comment was inaccurate: it wrote operation-local known-hosts and evidence files; it did not alter guest configuration or attach devices."
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "removable-empty-64gib",
+  "description": "One empty 64 GiB 512-byte-sector removable USB device.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "usb-empty-01",
+      "path": "/synthetic/disk/usb-empty-01",
+      "stable_id": "usb:ffff:0001:SYNTH-USB-0001",
+      "serial": "SYNTH-USB-0001",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 68719476736,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 512,
+      "partition_table": "none",
+      "partitions": []
+    }
+  ],
+  "expect": { "eligible_candidate_ids": ["usb-empty-01"], "refused": [] }
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "windows-system-plus-removable",
+  "description": "Windows GPT system disk beside one eligible removable USB target.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "win-system-01",
+      "path": "\\\\.\\PhysicalDrive0",
+      "stable_id": "nvme:SYNTH-WIN-SYSTEM-0001",
+      "serial": "SYNTH-WIN-SYSTEM-0001",
+      "bus": "nvme",
+      "media": "internal",
+      "system_disk": true,
+      "size_bytes": 1099511627776,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 4096,
+      "partition_table": "gpt",
+      "partitions": [
+        { "number": 1, "start_lba": 2048, "end_lba": 206847, "type": "efi-system", "name": "EFI System", "filesystem": "fat32", "mount_points": [], "encryption": null },
+        { "number": 2, "start_lba": 206848, "end_lba": 239615, "type": "microsoft-reserved", "name": "MSR", "filesystem": null, "mount_points": [], "encryption": null },
+        { "number": 3, "start_lba": 239616, "end_lba": 2145386495, "type": "microsoft-basic-data", "name": "Windows", "filesystem": "ntfs", "mount_points": ["C:\\"], "encryption": null },
+        { "number": 4, "start_lba": 2145386496, "end_lba": 2147479551, "type": "windows-recovery", "name": "Recovery", "filesystem": "ntfs", "mount_points": [], "encryption": null }
+      ]
+    },
+    {
+      "candidate_id": "win-usb-01",
+      "path": "\\\\.\\PhysicalDrive3",
+      "stable_id": "usb:ffff:0101:SYNTH-WIN-USB-0001",
+      "serial": "SYNTH-WIN-USB-0001",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 68719476736,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 512,
+      "partition_table": "none",
+      "partitions": []
+    }
+  ],
+  "expect": {
+    "eligible_candidate_ids": ["win-usb-01"],
+    "refused": [{ "candidate_id": "win-system-01", "codes": ["internal-media", "system-disk"] }]
+  }
+}

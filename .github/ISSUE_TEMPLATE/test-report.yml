@@ -1,0 +1,106 @@
+name: Tester evidence report
+description: Submit structured simulation or approved disposable-media evidence.
+title: "[Test]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing the unofficial Omarchy Setup community preview. Routine testing must use simulation or file-backed devices. Test physical media only under a published tester playbook, using a disposable external drive on a non-essential machine.
+
+        A successful report is evidence for a specific host/device combination; it does not make the capability generally safe or stable.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Test scope
+      options:
+        - Dry-run user journey
+        - File-backed fake block device
+        - Fault-injection scenario
+        - Download and verification only
+        - VM provider
+        - Approved disposable external USB write
+        - Boot verification of an approved USB
+    validations:
+      required: true
+
+  - type: input
+    id: playbook
+    attributes:
+      label: Tester playbook and version
+      description: Use "simulation" when no physical media was involved.
+      placeholder: simulation, or windows-usb-preview v0.1
+    validations:
+      required: true
+
+  - type: input
+    id: build
+    attributes:
+      label: Exact build
+      description: Provide the full commit SHA and package version, if applicable.
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host environment
+      placeholder: Windows 11 24H2, x86_64; laptop model; relevant USB controller
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Simulated or disposable target
+      description: For physical USB testing, provide manufacturer, model, advertised capacity, and connection type. Omit serial numbers.
+      placeholder: FakeBlockDevice 16 GiB, or Vendor Model 32 GB USB-A
+    validations:
+      required: true
+
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Procedure performed
+      description: Include verification, cancellation, reconnect, boot, or recovery steps required by the playbook.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Passed exactly as documented
+        - Failed safely with a clear error
+        - Failed or behaved unexpectedly
+        - Safety incident or near miss (also open the safety form)
+    validations:
+      required: true
+
+  - type: textarea
+    id: observations
+    attributes:
+      label: Results and observations
+      description: Include elapsed times, verification result, boot result, and exact non-sensitive errors where relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Paste reviewed journal excerpts, checksums, or diagnostic summaries. Do not upload a raw diagnostic bundle.
+      render: shell
+
+  - type: checkboxes
+    id: tester_confirmation
+    attributes:
+      label: Tester confirmation
+      options:
+        - label: I followed the named tester playbook and did not experiment on an internal disk, employer-managed machine, or my only computer.
+          required: true
+        - label: I confirmed that non-target sentinel devices were unchanged, where the playbook required them.
+          required: true
+        - label: I removed serial numbers, secrets, recovery material, private file contents, and personally identifying device data from this report.
+          required: true

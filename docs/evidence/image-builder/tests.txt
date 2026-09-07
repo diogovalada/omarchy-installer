@@ -1,0 +1,22 @@
+Command: wsl -d Ubuntu -- sh -lc 'cd /mnt/c/Users/example/Documents/Code/omarchy/providers/image-builder-x86; python3 -m unittest -v'
+Exit code: 0
+
+test_authenticated_guest_without_installed_marker_cannot_pin_key (test_builder.SafetyAndProofTests.test_authenticated_guest_without_installed_marker_cannot_pin_key) ... ok
+test_checksum_mismatch_rejected_before_signature_execution (test_builder.SafetyAndProofTests.test_checksum_mismatch_rejected_before_signature_execution) ... Verifying complete ISO checksum and detached signature
+ok
+test_deferred_profile_has_no_credentials_or_encryption (test_builder.SafetyAndProofTests.test_deferred_profile_has_no_credentials_or_encryption) ... ok
+test_each_install_has_unique_partition_ids_and_hostname (test_builder.SafetyAndProofTests.test_each_install_has_unique_partition_ids_and_hostname) ... ok
+test_guest_proof_requires_installed_root_identity_and_package (test_builder.SafetyAndProofTests.test_guest_proof_requires_installed_root_identity_and_package) ... ok
+test_independent_boot_has_neither_iso_nor_cidata (test_builder.SafetyAndProofTests.test_independent_boot_has_neither_iso_nor_cidata) ... ok
+test_input_rejects_links_directories_and_escape (test_builder.SafetyAndProofTests.test_input_rejects_links_directories_and_escape) ... ok
+test_install_media_are_read_only_and_only_fixed_files (test_builder.SafetyAndProofTests.test_install_media_are_read_only_and_only_fixed_files) ... ok
+test_install_wait_retries_transient_ssh_timeout (test_builder.SafetyAndProofTests.test_install_wait_retries_transient_ssh_timeout) ... Waiting for installed guest; screen: Installing Omarchy
+ok
+test_iso_offset_accepts_contiguous_multi_extent_file (test_builder.SafetyAndProofTests.test_iso_offset_accepts_contiguous_multi_extent_file) ... ok
+test_live_key_is_discarded_installed_key_pinned_and_later_mismatch_rejected (test_builder.SafetyAndProofTests.test_live_key_is_discarded_installed_key_pinned_and_later_mismatch_rejected) ... ok
+test_only_virtual_target_and_bounded_partition_layout (test_builder.SafetyAndProofTests.test_only_virtual_target_and_bounded_partition_layout) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.025s
+
+OK

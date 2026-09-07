@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "intel-mac-t1",
+  "description": "Intel Mac with a T1 security chip and external boot enabled.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "macos",
+    "architecture": "x86_64",
+    "os": { "name": "macOS", "version": "13.7.1", "build": "22H221" },
+    "firmware": { "mode": "uefi", "secure_boot": "medium", "external_boot_allowed": true },
+    "hardware": { "manufacturer": "Apple Inc.", "model": "MacBook Pro", "model_identifier": "MacBookPro14,2", "apple_security_chip": "t1" },
+    "storage": { "controller": "apple-nvme", "root_layout": "gpt-apfs", "encryption": { "kind": "filevault", "state": "on", "recovery_material_backed_up": true } },
+    "power": { "ac_connected": true, "battery_percent": 79 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "intel-mac-apfs-plus-removable.json",
+  "expect": { "host_class": "mac-intel-t1", "usb_writer": "eligible", "direct_install_preflight": "caution", "finding_codes": ["filevault-protected", "t1-security-policy-review"] }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "windows-legacy-system-plus-removable",
+  "description": "Legacy-BIOS Windows MBR system disk with an independent eligible USB target.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "win-legacy-system-01",
+      "path": "\\\\.\\PhysicalDrive0",
+      "stable_id": "sata:SYNTH-WIN-LEGACY-0001",
+      "serial": "SYNTH-WIN-LEGACY-0001",
+      "bus": "sata",
+      "media": "internal",
+      "system_disk": true,
+      "size_bytes": 549755813888,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 4096,
+      "partition_table": "mbr",
+      "partitions": [
+        { "number": 1, "start_lba": 2048, "end_lba": 1050623, "type": "mbr-ntfs-active", "name": "System Reserved", "filesystem": "ntfs", "mount_points": [], "encryption": null },
+        { "number": 2, "start_lba": 1050624, "end_lba": 1073737727, "type": "mbr-ntfs", "name": "Windows", "filesystem": "ntfs", "mount_points": ["C:\\"], "encryption": null }
+      ]
+    },
+    {
+      "candidate_id": "win-legacy-usb-01",
+      "path": "\\\\.\\PhysicalDrive2",
+      "stable_id": "usb:ffff:0103:SYNTH-WIN-USB-0003",
+      "serial": "SYNTH-WIN-USB-0003",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 34359738368,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 512,
+      "partition_table": "none",
+      "partitions": []
+    }
+  ],
+  "expect": {
+    "eligible_candidate_ids": ["win-legacy-usb-01"],
+    "refused": [{ "candidate_id": "win-legacy-system-01", "codes": ["internal-media", "system-disk"] }]
+  }
+}

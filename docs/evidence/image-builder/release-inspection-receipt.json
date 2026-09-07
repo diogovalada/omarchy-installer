@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "model": "gpt-6-astra",
+  "action": "inspect",
+  "status": "release-inspected",
+  "source": {
+    "schemaVersion": 1,
+    "version": "4.0.2",
+    "architecture": "x86_64",
+    "isoUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso",
+    "signatureUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sig",
+    "checksumUrl": "https://iso.omarchy.org/omarchy-4.0.2.iso.sha256",
+    "sizeBytes": 6227752960,
+    "sha256": "2ef8e624aa1bec7e277e28056b8535a6c9373ba48d7ede3f1a01cb6d2373cfb8",
+    "signingKeyFingerprint": "40DFB630FF42BCFFB047046CF0134EE680CAC571",
+    "recipeRepository": "https://github.com/omacom/omarchy-iso",
+    "recipeCommit": "2673c613d9a71e23920e43fbb951238145e0f1e8",
+    "recipePath": "test/integration.d/base-test.sh",
+    "recipeStatus": "reference-only until inspected inside this released ISO",
+    "observedAt": "2026-09-05",
+    "model": "gpt-6-astra"
+  },
+  "baremetalReady": false,
+  "installedSystemProven": false,
+  "independentBootProven": false,
+  "deferredProvisioningProven": false,
+  "encryptedTemplate": false,
+  "deploymentAllowed": false,
+  "startedAt": 1788646127.7398849,
+  "runtimeLock": {
+    "schemaVersion": 1,
+    "imageId": "sha256:020be814fec7b78e7f9baa3a49a53227cd10a98d210d621f9d4fd4f4457a3c8b",
+    "observedAt": "2026-09-05T22:05:21.3013496Z",
+    "baseImage": "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+    "packageIntegrity": "APT signed repository metadata and package hashes; all added/changed package versions pinned",
+    "dockerfileSha256": "3c2dc99dd192640938ab8408d8e677318265d2ef5fa76e847e969e10e9c987dd",
+    "packageLockSha256": "cd50c620577493e791aff3a7333d2bfc34607a65ea7d29796dbaf2eb793ffff5",
+    "model": "gpt-6-astra"
+  },
+  "builderFiles": {
+    "builder.py": "a4b6247adcde49776e3ee1ea89c9d0512ced26a2c640df7130c75ed31c0935fa",
+    "configuration.py": "39fa644ff044455ffadef902c45b5b0ec706b1ba531101ff3b13072da21beddb",
+    "Invoke-ImageProof.ps1": "55a1993af77e8bc6176e3eda35b6ac46ad615f8150262029ce9acfe58bb0946c",
+    "release-lock.json": "4e572871ac797143c2c38a50529c5178760def55df4e0ea3dd73aff6410b13c2",
+    "omarchy-signing-key.gpg": "763114ca466f5d850a39743b2f2f9572e33aacd1039aeed93e44654da919894d"
+  },
+  "runtime": {
+    "qemu": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+    "outputFreeBytes": 78010224640,
+    "uid": 1000,
+    "accelerator": "tcg",
+    "physicalDevices": [],
+    "network": "container none; guest restricted user network, loopback SSH only"
+  },
+  "firmwareSha256": {
+    "OVMF_CODE_4M.fd": "949bfa5389c4c48582737481e7d24f46b3a16b276ef44c4089a56858c6a0a446",
+    "OVMF_VARS_4M.fd": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "runtimePackagesSha256": "aa4675bc1d243498949140400da628063ed06ee96184dce692275e8c0ba97020",
+  "inspection": {
+    "files": {
+      "cidata-loader": {
+        "path": "usr/local/bin/omarchy-cidata-load",
+        "present": true,
+        "sha256": "b4ef3a6db9b62d3dbc01835cce27439713276ac1de4a0e5dbefe488489bcf7c8"
+      },
+      "installer-context": {
+        "path": "usr/share/omarchy-iso/orchestrator/context.py",
+        "present": true,
+        "sha256": "10fa0871c95dc951794cc2c5bae0b4228137dea3c4ed9a25ff43e0e3f8edb832"
+      },
+      "installer-phases": {
+        "path": "usr/share/omarchy-iso/orchestrator/phases_impl.py",
+        "present": true,
+        "sha256": "e75c17efbaba464f976ef88719a8ca726f7fedbda5c6260b813eb97eac81713e"
+      }
+    },
+    "squashfsOffsetBytes": 270831616,
+    "inspectionMethod": "read-only direct offset; contiguous ISO extents checked; no extracted filesystem copy",
+    "cidataSupported": true,
+    "deferredProvisioningSourcePresent": true,
+    "installedSystemProven": false,
+    "note": "Presence checks are a compatibility prerequisite, not proof of behavior."
+  },
+  "finishedAt": 1788646309.9257011
+}

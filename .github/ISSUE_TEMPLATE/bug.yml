@@ -1,0 +1,98 @@
+name: Bug report
+description: Report a reproducible problem in the unofficial, simulation-first preview.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Omarchy Setup is a **community preview, not an official Omarchy release**.
+        Redact logs before posting them. Never attach disk contents, credentials, recovery keys, private keys, or unreviewed diagnostic archives.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Give the application version or full commit SHA.
+      placeholder: 0.1.0-dev or 0123456789abcdef...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host operating system
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Other or unknown
+    validations:
+      required: true
+
+  - type: input
+    id: host_version
+    attributes:
+      label: Host version and architecture
+      placeholder: Windows 11 24H2, x86_64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend in use
+      description: Physical-media testing is valid only when an active tester playbook explicitly permits it.
+      options:
+        - Dry-run or provider simulator
+        - File-backed fake block device
+        - Download-only
+        - Virtual-machine provider
+        - Physical external media (authorized tester ring only)
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest repeatable sequence and any non-sensitive fixture identifiers.
+      placeholder: |
+        1. Start the app in dry-run mode...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include exact error text when it contains no private data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Paste only the relevant, locally reviewed excerpt. A diagnostic archive is not required.
+      render: shell
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I verified that this report contains no secrets, recovery material, private file contents, or personally identifying device data.
+          required: true
+        - label: I understand that this project is unofficial and pre-release.
+          required: true

@@ -1,0 +1,378 @@
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+const EMBEDDED: &str = include_str!(concat!(env!("OUT_DIR"), "/provider-lock.json"));
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeManifest {
+    pub schema: u32,
+    pub platform: String,
+    pub architecture: String,
+    pub media: MediaRuntime,
+    pub media_inspection: Option<MediaRuntime>,
+    pub direct_x86: Option<ScriptRuntime>,
+    pub apple: Option<ScriptRuntime>,
+    pub files: Vec<RuntimeFile>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaRuntime {
+    pub executable: String,
+    pub entrypoint: String,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptRuntime {
+    pub entrypoint: String,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeFile {
+    pub path: String,
+    pub length: u64,
+    pub sha256: String,
+}
+
+pub fn manifest() -> Result<RuntimeManifest, String> {
+    let manifest: RuntimeManifest = serde_json::from_str(EMBEDDED)
+        .map_err(|_| "Native providers are not packaged. Run pnpm providers:stage and rebuild the desktop app.".to_string())?;
+    let platform = match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    if manifest.schema != 1
+        || manifest.platform != platform
+        || manifest.architecture != arch
+        || manifest.files.is_empty()
+        || manifest.files.len() > 50000
+    {
+        return Err("Packaged providers do not match this platform".into());
+    }
+    let mut files = HashSet::new();
+    for record in &manifest.files {
+        checked_path(Path::new("."), &record.path)?;
+        if record.length > 256 * 1024 * 1024
+            || record.sha256.len() != 64
+            || !record
+                .sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err("Invalid compiled runtime file constraint".into());
+        }
+        let key = if cfg!(windows) {
+            record.path.to_lowercase()
+        } else {
+            record.path.clone()
+        };
+        if !files.insert(key) {
+            return Err("Compiled runtime contains duplicate file paths".into());
+        }
+    }
+    for entry in std::iter::once(&manifest.media.executable)
+        .chain(std::iter::once(&manifest.media.entrypoint))
+        .chain(
+            manifest
+                .media_inspection
+                .iter()
+                .flat_map(|media| [&media.executable, &media.entrypoint]),
+        )
+        .chain(manifest.direct_x86.iter().map(|script| &script.entrypoint))
+        .chain(manifest.apple.iter().map(|script| &script.entrypoint))
+    {
+        checked_path(Path::new("."), entry)?;
+        if !manifest.files.iter().any(|record| &record.path == entry) {
+            return Err(
+                "A provider executable or entrypoint is not covered by compiled hashes".into(),
+            );
+        }
+    }
+    Ok(manifest)
+}
+
+pub fn checked_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let path = Path::new(relative);
+    if relative.is_empty()
+        || relative.contains('\0')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+        || relative.contains(':')
+        || relative.contains('\\')
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part.ends_with(['.', ' ']))
+    {
+        return Err("Invalid packaged provider path".into());
+    }
+    #[cfg(windows)]
+    if relative.split('/').any(|part| {
+        let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+        ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+            || (stem.len() == 4
+                && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    }) {
+        return Err("Packaged provider contains a reserved device filename".into());
+    }
+    Ok(root.join(path))
+}
+
+pub fn locate(manifest: &RuntimeManifest) -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let parent = exe.parent().ok_or("Executable directory is unavailable")?;
+    let mut roots = vec![
+        parent.join("providers"),
+        parent.join("../Resources/providers"),
+    ];
+    if cfg!(debug_assertions) {
+        roots.push(PathBuf::from(env!("OMARCHY_PROVIDER_ROOT")));
+    }
+    roots
+        .into_iter()
+        .find(|root| {
+            checked_path(root, &manifest.media.executable).is_ok_and(|path| path.is_file())
+        })
+        .ok_or_else(|| "Packaged native provider runtime was not found".into())
+}
+
+fn open_regular(root: &Path, relative: &str) -> Result<File, String> {
+    let full = checked_path(root, relative)?;
+    let mut cursor = root.to_path_buf();
+    for part in Path::new(relative).components() {
+        cursor.push(part);
+        if fs::symlink_metadata(&cursor)
+            .map_err(|error| error.to_string())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err("Provider runtime contains a symbolic link".into());
+        }
+    }
+    if !fs::symlink_metadata(&full)
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Provider runtime entry is not a regular file".into());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ);
+    }
+    let file = options.open(full).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Provider runtime entry is not a regular file".into());
+    }
+    Ok(file)
+}
+
+#[cfg(test)]
+fn verify(root: &Path, manifest: &RuntimeManifest, cancel: &AtomicBool) -> Result<(), String> {
+    for record in &manifest.files {
+        copy_one(root, None, record, cancel)?;
+    }
+    Ok(())
+}
+
+pub fn verify_inspection(
+    root: &Path,
+    manifest: &RuntimeManifest,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let inspection = manifest
+        .media_inspection
+        .as_ref()
+        .ok_or("Read-only USB inspector is not packaged")?;
+    let (prefix, suffix) = inspection
+        .entrypoint
+        .split_once("/inspection/")
+        .ok_or("Invalid inspector entrypoint")?;
+    if suffix != "dist/inspection-cli.js"
+        || inspection.executable
+            != format!(
+                "{prefix}/{}",
+                if cfg!(windows) { "node.exe" } else { "node" }
+            )
+    {
+        return Err("Invalid inspector runtime layout".into());
+    }
+    let subtree = format!("{prefix}/inspection/");
+    for record in manifest
+        .files
+        .iter()
+        .filter(|file| file.path == inspection.executable || file.path.starts_with(&subtree))
+    {
+        copy_one(root, None, record, cancel)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+
+    #[test]
+    fn inspector_authenticates_its_closure_and_full_verification_still_checks_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let node = format!("media/{}", if cfg!(windows) { "node.exe" } else { "node" });
+        let entry = "media/inspection/dist/inspection-cli.js";
+        let paths = [
+            node.as_str(),
+            entry,
+            "media/inspection/node_modules/native.node",
+            "media/writer.js",
+        ];
+        let files = paths
+            .iter()
+            .map(|path| {
+                let destination = directory.path().join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(destination, b"good").unwrap();
+                RuntimeFile {
+                    path: (*path).into(),
+                    length: 4,
+                    sha256: format!("{:x}", Sha256::digest(b"good")),
+                }
+            })
+            .collect();
+        let manifest = RuntimeManifest {
+            schema: 1,
+            platform: "test".into(),
+            architecture: "test".into(),
+            media: MediaRuntime {
+                executable: node.clone(),
+                entrypoint: "media/writer.js".into(),
+            },
+            media_inspection: Some(MediaRuntime {
+                executable: node,
+                entrypoint: entry.into(),
+            }),
+            direct_x86: None,
+            apple: None,
+            files,
+        };
+        let cancel = AtomicBool::new(false);
+        verify_inspection(directory.path(), &manifest, &cancel).unwrap();
+        fs::write(directory.path().join("media/writer.js"), b"evil").unwrap();
+        verify_inspection(directory.path(), &manifest, &cancel).unwrap();
+        assert!(verify(directory.path(), &manifest, &cancel).is_err());
+        fs::write(
+            directory
+                .path()
+                .join("media/inspection/node_modules/native.node"),
+            b"evil",
+        )
+        .unwrap();
+        assert!(verify_inspection(directory.path(), &manifest, &cancel).is_err());
+    }
+}
+
+// The destination must be owned by the privileged helper before this function
+// runs. Hash the bytes actually copied, never reopen untrusted source code after
+// validating a separate read of it.
+pub fn copy_protected(
+    root: &Path,
+    destination: &Path,
+    manifest: &RuntimeManifest,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    for record in &manifest.files {
+        copy_one(root, Some(destination), record, cancel)?;
+    }
+    Ok(())
+}
+
+fn copy_one(
+    root: &Path,
+    destination: Option<&Path>,
+    record: &RuntimeFile,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    if record.length > 256 * 1024 * 1024 || record.sha256.len() != 64 {
+        return Err("Invalid runtime file constraint".into());
+    }
+    let mut source = open_regular(root, &record.path)?;
+    if source.metadata().map_err(|error| error.to_string())?.len() != record.length {
+        return Err(format!("Packaged runtime changed: {}", record.path));
+    }
+    let mut target = if let Some(destination) = destination {
+        let path = checked_path(destination, &record.path)?;
+        fs::create_dir_all(path.parent().ok_or("Invalid runtime parent")?)
+            .map_err(|error| error.to_string())?;
+        Some(
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(path)
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        None
+    };
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut total = 0_u64;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Operation cancelled".into());
+        }
+        let read = source
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        if total > record.length {
+            return Err("Packaged file grew during staging".into());
+        }
+        hash.update(&buffer[..read]);
+        if let Some(target) = target.as_mut() {
+            target
+                .write_all(&buffer[..read])
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    if total != record.length || format!("{:x}", hash.finalize()) != record.sha256 {
+        return Err(format!("Packaged runtime digest mismatch: {}", record.path));
+    }
+    if let Some(target) = target {
+        target.sync_all().map_err(|error| error.to_string())?;
+    }
+    #[cfg(unix)]
+    if let Some(destination) = destination {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = record.path.ends_with("/node") || record.path.ends_with(".sh");
+        fs::set_permissions(
+            checked_path(destination, &record.path)?,
+            fs::Permissions::from_mode(if executable { 0o700 } else { 0o600 }),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}

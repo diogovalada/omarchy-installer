@@ -1,0 +1,92 @@
+"""Recorded qualification continuation for an already-running initial builder.
+
+The live ISO exposes SSH with a different host key. Discover the installed key
+using a disposable file and the run's unique client key; only promote it after
+authenticated installed-root checks. This never changes guest or host storage.
+The permanent two-stage probe belongs in builder.py after this run completes.
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+import builder
+
+
+def fingerprint(path):
+    if not path.exists():
+        return None
+    fields = path.read_text().splitlines()[0].split()
+    digest = hashlib.sha256(base64.b64decode(fields[-1])).digest()
+    return 'SHA256:' + base64.b64encode(digest).decode().rstrip('=')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('run_id')
+    parser.add_argument('--timeout', type=int, default=900, choices=range(60, 1801))
+    args = parser.parse_args()
+    if not re.fullmatch(r'\d{8}T\d{6}Z-[0-9a-f]{8}', args.run_id):
+        raise ValueError('Only a generated run identifier is accepted')
+    run = Path('/runs') / args.run_id
+    if run.is_symlink() or run.resolve(strict=True).parent != Path('/runs').resolve():
+        raise ValueError('Run directory must remain inside the output mount')
+    os.umask(0o077)
+    known = run / 'known_hosts'
+    candidate = run / 'discovery_known_hosts'
+    record_path = run / 'ssh-qualification-continuation.json'
+    record = {
+        'schemaVersion': 1, 'model': 'gpt-6-astra',
+        'status': 'waiting-for-authenticated-installed-key', 'startedAt': time.time(),
+        'builderSha256': builder.sha256(Path(builder.__file__)),
+        'continuationSha256': builder.sha256(Path(__file__)),
+        'liveHostKeyFingerprint': fingerprint(known),
+        'reason': 'Live ISO host key was pinned before proof-user authentication; keep discovery separate from independent-boot pinning.',
+    }
+    builder.write_json(record_path, record)
+    print('Recording bounded live-to-installed SSH key qualification', flush=True)
+    deadline = time.monotonic() + args.timeout
+    try:
+        while time.monotonic() < deadline:
+            candidate.unlink(missing_ok=True)
+            result = builder.command([
+                'ssh', '-i', run / 'id_ed25519', '-p', '2322',
+                '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
+                '-o', 'StrictHostKeyChecking=accept-new',
+                '-o', f'UserKnownHostsFile={candidate}',
+                '-o', 'ConnectTimeout=3', '-o', 'LogLevel=ERROR', 'proof@127.0.0.1',
+                'test -d /usr/share/omarchy && test ! -d /run/archiso',
+            ], check=False, timeout=15)
+            if result.returncode == 0:
+                record['installedHostKeyFingerprint'] = fingerprint(candidate)
+                if known.exists():
+                    known.replace(run / 'known_hosts.live-before-qualification')
+                candidate.replace(known)
+                pinned = builder.ssh(run, 'test -d /usr/share/omarchy && test ! -d /run/archiso')
+                record['status'] = 'installed-key-verified-and-pinned'
+                record['pinnedAuthenticationExitCode'] = pinned.returncode
+                print('Installed SSH key authenticated and pinned for independent boot', flush=True)
+                return 0
+            record['lastProbeExitCode'] = result.returncode
+            record['lastProbeError'] = result.stderr.strip()[:1000]
+            builder.write_json(record_path, record)
+            time.sleep(5)
+        raise TimeoutError('Installed guest did not become authenticatable before the continuation bound')
+    except (Exception, KeyboardInterrupt) as error:
+        record['status'] = 'failed'
+        record['error'] = str(error)
+        return 1
+    finally:
+        candidate.unlink(missing_ok=True)
+        record['finishedAt'] = time.time()
+        builder.write_json(record_path, record)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

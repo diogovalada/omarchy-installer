@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "windows-x64-uefi-bitlocker-protected",
+  "description": "Windows 11 x64 with active BitLocker and confirmed recovery-material backup.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "windows",
+    "architecture": "x86_64",
+    "os": { "name": "Windows 11 Pro", "version": "24H2", "build": "26100.1000" },
+    "firmware": { "mode": "uefi", "secure_boot": "enabled", "external_boot_allowed": "unknown" },
+    "hardware": { "manufacturer": "Synthetic Systems", "model": "WinUEFI-02", "apple_security_chip": "not-applicable" },
+    "storage": { "controller": "nvme-standard", "root_layout": "gpt-basic", "encryption": { "kind": "bitlocker", "state": "on", "recovery_material_backed_up": true } },
+    "power": { "ac_connected": true, "battery_percent": 91 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "windows-system-bitlocker-plus-removable.json",
+  "expect": { "host_class": "windows-x64-uefi", "usb_writer": "eligible", "direct_install_preflight": "caution", "finding_codes": ["bitlocker-protected"] }
+}

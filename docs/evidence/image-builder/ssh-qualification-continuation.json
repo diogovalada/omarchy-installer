@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "model": "gpt-6-astra",
+  "status": "waiting-for-authenticated-installed-key",
+  "startedAt": 1788648095.8652472,
+  "builderSha256": "9bf1fe4acf48db467ee988ea6f6f1c5fc37258dfd31900ce1f837d458149f702",
+  "continuationSha256": "255739af9f34c653c0429657d9cece3aa6f235a3580fa7379cea6ad827ee7d9b",
+  "liveHostKeyFingerprint": "SHA256:3gbkbbRwmZgoxbuKczoUK7lgR8ObiPWeLnTg86I3a8c",
+  "reason": "Live ISO host key was pinned before proof-user authentication; keep discovery separate from independent-boot pinning.",
+  "lastProbeExitCode": 255,
+  "lastProbeError": ""
+}

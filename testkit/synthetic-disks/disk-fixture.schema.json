@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omarchy-setup/testkit/disk-fixture.schema.json",
+  "title": "Omarchy Setup synthetic disk inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fixture_version", "id", "description", "policy_id", "required_image_bytes", "devices", "expect"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "fixture_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$" },
+    "description": { "type": "string", "minLength": 1 },
+    "policy_id": { "const": "synthetic-device-policy-v1" },
+    "required_image_bytes": { "type": "integer", "minimum": 1 },
+    "selection_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "stable_id", "size_bytes"],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "stable_id": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/device" }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible_candidate_ids", "refused"],
+      "properties": {
+        "eligible_candidate_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidate_id", "codes"],
+            "properties": {
+              "candidate_id": { "type": "string" },
+              "codes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "path", "stable_id", "serial", "bus", "media", "system_disk", "size_bytes", "logical_sector_bytes", "physical_sector_bytes", "partition_table", "partitions"],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "path": { "type": "string" },
+        "stable_id": { "type": ["string", "null"] },
+        "serial": { "type": ["string", "null"] },
+        "bus": { "enum": ["usb", "nvme", "sata", "pcie", "virtual"] },
+        "media": { "enum": ["removable", "internal", "virtual"] },
+        "system_disk": { "type": "boolean" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "logical_sector_bytes": { "enum": [512, 4096] },
+        "physical_sector_bytes": { "enum": [512, 4096] },
+        "partition_table": { "enum": ["none", "mbr", "gpt"] },
+        "partitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["number", "start_lba", "end_lba", "type", "filesystem", "mount_points", "encryption"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "start_lba": { "type": "integer", "minimum": 0 },
+              "end_lba": { "type": "integer", "minimum": 0 },
+              "type": { "type": "string" },
+              "name": { "type": "string" },
+              "filesystem": { "type": ["string", "null"] },
+              "mount_points": { "type": "array", "items": { "type": "string" } },
+              "encryption": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

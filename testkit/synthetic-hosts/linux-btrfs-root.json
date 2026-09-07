@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "linux-btrfs-root",
+  "description": "UEFI Linux host with native Btrfs root subvolumes.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "linux",
+    "architecture": "x86_64",
+    "os": { "name": "openSUSE Tumbleweed", "version": "20260830", "kernel": "6.16.0-synthetic" },
+    "firmware": { "mode": "uefi", "secure_boot": "enabled", "external_boot_allowed": true },
+    "hardware": { "manufacturer": "Synthetic Systems", "model": "LinuxBtrfs-01", "apple_security_chip": "not-applicable" },
+    "storage": { "controller": "nvme-standard", "root_layout": "gpt-btrfs-subvolumes", "encryption": { "kind": "none", "state": "off", "recovery_material_backed_up": "not-applicable" } },
+    "power": { "ac_connected": true, "battery_percent": null },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "linux-btrfs-system-plus-removable.json",
+  "expect": { "host_class": "linux-x64-uefi", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["btrfs-root-layout", "direct-linux-provider-unavailable"] }
+}

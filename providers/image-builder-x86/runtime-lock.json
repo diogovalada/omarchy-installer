@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "imageId": "sha256:020be814fec7b78e7f9baa3a49a53227cd10a98d210d621f9d4fd4f4457a3c8b",
+  "observedAt": "2026-09-05T22:05:21.3013496Z",
+  "baseImage": "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+  "packageIntegrity": "APT signed repository metadata and package hashes; all added/changed package versions pinned",
+  "dockerfileSha256": "3c2dc99dd192640938ab8408d8e677318265d2ef5fa76e847e969e10e9c987dd",
+  "packageLockSha256": "cd50c620577493e791aff3a7333d2bfc34607a65ea7d29796dbaf2eb793ffff5",
+  "model": "gpt-6-astra"
+}

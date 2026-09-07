@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-09-05T21:43:48.1973936Z",
+  "model": "gpt-6-astra",
+  "platform": "Windows",
+  "workspaceFreeBytes": 84413313024,
+  "totalMemoryKiB": 41136588,
+  "freeMemoryKiB": 7234772,
+  "runtime": "Docker Desktop Linux engine",
+  "accelerator": "TCG software emulation; no host device passthrough",
+  "hypervisorChanges": false,
+  "physicalDiskAccess": false
+}

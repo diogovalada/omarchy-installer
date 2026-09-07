@@ -1,0 +1,27 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "removable-4kn-64gib",
+  "description": "A 64 GiB native-4Kn removable device for sector-size arithmetic tests.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "usb-4kn-01",
+      "path": "/synthetic/disk/usb-4kn-01",
+      "stable_id": "usb:ffff:0003:SYNTH-4KN-0001",
+      "serial": "SYNTH-4KN-0001",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 68719476736,
+      "logical_sector_bytes": 4096,
+      "physical_sector_bytes": 4096,
+      "partition_table": "gpt",
+      "partitions": [
+        { "number": 1, "start_lba": 256, "end_lba": 16776959, "type": "microsoft-basic-data", "name": "OLD-4KN", "filesystem": "exfat", "mount_points": [], "encryption": null }
+      ]
+    }
+  ],
+  "expect": { "eligible_candidate_ids": ["usb-4kn-01"], "refused": [] }
+}

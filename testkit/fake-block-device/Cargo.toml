@@ -1,0 +1,12 @@
+[package]
+name = "omarchy-fake-block-device"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+omarchy-media-writer = { path = "../../crates/media-writer" }
+
+[lints.rust]
+unsafe_code = "forbid"

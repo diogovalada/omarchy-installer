@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "model": "gpt-6-astra",
+  "recordedAt": "2026-09-06",
+  "implementation": "Windows x64 UEFI/GPT alongside deployment with allocation/shrink/deletion, LUKS2 streaming, protector/PCR and measured-route eligibility, separate firmware/runtime preparation, bounded restoration and transient cleanup",
+  "currentEvidence": "../../docs/evidence/windows-direct-readiness-2026-09-06.md",
+  "validationPerformed": [
+    "All direct-provider Windows PowerShell modules parsed without invoking actions",
+    "NativeDisk.cs, NativeBootEvidence.cs and EncryptedImage.cs compiled with Windows PowerShell 5.1 without invoking host methods",
+    "Five boot-menu regression tests passed against the actual ISO reset template in the restricted Linux runtime",
+    "Protector-policy and recovery-timing tests plus 541 synthetic measured-boot parser checks passed without host CIM or TPM calls",
+    "Six native desktop Rust tests passed, including bounded transient cleanup",
+    "Thirteen frontend tests passed, including saved-image gating and separate firmware/runtime preparation",
+    "Svelte check passed with zero errors and four existing warnings",
+    "Packaged Docker runtime archive imported successfully and reported the exact pinned image ID",
+    "TOKEN_PRIVILEGES marshalled layout inspected: size 16, Count offset 0, Luid offset 4, Attributes offset 12",
+    "Windows .NET Framework constructors for atomic protected file, directory and mutex creation inspected",
+    "Bounded source review of fresh disk identity checks, exact shrink comparison, encrypted artifact input and BitLocker restoration paths"
+  ],
+  "priorRevisionEvidence": [
+    "Read-only, non-elevated Windows inventory/prerequisite probe predating shrink and encryption additions",
+    "Read-only inspection of signed ISO installer and bundled runtime package entry points"
+  ],
+  "nativeInteropReview": {
+    "tokenPrivilegesPack": 4,
+    "tokenPrivilegesBytes": 16,
+    "tokenPrivilegesOffsets": { "Count": 0, "Luid": 4, "Attributes": 12 },
+    "driveLayoutHeaderBytes": 48,
+    "partitionInformationExBytes": 144,
+    "otherMarshalledStructures": "None; GPT layouts use explicitly offset byte buffers"
+  },
+  "notPerformed": [
+    "Encrypted product image construction VM run",
+    "Independent installed image boot",
+    "Privileged host execution or elevation",
+    "New shrink-capability probe or NTFS resize",
+    "Deletion-candidate probe, volume locking, partition deletion or warning-modal execution",
+    "Actual BitLocker suspension, scheduled-task recovery or restoration",
+    "Host partition or firmware mutation",
+    "Physical deployment",
+    "Actual hardware first boot, filesystem growth and owner provisioning",
+    "Subsequent Windows boot or TPM/PCR recovery behavior qualification",
+    "Reboot"
+  ],
+  "encryption": {
+    "root": "luks2",
+    "protectionState": "owner-setup-required",
+    "bootstrapKey": "upstream-per-install",
+    "ownerRekey": "passphrase-slots-only",
+    "staging": "encrypted guest backing disk and authenticated encrypted partition exports; private memory-only helper key",
+    "windows": "suspend only originally active OS protectors with one-reboot bound; restore and verify before success; never decrypt"
+  },
+  "secureBoot": "must be disabled for installation; separate reviewed firmware restart and bounded BitLocker preparation implemented, machine qualification pending",
+  "constructionRuntime": "digest-bound packaged archive import into an existing Linux Docker engine; 85 GiB free staging and 10 GiB currently free RAM required",
+  "packaging": "NSIS packaging with optional verified certificate signing or explicit unsigned preview; see artifacts/windows-package/package-record.json for produced files",
+  "bootMenu": {
+    "policy": "menu-first-preserve-existing-entries",
+    "defaultOs": "omarchy",
+    "defaultTimeoutSeconds": 5,
+    "selectableDefaults": ["omarchy", "windows"],
+    "selectableTimeoutSeconds": [5, 10, 15, 30],
+    "windowsProtocol": "efi_boot_entry with an additional firmware restart",
+    "persistentUpdateHooks": true,
+    "executionQualified": false,
+    "platformBehaviorGuide": "../../docs/platform-behavior.md"
+  },
+  "allocation": "MiB-aligned selectable total; fixed 2 GiB ESP and remaining capacity assigned to LUKS2 root",
+  "shrinking": "confirmed exact native NTFS Resize-Partition with fresh Windows limits and max(20 GiB, 10% volume size) retained free-space reserve",
+  "deletion": "typed Disk N Partition M confirmation plus native final approval; exact partition identity and protected-role checks; locked Remove-Partition; readback preserves other GPT entries; encrypted/unknown/multi-device targets excluded",
+  "recovery": "protected SYSTEM startup and one-minute watchdog; deployment restores after owner process exit or two-hour deadline; firmware preparation waits for new Windows boot or five-minute deadline; durable state retained; bounded file cleanup requires confirmed builder stop",
+  "rollback": "manual inspection required; confirmed shrink or partition deletion may persist and operation-owned new partitions may remain incomplete"
+}

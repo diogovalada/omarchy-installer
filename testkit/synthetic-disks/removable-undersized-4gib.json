@@ -1,0 +1,25 @@
+{
+  "$schema": "./disk-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "removable-undersized-4gib",
+  "description": "A unique removable USB that is smaller than the required image.",
+  "policy_id": "synthetic-device-policy-v1",
+  "required_image_bytes": 8589934592,
+  "devices": [
+    {
+      "candidate_id": "usb-small-01",
+      "path": "/synthetic/disk/usb-small-01",
+      "stable_id": "usb:ffff:0004:SYNTH-SMALL-0001",
+      "serial": "SYNTH-SMALL-0001",
+      "bus": "usb",
+      "media": "removable",
+      "system_disk": false,
+      "size_bytes": 4294967296,
+      "logical_sector_bytes": 512,
+      "physical_sector_bytes": 512,
+      "partition_table": "none",
+      "partitions": []
+    }
+  ],
+  "expect": { "eligible_candidate_ids": [], "refused": [{ "candidate_id": "usb-small-01", "codes": ["target-too-small"] }] }
+}

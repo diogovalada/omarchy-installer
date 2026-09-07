@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/maralcbr/omarchy-mx-mac.git",
+  "commit": "00daf3ebef9e4fbe89fb9b32bd184e65aa75d357",
+  "selection": "Last source revision before the validation locator changed from the published .7 engine. The locator exactly matches the separately pinned release asset; this does not establish that the released app binary was built from this revision.",
+  "appSourceFiles": ["LiveInstallerEnvironment.swift", "EngineInspectionRunner.swift"],
+  "modifiedUpstreamFiles": [],
+  "model": "gpt-6-astra"
+}

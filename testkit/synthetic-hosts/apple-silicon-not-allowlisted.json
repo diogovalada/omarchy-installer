@@ -1,0 +1,19 @@
+{
+  "$schema": "./host-fixture.schema.json",
+  "fixture_version": 1,
+  "id": "apple-silicon-not-allowlisted",
+  "description": "Apple-Silicon model deliberately absent from the synthetic direct-install allowlist.",
+  "policy_id": "synthetic-policy-v1",
+  "host": {
+    "platform": "macos",
+    "architecture": "aarch64",
+    "os": { "name": "macOS", "version": "15.6", "build": "24G84" },
+    "firmware": { "mode": "apple-iboot", "secure_boot": "full", "external_boot_allowed": "not-applicable" },
+    "hardware": { "manufacturer": "Apple Inc.", "model": "Synthetic Future Mac", "model_identifier": "Mac99,99", "apple_soc": "Unknown Apple Silicon", "apple_security_chip": "integrated" },
+    "storage": { "controller": "apple-ans", "root_layout": "gpt-apfs-apple-firmware", "encryption": { "kind": "filevault", "state": "on", "recovery_material_backed_up": true } },
+    "power": { "ac_connected": true, "battery_percent": 73 },
+    "session": { "elevated": false, "elevation_available": true }
+  },
+  "disk_fixture": "apple-silicon-apfs-plus-removable.json",
+  "expect": { "host_class": "mac-apple-silicon", "usb_writer": "eligible", "direct_install_preflight": "block", "finding_codes": ["apple-model-not-allowlisted", "x86-usb-not-bootable-on-host"] }
+}

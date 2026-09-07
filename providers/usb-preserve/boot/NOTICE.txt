@@ -1,0 +1,30 @@
+Omarchy USB UEFI loader
+
+BOOTX64.EFI is assembled from GNU GRUB 2.12, Ubuntu package version
+2.12-1ubuntu7.3, using grub-mkimage. GNU GRUB is licensed under the GNU
+General Public License, version 3 or later. See GPL-3.txt and
+GRUB-COPYRIGHT.txt for license text and the complete upstream notices.
+
+Exact corresponding source is included in sources/:
+  grub2_2.12.orig.tar.xz
+  grub2_2.12-1ubuntu7.3.debian.tar.xz
+  grub2_2.12-1ubuntu7.3.dsc
+The authenticated source package contains the Ubuntu patches and build
+scripts. source-lock.json records the archive checksums. Extract with
+dpkg-source -x grub2_2.12-1ubuntu7.3.dsc in a suitably configured Ubuntu
+24.04 build environment; install the declared Build-Depends and build
+with dpkg-buildpackage. No GRUB source modifications were made here.
+
+build-loader.py is the exact final image assembly recipe. It requires
+grub-common and grub-efi-amd64-bin version 2.12-1ubuntu7.3. Run it with
+the desired output directory mounted or available as /output. The
+recipe sets SOURCE_DATE_EPOCH=0 and embeds all required GRUB modules.
+loader-provenance.json records the resulting loader checksum.
+
+This loader is for x86-64 UEFI with Secure Boot disabled. It reads
+/EFI/Omarchy/grub.cfg from its own EFI volume. The ISO-specific
+configuration is generated from grub.cfg.template by the application.
+It neither installs nor changes legacy BIOS boot sectors.
+
+This is a community preview. Virtual boot qualification does not claim
+qualification on every physical USB controller or computer firmware.

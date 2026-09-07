@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "platform": "x64-uefi",
+  "secureBoot": false,
+  "sha256": "6aee4ec8cb45c274e9798d0700efa041fd5d7baa1aa83b9ad507fbfd9a23e155",
+  "length": 888832,
+  "packages": "grub-common\t2.12-1ubuntu7.3\ngrub-efi-amd64-bin\t2.12-1ubuntu7.3\n",
+  "buildCommand": "qualification/build-loader.py",
+  "source": "https://archive.ubuntu.com/ubuntu/pool/main/g/grub2/"
+}
