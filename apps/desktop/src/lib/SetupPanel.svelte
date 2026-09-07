@@ -51,7 +51,7 @@
     {#if active}
       <p role="status" aria-live="polite">{snapshot?.cancelRequested ? 'Stopping safely…' : snapshot?.message ?? 'Checking this computer…'}</p>
       {#if snapshot?.totalBytes}<progress max="100" value={percent} aria-label="Setup progress"></progress><p class="muted">{formatBytes(snapshot.bytes)} / {formatBytes(snapshot.totalBytes)}</p>{:else}<progress max="100" aria-label="Setup progress"></progress>{/if}
-      {#if snapshot?.cancelAvailable}<button disabled={snapshot.cancelRequested || $setup.pending} onclick={() => { void setup.cancel(); }}>Cancel</button>{:else if snapshot?.status === 'running'}<p class="muted">Keep the computer powered on. Cancellation is unavailable during this stage.</p>{/if}
+      {#if snapshot?.cancelAvailable}<div class="actions"><button disabled={snapshot.cancelRequested || $setup.pending} onclick={() => { void setup.cancel(); }}>Cancel</button></div>{:else if snapshot?.status === 'running'}<p class="muted">Keep the computer powered on. Cancellation is unavailable during this stage.</p>{/if}
     {:else if kind === 'usb' && usbReview}
       <section class="usb-confirmation" aria-labelledby="usb-confirm-title">
         <h3 id="usb-confirm-title" tabindex="-1" use:focusReview>{usbReview.mode === 'erase' ? 'Erase this USB?' : 'Add the installer to this USB?'}</h3>
