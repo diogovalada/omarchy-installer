@@ -21,7 +21,7 @@
 <main class="setup">
   <div class="setup-content">
     <header><div class="wordmark"><OmarchyWordmark/></div><span>Setup <span class="edition">/ Community edition</span></span></header>
-    <DownloadPanel/>
+    <DownloadPanel compact={option === 'direct'} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
     {#if option==='direct' && appleHost}<AppleSetupPanel close={() => { option=null; }}/>{:else if option}<SetupPanel kind={option} close={() => { option=null; }}/>{:else}
       <section class="next-actions" aria-label="Installation options">
         <button disabled={setupActive($setup.snapshot?.status)} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>

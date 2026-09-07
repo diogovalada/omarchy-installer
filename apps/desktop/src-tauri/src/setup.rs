@@ -325,8 +325,8 @@ impl Setup {
                     choices.push(Choice {
                         usb: None,
                         id: id.clone(),
-                        label: name.clone(),
-                        detail: "Unallocated space".into(),
+                        label: "Use unallocated space".into(),
+                        detail: name.clone(),
                         size_bytes: extent["sizeBytes"].as_u64().unwrap_or(0),
                         eligible,
                         reasons: blockers.clone(),
@@ -389,8 +389,8 @@ impl Setup {
                     choices.push(Choice {
                         usb: None,
                         id: id.clone(),
-                        label: name.clone(),
-                        detail: format!("Make space by shrinking {display_volume}"),
+                        label: format!("Make space on {display_volume}"),
+                        detail: format!("{name} · NTFS"),
                         size_bytes: maximum,
                         eligible,
                         reasons: candidate_blockers,
@@ -454,11 +454,8 @@ impl Setup {
                     choices.push(Choice {
                         usb: None,
                         id: id.clone(),
-                        label: name.clone(),
-                        detail: format!(
-                            "Delete partition {partition_number} and use this space · {}",
-                            label(&candidate["fileSystem"])
-                        ),
+                        label: format!("Replace partition {partition_number}"),
+                        detail: format!("{name} · {}", label(&candidate["fileSystem"])),
                         size_bytes: size,
                         eligible,
                         reasons: candidate_blockers,
@@ -1139,7 +1136,7 @@ fn run_elevated(
                     inner.snapshot.message = match inner.snapshot.stage.as_str() {
                         "validating" => "Checking the image and USB drive…",
                         "unmounting" => "Locking and unmounting USB volumes…",
-                        "writing" => "Writing the image to the USB drive…",
+                        "writing" => "Writing the image…",
                         "verifying" => "Verifying the written image…",
                         "readback" => "Reading back the USB to verify its checksum…",
                         "flushing" => "Flushing pending writes to the USB drive…",

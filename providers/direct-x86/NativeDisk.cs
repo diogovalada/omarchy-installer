@@ -26,6 +26,12 @@ namespace Omarchy.DirectX86 {
         [DllImport("kernel32.dll", SetLastError=true)]
         static extern bool FlushFileBuffers(SafeFileHandle h);
         [DllImport("kernel32.dll", SetLastError=true)]
+        static extern bool ReadFile(SafeFileHandle h, IntPtr buffer, int count, out int read, IntPtr overlapped);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        static extern bool WriteFile(SafeFileHandle h, IntPtr buffer, int count, out int written, IntPtr overlapped);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        static extern bool SetFilePointerEx(SafeFileHandle h, long distance, out long position, uint method);
+        [DllImport("kernel32.dll", SetLastError=true)]
         static extern bool GetFirmwareType(out uint kind);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         static extern uint GetFinalPathNameByHandle(SafeFileHandle h, StringBuilder path, uint length, uint flags);
@@ -283,51 +289,86 @@ namespace Omarchy.DirectX86 {
             // The provider authenticates the encrypted envelope before handing
             // over this stream. Hash plaintext again as it is written; the
             // source stream is deliberately not required to seek or touch disk.
-            using (var sourceHash = SHA256.Create()) {
-                string device = @"\\?\GLOBALROOT\Device\Harddisk" + disk + @"\Partition" + number;
-                using (var raw = CreateFile(device, READ | WRITE, 3, IntPtr.Zero, 3, 0x80000000, IntPtr.Zero)) {
-                    if (raw.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open newly allocated partition");
-                    int returned;
-                    var partitionInfo = new byte[Entry];
-                    Check(DeviceIoControl(raw, 0x00070048, null, 0, partitionInfo, partitionInfo.Length, out returned, IntPtr.Zero), "Cannot reidentify opened partition handle");
-                    if (returned < Entry || BitConverter.ToUInt32(partitionInfo, 0) != 1 ||
-                        BitConverter.ToInt64(partitionInfo, 8) != start || BitConverter.ToInt64(partitionInfo, 16) != size ||
-                        GuidAt(partitionInfo, 32) != type || GuidAt(partitionInfo, 48) != id)
-                        throw new InvalidDataException("Opened partition handle differs from the approved GPT extent");
-                    Check(DeviceIoControl(raw, 0x00090018, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot exclusively lock new partition");
-                    try {
-                        Check(DeviceIoControl(raw, 0x00090020, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot dismount new partition");
-                        using (var output = new FileStream(raw, FileAccess.ReadWrite, 1048576, false)) {
-                            var buffer = new byte[4 * 1048576]; long done = 0;
-                            while (done < imageSize) {
-                                int n = input.Read(buffer, 0, (int)Math.Min(buffer.Length, imageSize - done));
-                                if (n == 0) throw new EndOfStreamException("Image changed while writing");
-                                sourceHash.TransformBlock(buffer, 0, n, null, 0);
-                                output.Write(buffer, 0, n); done += n;
-                                if (progress != null && (done % (64 * 1048576) == 0 || done == imageSize)) progress("writing", done, imageSize);
-                            }
-                            if (input.ReadByte() != -1) throw new InvalidDataException("Plaintext image exceeds the authorized source bound");
-                            sourceHash.TransformFinalBlock(new byte[0], 0, 0);
-                            if (BitConverter.ToString(sourceHash.Hash).Replace("-", "").ToLowerInvariant() != sha256)
-                                throw new InvalidDataException("Decrypted source image digest changed");
-                            output.Flush(true); Check(FlushFileBuffers(raw), "Cannot flush partition contents");
-                            output.Position = 0;
-                            using (var verify = SHA256.Create()) {
-                                done = 0;
-                                while (done < imageSize) {
-                                    int n = output.Read(buffer, 0, (int)Math.Min(buffer.Length, imageSize - done));
-                                    if (n == 0) throw new EndOfStreamException("Short destination readback");
-                                    verify.TransformBlock(buffer, 0, n, null, 0); done += n;
-                                    if (progress != null && (done % (64 * 1048576) == 0 || done == imageSize)) progress("verifying", done, imageSize);
-                                }
-                                verify.TransformFinalBlock(new byte[0], 0, 0);
-                                string actual = BitConverter.ToString(verify.Hash).Replace("-", "").ToLowerInvariant();
-                                if (actual != sha256) throw new InvalidDataException("Mandatory destination readback failed");
-                            }
-                            Check(DeviceIoControl(raw, 0x0009001C, null, 0, null, 0, out returned, IntPtr.Zero), "Could not unlock new partition");
+            string device = @"\\?\GLOBALROOT\Device\Harddisk" + disk + @"\Partition" + number;
+            using (var raw = CreateFile(device, READ | WRITE, 3, IntPtr.Zero, 3, 0xA0000000, IntPtr.Zero)) {
+                if (raw.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open newly allocated partition");
+                int returned;
+                var partitionInfo = new byte[Entry];
+                Check(DeviceIoControl(raw, 0x00070048, null, 0, partitionInfo, partitionInfo.Length, out returned, IntPtr.Zero), "Cannot reidentify opened partition handle");
+                if (returned < Entry || BitConverter.ToUInt32(partitionInfo, 0) != 1 ||
+                    BitConverter.ToInt64(partitionInfo, 8) != start || BitConverter.ToInt64(partitionInfo, 16) != size ||
+                    GuidAt(partitionInfo, 32) != type || GuidAt(partitionInfo, 48) != id)
+                    throw new InvalidDataException("Opened partition handle differs from the approved GPT extent");
+                Check(DeviceIoControl(raw, 0x00090018, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot exclusively lock new partition");
+                try {
+                    Check(DeviceIoControl(raw, 0x00090020, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot dismount new partition");
+                    // Filesystems may otherwise exclude their final sectors.
+                    // The partition identity and exact image bound are checked above.
+                    Check(DeviceIoControl(raw, 0x00090083, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot access the complete new partition");
+                    TransferVerifiedImage(raw, input, imageSize, sha256, progress);
+                    Check(DeviceIoControl(raw, 0x0009001C, null, 0, null, 0, out returned, IntPtr.Zero), "Could not unlock new partition");
+                } catch { if (!raw.IsClosed) DeviceIoControl(raw, 0x0009001C, null, 0, null, 0, out returned, IntPtr.Zero); throw; }
+            }
+        }
+        // Shared with file-backed Windows I/O tests. The caller owns and has
+        // reidentified the handle; this routine never opens a device or path.
+        // Volume handles can be noncached even without FILE_FLAG_NO_BUFFERING.
+        // Aggregate short source reads, then issue aligned, bounded native I/O.
+        internal static void TransferVerifiedImage(SafeFileHandle raw, Stream input, long imageSize, string sha256, Action<string,long,long> progress) {
+            const int block = 4 * 1048576, alignment = 65536;
+            if (imageSize <= 0 || imageSize % alignment != 0 || input == null || !input.CanRead)
+                throw new InvalidDataException("Unsupported aligned image stream");
+            var buffer = new byte[block];
+            IntPtr allocation = Marshal.AllocHGlobal(block + alignment - 1);
+            IntPtr aligned = new IntPtr((allocation.ToInt64() + alignment - 1) & ~(long)(alignment - 1));
+            try {
+                long position;
+                Check(SetFilePointerEx(raw, 0, out position, 0) && position == 0, "Cannot seek to the partition start");
+                using (var sourceHash = SHA256.Create()) {
+                    long done = 0;
+                    if (progress != null) progress("writing", 0, imageSize);
+                    while (done < imageSize) {
+                        int count = (int)Math.Min(block, imageSize - done), filled = 0;
+                        while (filled < count) {
+                            int n = input.Read(buffer, filled, count - filled);
+                            if (n <= 0 || n > count - filled) throw new EndOfStreamException("Image changed while writing");
+                            filled += n;
                         }
-                    } catch { if (!raw.IsClosed) DeviceIoControl(raw, 0x0009001C, null, 0, null, 0, out returned, IntPtr.Zero); throw; }
+                        sourceHash.TransformBlock(buffer, 0, count, buffer, 0);
+                        Marshal.Copy(buffer, 0, aligned, count);
+                        int written;
+                        Check(WriteFile(raw, aligned, count, out written, IntPtr.Zero), "Cannot write the partition image");
+                        if (written != count) throw new IOException("Short partition write");
+                        done += written;
+                        if (progress != null && (done % (64 * 1048576) == 0 || done == imageSize)) progress("writing", done, imageSize);
+                    }
+                    if (input.ReadByte() != -1) throw new InvalidDataException("Plaintext image exceeds the authorized source bound");
+                    sourceHash.TransformFinalBlock(new byte[0], 0, 0);
+                    if (BitConverter.ToString(sourceHash.Hash).Replace("-", "").ToLowerInvariant() != sha256)
+                        throw new InvalidDataException("Decrypted source image digest changed");
                 }
+                if (progress != null) progress("flushing", 0, 0);
+                Check(FlushFileBuffers(raw), "Cannot flush partition contents");
+                Check(SetFilePointerEx(raw, 0, out position, 0) && position == 0, "Cannot seek for partition verification");
+                if (progress != null) progress("verifying", 0, imageSize);
+                using (var verify = SHA256.Create()) {
+                    long done = 0;
+                    while (done < imageSize) {
+                        int count = (int)Math.Min(block, imageSize - done), read;
+                        Check(ReadFile(raw, aligned, count, out read, IntPtr.Zero), "Cannot read back the partition image");
+                        if (read != count) throw new EndOfStreamException("Short destination readback");
+                        Marshal.Copy(aligned, buffer, 0, read);
+                        verify.TransformBlock(buffer, 0, read, buffer, 0); done += read;
+                        if (progress != null && (done % (64 * 1048576) == 0 || done == imageSize)) progress("verifying", done, imageSize);
+                    }
+                    verify.TransformFinalBlock(new byte[0], 0, 0);
+                    if (BitConverter.ToString(verify.Hash).Replace("-", "").ToLowerInvariant() != sha256)
+                        throw new InvalidDataException("Mandatory destination readback failed");
+                }
+            } finally {
+                Array.Clear(buffer, 0, buffer.Length);
+                Marshal.Copy(buffer, 0, aligned, buffer.Length);
+                Marshal.FreeHGlobal(allocation);
             }
         }
         static void FirmwarePrivilege() {

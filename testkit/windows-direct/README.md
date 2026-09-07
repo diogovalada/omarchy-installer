@@ -6,11 +6,31 @@ From the repository root:
 
 ```powershell
 powershell.exe -NoProfile -File testkit/windows-direct/Test-Preflight.ps1
+powershell.exe -NoProfile -File testkit/windows-direct/Test-StoragePlan.ps1
+powershell.exe -NoProfile -File testkit/windows-direct/Test-PartitionTransfer.ps1
 ```
 
 This runs protector-policy and recovery-timing checks and compiles/runs the
 synthetic measured-boot parser cases. Host CIM entry points deliberately throw.
 The recovery worker body is never executed.
+
+`Test-StoragePlan.ps1` loads the production planning functions with synthetic
+host boundaries. It covers blank GPT disks, failed or incomplete inventories,
+physical-sector limits, protected-path discovery with `ProgramData` absent,
+and allocation identity, size and alignment checks.
+
+`Test-PartitionTransfer.ps1` compiles the production C# transfer loop and runs
+seven cases using real Windows unbuffered I/O into newly created temporary files.
+It checks fragmented input, short/long sources, wrong source hashes, corrupted
+readback, flush failures and read failures. A sentinel after the approved image
+must remain unchanged. It never opens a disk, partition or firmware handle.
+
+For repeatable UI review, run `pnpm --dir apps/desktop dev --host 127.0.0.1` and
+open `/test-fixtures/windows-direct.html?state=ready`. The available scenarios
+are `ready`, `preparation`, `running`, `complete` and `failed`. Select **Install
+without USB** where necessary. This development-only fixture renders the real
+components with synthetic state and an in-memory command bridge. It cannot
+install an OS and is not an entry point in the production Vite build.
 
 Run `test_boot_menu.py` with Python 3 on Linux. The test imports the repository's
 menu module and calls pure transformation functions; it does not install hooks

@@ -34,7 +34,6 @@
   }
 </script>
 
-<details class="resize-help"><summary>{helpTitle}</summary><p>{helpText}</p></details>
 {#if choices.some(item=>item.deletion)}
   <button class="replacement-toggle" aria-expanded={showDeletion} onclick={()=>{showDeletion=!showDeletion;if(!showDeletion && choice?.deletion) selected='';}}>{showDeletion ? 'Hide replacement options' : 'Replace existing storage…'}</button>
 {/if}
@@ -52,13 +51,13 @@
     <div class="size-controls"><input id="omarchy-size" type="text" inputmode="decimal" placeholder="Recommended" bind:value={sizeGiB} aria-describedby="size-limits" aria-invalid={!validSize}/>{#if allocation.maximumBytes!==undefined}<button onclick={()=>{sizeGiB=String(allocation!.maximumBytes!/1024**3);}}>Use maximum</button>{/if}</div>
     <p id="size-limits" class="muted">{#if allocation.minimumBytes!==undefined && allocation.maximumBytes!==undefined}{formatBytes(allocation.minimumBytes)} minimum · {formatBytes(allocation.maximumBytes)} maximum{:else}Leave blank for the native installer’s recommendation. It checks available space before preparing your plan.{/if}</p>
     {#if !validSize}<p class="error">Choose a positive amount within the available limits.</p>
-    {:else if allocation.mode==='shrink'}<p>{allocation.windowsVolume ?? 'Windows'}: {formatBytes(allocation.currentPartitionBytes ?? 0)} → {formatBytes(remainingBytes)}</p>
+    {:else if allocation.mode==='shrink'}<p>{allocation.windowsVolume ?? 'Windows'} · {formatBytes(allocation.currentPartitionBytes ?? 0)} → {formatBytes(remainingBytes)}</p>
     {:else if allocation.maximumBytes!==undefined}<p>{formatBytes(remainingBytes)} will remain unallocated.</p>{/if}
-    {#if allocation.mode==='shrink'}<p class="muted">Only this partition will be shrunk. You will review its exact before-and-after size before the disk is changed.</p>{/if}
   </div>
 {/if}
 {#if choice?.deletion}<p class="error">The entire {choice.deletion.scope==='installation' ? 'existing installation' : 'partition'} ({choice.deletion.sizeDescription ?? formatBytes(choice.deletion.sizeBytes ?? 0)}) and its data will be deleted.{#if allocation} This also applies if you allocate less space to Omarchy.{/if} Confirm its identifier to continue.</p>{/if}
 {#if choice}<slot/><button class="primary prepare" disabled={!validSize} onclick={submit}>{choice.deletion ? 'Review deletion' : 'Prepare installation'}</button>{/if}
+<details class="resize-help"><summary>{helpTitle}</summary><p>{helpText}</p></details>
 {#if deleteChoice}<DeletePartitionModal choice={deleteChoice} confirm={confirm} close={()=>{deleteChoice=null;}}/>{/if}
 
 <style>

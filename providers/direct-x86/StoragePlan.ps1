@@ -2,6 +2,14 @@
 # only in Invoke-ConfirmedShrink, called after final approval by deploy.
 function Align-Up([long]$Bytes) { return [long]([decimal]::Ceiling([decimal]$Bytes/1048576)*1048576) }
 function Align-Down([long]$Bytes) { return [long]([decimal]::Floor([decimal]$Bytes/1048576)*1048576) }
+function Get-InspectedPartitions($Disk) {
+    # Get-Partition -DiskNumber raises not-found on a valid empty GPT disk.
+    # An empty CIM result is valid only when the disk independently reports zero.
+    if ($null -eq $Disk.NumberOfPartitions -or $Disk.Number -lt 0 -or $Disk.Number -gt 4095) { Fail 'partition_inventory_unknown' 'The disk partition inventory is unavailable.' }
+    $partitions=@(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_Partition -Filter "DiskNumber = $($Disk.Number)" -ErrorAction Stop)
+    if ($partitions.Count -ne [int]$Disk.NumberOfPartitions) { Fail 'partition_inventory_changed' 'The partition inventory changed or is incomplete. Refresh disks and retry.' }
+    return $partitions
+}
 function Get-ShrinkCandidate($Partition) {
     $issues=New-Object 'Collections.Generic.List[string]'
     $sizeMin=[long]0; $reserve=[long]0; $minimum=[long]$Partition.Size; $maximum=[long]0; $volumeId=''; $letter=''; $fs=''; $free=[long]0
@@ -27,6 +35,7 @@ function Get-ShrinkCandidate($Partition) {
     return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
 }
 function Get-Probe([string[]]$ProtectedPaths=@()) {
+    Emit 'progress' 'inspecting' @{message='Checking firmware and Windows encryption…';cancelAvailable=$false}
     $firmware=[Omarchy.DirectX86.NativeDisk]::Firmware(); $secure='unknown'
     try { $secure=if (Confirm-SecureBootUEFI) { 'enabled' } else { 'disabled' } } catch { }
     $bitLocker=Get-BitLockerSnapshot
@@ -37,6 +46,7 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
     $deletionContext=Get-DeletionContext $ProtectedPaths
     $disks=@()
     foreach ($disk in @(Get-Disk | Sort-Object Number)) {
+        Emit 'progress' 'inspecting' @{message=('Checking partitions and available space on Disk '+$disk.Number+'…');cancelAvailable=$false}
         $blockers=New-Object 'Collections.Generic.List[string]'
         if ($firmware -ne 'uefi') { $blockers.Add('UEFI firmware is required.') }
         if ($secure -ne 'disabled') { $blockers.Add('Turn off Secure Boot in firmware before installing: this Omarchy release does not provide a compatible signed boot chain.') }
@@ -44,12 +54,14 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
         if ([string]$disk.PartitionStyle -ne 'GPT') { $blockers.Add('Only GPT partition tables are supported.') }
         if ($disk.IsOffline -or $disk.IsReadOnly) { $blockers.Add('The disk must already be online and writable.') }
         if ($disk.LogicalSectorSize -ne 512) { $blockers.Add('This image recipe requires 512-byte logical sectors.') }
+        $physical=[long]$disk.PhysicalSectorSize
+        if ($physical -lt 512 -or $physical -gt 65536 -or ($physical -band ($physical-1)) -ne 0) { $blockers.Add('The physical sector alignment is unsupported or unavailable.') }
         if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { $blockers.Add('Only basic local NVMe/SATA/ATA/SCSI disks are supported.') }
         if ([string]::IsNullOrWhiteSpace([string]$disk.UniqueId)) { $blockers.Add('A stable disk identity is required.') }
         try { [void](Get-AffectedBitLocker $bitLocker $disk.Number) } catch { $blockers.Add($_.Exception.Message) }
         $partitions=@(); $shrink=@(); $delete=@()
         try {
-            foreach ($p in @(Get-Partition -DiskNumber $disk.Number -ErrorAction Stop | Sort-Object Offset)) {
+            foreach ($p in @(Get-InspectedPartitions $disk | Sort-Object Offset)) {
                 $partitions += [ordered]@{partitionNumber=[int]$p.PartitionNumber;guid=[string]$p.Guid;gptType=[string]$p.GptType;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size}
                 if ([string]$p.GptType -in @('{5808c8aa-7e8f-42e0-85d2-e1e90434cfb3}','{af9b60a0-1431-4f62-bc68-3311714a69ad}')) { $blockers.Add('Dynamic Windows disks are unsupported.') }
                 if ([string]$p.GptType -ieq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}') { $shrink += Get-ShrinkCandidate $p }
@@ -67,6 +79,7 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
         if (-not $hasSpace) { $blockers.Add('No unallocated space, supported NTFS shrink or eligible partition deletion can fit Omarchy.') }
         $disks += [ordered]@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;serialNumber=[string]$disk.SerialNumber;friendlyName=[string]$disk.FriendlyName;sizeBytes=[long]$disk.Size;logicalSectorBytes=[int]$disk.LogicalSectorSize;physicalSectorBytes=[int]$disk.PhysicalSectorSize;partitionStyle=[string]$disk.PartitionStyle;isOffline=[bool]$disk.IsOffline;isReadOnly=[bool]$disk.IsReadOnly;eligible=($blockers.Count -eq 0);blockers=@($blockers.ToArray());partitions=$partitions;freeExtents=$free;shrinkCandidates=$shrink;deleteCandidates=$delete}
     }
+    Emit 'progress' 'inspecting' @{message='Checking installation tools and free memory…';cancelAvailable=$false}
     $prerequisites=@(); $runtimePackaged=$false
     try { $runtimePackaged=$null -ne (Get-RuntimeDistribution) } catch { $prerequisites += @{code='runtime_distribution';available=$false;message=$_.Exception.Message} }
     try {

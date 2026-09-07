@@ -15,7 +15,10 @@ function Get-DeletionContext([string[]]$ProtectedPaths=@()) {
         $location=$recovery.SelectSingleNode('/WindowsRE/WinreLocation')
         if ($null -eq $location) { throw 'Windows recovery location is unknown.' }
         $recoveryOffset=[long]::Parse($location.GetAttribute('offset'))
-        $paths=@($env:SystemRoot,$env:ProgramData,$PSHOME,$script:providerRoot,$script:builderRoot)+@($ProtectedPaths)
+        # The privileged helper intentionally clears inherited environment
+        # variables. Resolve this system path independently of ProgramData.
+        $programData=[Environment]::GetFolderPath('CommonApplicationData')
+        $paths=@($env:SystemRoot,$programData,$PSHOME,$script:providerRoot,$script:builderRoot)+@($ProtectedPaths)
         foreach ($page in @(Get-CimInstance Win32_PageFileUsage -ErrorAction Stop)) { $paths += [string]$page.Name }
         $crash=Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' -ErrorAction Stop
         foreach ($field in @('DumpFile','MinidumpDir','DedicatedDumpFile')) {

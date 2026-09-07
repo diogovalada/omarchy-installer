@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Windows installation UX audit</title></head><body><div id="app"></div><script type="module">
+
+// Local visual fixture. Every desktop command stays in memory; no native bridge.
+
+const GiB=1024**3;
+
+const scenario=new URLSearchParams(location.search).get('state') ?? 'ready';
+
+const choice={id:'fixture-shrink',label:'Make space on C:',detail:'Disk 0 · Internal SSD · NTFS',sizeBytes:200*GiB,eligible:true,reasons:[],allocation:{mode:'shrink',minimumBytes:40*GiB,maximumBytes:200*GiB,recommendedBytes:64*GiB,currentPartitionBytes:400*GiB,windowsVolume:'C:'},deletion:null};
+
+let snapshot={kind:'direct',status:'ready',stage:'ready',message:'Choose where to install Omarchy.',choices:[choice,{...choice,id:'fixture-free',label:'Use unallocated space',detail:'Disk 0 · Internal SSD',sizeBytes:100*GiB,allocation:{...choice.allocation,mode:'free',maximumBytes:100*GiB,currentPartitionBytes:null,windowsVolume:null}}],requirements:[],bytes:0,totalBytes:0,cancelAvailable:false,cancelRequested:false,error:null,preparation:{secureBoot:'disabled',runtimePackaged:true,runtimeReady:true},receipt:null};
+
+if(scenario==='preparation'){snapshot.preparation={secureBoot:'enabled',runtimePackaged:true,runtimeReady:false};snapshot.requirements=['Secure Boot must be disabled.','The construction runtime is not available.'];snapshot.choices=snapshot.choices.map(c=>({...c,eligible:false,reasons:['Prepare this computer before installing.']}));}
+
+if(scenario==='failed')Object.assign(snapshot,{status:'failed',error:'The selected disk changed. Refresh disks and choose the space again.',choices:[]});
+
+if(scenario==='running')Object.assign(snapshot,{status:'running',stage:'building',message:'Building Omarchy from the official image…',cancelAvailable:true});
+
+if(scenario==='complete')Object.assign(snapshot,{status:'complete',stage:'complete',message:'Installation complete.',receipt:{receiptPath:'C:/ProgramData/OmarchySetup/operations/example/receipt.json',receipt:{bitLockerRestoration:{required:true,verified:true}}}});
+
+window.isTauri=true;
+
+window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+
+ if(command==='download_status')return {status:'complete',release:{version:'4.0.2',file_name:'omarchy-4.0.2.iso',length:7*GiB,sha256:'fixture-checksum',signer_fingerprint:'fixture-key'},received_bytes:7*GiB,total_bytes:7*GiB,existing_image:true,cancel_requested:false,image_path:'C:/Downloads/Omarchy/omarchy-4.0.2.iso',error:null,destination_directory:'C:/Downloads/Omarchy',host_os:'windows',host_architecture:'x86_64'};
+
+ if(command==='setup_status'||command==='inspect_setup')return structuredClone(snapshot);
+
+ if(command==='prepare_setup')return structuredClone(snapshot);
+
+ if(command==='start_setup'){snapshot={...snapshot,status:'running',stage:'building',message:'Building Omarchy from the official image…',cancelAvailable:true};return structuredClone(snapshot);}
+
+ if(command==='cancel_setup'){snapshot={...snapshot,status:'cancelled',message:'Cancelled.',cancelAvailable:false};return structuredClone(snapshot);}
+
+ throw new Error('Visual fixture does not implement '+command);
+
+}};
+
+await import('/src/main.ts');
+
+</script></body></html>

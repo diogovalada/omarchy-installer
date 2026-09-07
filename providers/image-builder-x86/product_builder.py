@@ -228,12 +228,14 @@ def build(operation, memory, timeout, staging_key, secret_file, boot_menu):
             raise TimeoutError('Encrypted partition export exceeded its 30 minute bound')
     with product_nbd.open_image(run, disk, secret_file, export_cancel) as reader:
         for role, start, size in [('esp', MIB, 2 * GIB), ('root', 2 * GIB + MIB, ROOT_BYTES)]:
-            emit('progress', operation, 'exporting', message='Encrypting exported ' + role + ' partition')
+            label = 'boot files' if role == 'esp' else 'Omarchy system'
+            emit('progress', operation, 'exporting', completedBytes=0, totalBytes=size,
+                 message='Preparing encrypted ' + label + '…')
             last_progress = [0.0]
             def progress(done):
                 if time.monotonic() - last_progress[0] >= 30:
                     emit('progress', operation, 'exporting', completedBytes=done, totalBytes=size,
-                         message='Exporting ' + role + ' into protected staging')
+                         message='Preparing encrypted ' + label + '…')
                     last_progress[0] = time.monotonic()
             item = artifact_crypto.encrypt_image(run / (role + '.img.enc'), staging_key,
                                                 reader.chunks(start, size), size, operation, role,

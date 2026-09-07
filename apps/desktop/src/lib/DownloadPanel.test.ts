@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import App from '../App.svelte';
+import DownloadPanel from './DownloadPanel.svelte';
 import { downloads, type DownloadSnapshot } from './downloads';
 
 vi.mock('./downloads', async importOriginal => {
@@ -20,6 +21,16 @@ const setState = async (snapshot: DownloadSnapshot) => { controller.set({ snapsh
 
 describe('single-screen native download flow', () => {
   beforeEach(async () => { vi.clearAllMocks(); await setState(state('ready')); });
+  it('locks image changes during installation while allowing details to expand', async () => {
+    await setState(state('complete', {image_path:'C:\\fixture.iso'}));
+    render(DownloadPanel, {compact:true,locked:true});
+    expect(screen.queryByRole('button',{name:'Change'})).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button',{name:'Image details'}));
+    expect(screen.getByRole('button',{name:'Change'})).toBeDisabled();
+    expect(screen.getByRole('button',{name:'Check for updates',hidden:true})).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button',{name:'Hide image details'}));
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
   it('downloads explicitly and opens the native destination chooser', async () => {
     render(App);
     await fireEvent.click(screen.getByRole('button', { name: 'Change' }));
@@ -65,6 +76,8 @@ describe('single-screen native download flow', () => {
     expect(screen.queryByRole('button', { name: 'Check disks' })).not.toBeInTheDocument();
     await setState(state('complete', { image_path: 'C:\\Users\\Example\\Downloads\\omarchy-3.4.1.iso' }));
     expect(screen.getByRole('status')).toHaveTextContent('Verified');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Image details' }));
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '100');
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check disks' })).toBeEnabled();

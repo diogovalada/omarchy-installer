@@ -882,12 +882,12 @@ fn execute(
                 let output_directory = elevation::protected_directory(Some(&workspace), "image")?;
                 let preliminary = json!({"kind":"direct_x86","diskNumber":disk_number,"diskUniqueId":disk_unique_id,"target":target,"allocationBytes":allocation_bytes,"bootMenu":boot_menu,"sourceSha256":request.source.sha256,"encryption":"luks2"});
                 let space_description = match target {
-                    DirectTarget::Free { start_offset_bytes } => format!("Use existing unallocated space at offset {start_offset_bytes} bytes."),
-                    DirectTarget::Shrink { partition_number, .. } => format!("Make room for {allocation_bytes} bytes by shrinking Windows partition {partition_number} after final confirmation."),
-                    DirectTarget::Delete { partition_number, partition_size_bytes, .. } => format!("DELETE Disk {disk_number} Partition {partition_number} ({partition_size_bytes} bytes) and all its files and operating system after final confirmation. Deletion affects the entire partition, regardless of the Omarchy allocation. The installer cannot undo it."),
+                    DirectTarget::Free { .. } => "Use existing unallocated space.".to_owned(),
+                    DirectTarget::Shrink { partition_number, .. } => format!("Make space by shrinking partition {partition_number}."),
+                    DirectTarget::Delete { partition_number, partition_size_bytes, .. } => format!("Replace partition {partition_number} ({:.2} GiB). All its data will be deleted after final confirmation.", *partition_size_bytes as f64 / 1_073_741_824.0),
                 };
                 let boot_review = boot_menu.summary();
-                let preliminary_summary = format!("Prepare Omarchy for installation on disk {disk_number}?\n\nDisk identity: {}\nOmarchy allocation: {allocation_bytes} bytes\n{space_description}\n\n{boot_review}\n\nEncryption: LUKS2. You will set your personal encryption password during first boot.\n\nAn installed system will be built locally. You will review the exact partition and BitLocker plan before disk changes begin.", safe_label(Some(&Value::String(disk_unique_id.clone()))));
+                let preliminary_summary = format!("Prepare Omarchy for Disk {disk_number}?\n\nSpace for Omarchy: {:.2} GiB\n{space_description}\n\nThis prepares Omarchy locally. You’ll review the final changes before installation begins.", *allocation_bytes as f64 / 1_073_741_824.0);
                 confirm(
                     output,
                     confirmations,
@@ -950,6 +950,12 @@ fn execute(
                 let mut command =
                     provider_process::direct_command(&runtime, &manifest, "plan", &plan_request)?;
                 provider_process::privileged_environment(&mut command, &workspace)?;
+                stage(
+                    output,
+                    "planning",
+                    "Checking the final installation plan…",
+                    false,
+                );
                 let planned = provider_process::run_with_staging_key(
                     command,
                     staging_key.as_ref(),
@@ -958,23 +964,11 @@ fn execute(
                     false,
                     callback,
                 )?;
+                crate::setup_protocol::validate_direct_plan(&request, &id, &built, &planned)?;
                 let partitions = planned["partitions"]
                     .as_array()
                     .filter(|items| items.len() == 2)
                     .ok_or("The installation plan omitted its exact partitions")?;
-                let mut extents = String::new();
-                for partition in partitions {
-                    let offset = partition["offsetBytes"]
-                        .as_u64()
-                        .ok_or("The plan omitted a partition offset")?;
-                    let size = partition["sizeBytes"]
-                        .as_u64()
-                        .ok_or("The plan omitted a partition size")?;
-                    extents.push_str(&format!(
-                        "{}: {size} bytes at offset {offset}\n",
-                        safe_label(partition.get("role"))
-                    ));
-                }
                 if planned["allocationBytes"].as_u64() != Some(*allocation_bytes) {
                     return Err("The provider changed the requested allocation".into());
                 }
@@ -1007,7 +1001,7 @@ fn execute(
                         {
                             return Err("The provider changed the selected shrink operation".into());
                         }
-                        format!("Windows {} (partition {partition_number}): {before} → {after} bytes.\nSpace released: {released} bytes. Omarchy allocation: {allocation_bytes} bytes.", safe_label(shrink.get("driveLetter")))
+                        format!("Partition {partition_number} ({}): {:.2} GiB → {:.2} GiB.\nIts files are kept.", safe_label(shrink.get("driveLetter")), before as f64 / 1_073_741_824.0, after as f64 / 1_073_741_824.0)
                     }
                     DirectTarget::Delete {
                         partition_number,
@@ -1032,7 +1026,7 @@ fn execute(
                                 "The provider changed the confirmed partition deletion".into()
                             );
                         }
-                        format!("PERMANENT DATA LOSS: delete Disk {disk_number} Partition {partition_number}.\nName: {}\nFilesystem: {}\nEntire partition: {partition_size_bytes} bytes. Omarchy allocation: {allocation_bytes} bytes.\nAll files and any operating system on this partition will be lost. The installer cannot undo this deletion.", safe_label(deletion.get("label")), safe_label(deletion.get("fileSystem")))
+                        format!("Delete Disk {disk_number} Partition {partition_number}: {} · {} · {:.2} GiB.\nAll its files and any operating system will be permanently lost, including space not allocated to Omarchy.", safe_label(deletion.get("label")), safe_label(deletion.get("fileSystem")), *partition_size_bytes as f64 / 1_073_741_824.0)
                     }
                 };
                 let suspend = planned["bitLocker"]["suspendVolumes"]
@@ -1055,7 +1049,7 @@ fn execute(
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    format!("Temporarily suspend BitLocker protection on: {names}. Windows data remains encrypted. Protection is restored and verified when installation finishes, with a recovery task if the installer is interrupted.")
+                    format!("Temporarily suspend BitLocker on {names}; restore it when installation finishes. Data stays encrypted. Automatic recovery is prepared in case of interruption.")
                 };
                 if planned["bootMenu"] != json!(boot_menu)
                     || planned["bootPolicy"].as_str()
@@ -1063,7 +1057,7 @@ fn execute(
                 {
                     return Err("The startup settings changed while preparing the plan".into());
                 }
-                let summary = format!("Install Omarchy without USB on disk {disk_number}?\n\nDisk identity: {}\n\n{extents}\n{resize_review}\n\nEncryption: LUKS2. First boot replaces the initial setup key with your personal password.\n\n{bitlocker_review}\n\n{boot_review}\nThe menu becomes the first firmware boot entry; all existing entries remain available. Do not interrupt the computer during installation.", safe_label(Some(&Value::String(disk_unique_id.clone()))));
+                let summary = format!("Install Omarchy on Disk {disk_number}?\n\nSpace for Omarchy: {:.2} GiB\n{resize_review}\n\n{bitlocker_review}\n\n{boot_review}\nThis menu becomes the first boot option; existing boot entries are kept.\n\nKeep the computer powered on until installation finishes.", *allocation_bytes as f64 / 1_073_741_824.0);
                 confirm(output, confirmations, &cancel, &summary, &planned)?;
                 cancelled(&cancel)?;
                 let deploy_request = write_request(
@@ -1086,7 +1080,7 @@ fn execute(
                 );
                 // This invocation has no cooperative cancellation channel. Do not
                 // advertise the provider's pre-allocation cancel flag to the UI.
-                provider_process::run_with_staging_key(
+                let deployed = provider_process::run_with_staging_key(
                     command,
                     staging_key.as_ref(),
                     Arc::clone(&cancel),
@@ -1098,7 +1092,9 @@ fn execute(
                         }
                         provider_event(output, value);
                     },
-                )?
+                )?;
+                crate::setup_protocol::validate_direct_receipt(&planned, &deployed)?;
+                deployed
             }
         };
         // Durable helper-owned receipt. Keep work products for explicit recovery;

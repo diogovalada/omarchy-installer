@@ -38,7 +38,7 @@ impl BootMenu {
             BootDefault::Omarchy => "Omarchy",
             BootDefault::Windows => "Windows",
         };
-        format!("Show the Omarchy / Windows boot menu at normal startup. Start {name} automatically after {} seconds. Choosing Windows uses its existing firmware entry and briefly restarts the PC. A one-time choice does not change the saved default.", self.timeout_seconds)
+        format!("Boot menu: start {name} after {} seconds. Choosing Windows includes a brief extra restart.", self.timeout_seconds)
     }
 }
 
@@ -102,6 +102,317 @@ pub struct OperationRequest {
     pub protocol: u32,
     pub source: SourceImage,
     pub destination: Destination,
+}
+
+/// Bind the provider's plan to the requested disk, space and startup settings
+/// before presenting its final confirmation. Presentation never defines scope.
+pub fn validate_direct_plan(
+    request: &OperationRequest,
+    operation_id: &str,
+    built: &Value,
+    plan: &Value,
+) -> Result<(), String> {
+    let Destination::DirectX86 {
+        disk_number,
+        disk_unique_id,
+        target,
+        allocation_bytes,
+        boot_menu,
+    } = &request.destination
+    else {
+        return Err("A Windows installation plan requires a direct installation request".into());
+    };
+    let target_kind = match target {
+        DirectTarget::Free { .. } => "free",
+        DirectTarget::Shrink { .. } => "shrink",
+        DirectTarget::Delete { .. } => "delete",
+    };
+    let digest = |value: &Value| {
+        value.as_str().is_some_and(|s| {
+            s.len() == 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    };
+    let partitions = plan["partitions"]
+        .as_array()
+        .filter(|p| p.len() == 2)
+        .ok_or("The installation plan omitted its exact partitions")?;
+    let start = partitions[0]["offsetBytes"]
+        .as_u64()
+        .ok_or("The plan omitted a partition offset")?;
+    let root_start = start
+        .checked_add(2_147_483_648)
+        .ok_or("The installation plan exceeds disk bounds")?;
+    let end = start
+        .checked_add(*allocation_bytes)
+        .ok_or("The installation plan exceeds disk bounds")?;
+    let root_size = allocation_bytes
+        .checked_sub(2_147_483_648)
+        .filter(|size| *size >= 40_800_092_160)
+        .ok_or("The installation allocation is too small")?;
+    let valid = plan["schemaVersion"] == 2
+        && plan["kind"] == "omarchy-windows-alongside-plan"
+        && plan["operationId"] == operation_id
+        && plan["diskNumber"].as_u64() == Some(u64::from(*disk_number))
+        && plan["diskUniqueId"].as_str() == Some(disk_unique_id.as_str())
+        && plan["targetKind"] == target_kind
+        && plan["allocationBytes"].as_u64() == Some(*allocation_bytes)
+        && allocation_bytes % 1_048_576 == 0
+        && plan["manifestSha256"] == built["manifestSha256"]
+        && digest(&plan["manifestSha256"])
+        && digest(&plan["planSha256"])
+        && plan["bootMenu"] == serde_json::json!(boot_menu)
+        && plan["bootPolicy"] == "menu-first-preserve-existing-entries"
+        && plan["encryption"] == "luks2"
+        && plan["protectionState"] == "owner-setup-required"
+        && plan["reboot"] == false
+        && start >= 1_048_576
+        && start % 1_048_576 == 0
+        && plan["diskSizeBytes"]
+            .as_u64()
+            .is_some_and(|size| end <= size)
+        && partitions[0]["role"] == "esp"
+        && partitions[0]["sizeBytes"] == 2_147_483_648_u64
+        && partitions[0]["imageSizeBytes"] == 2_147_483_648_u64
+        && partitions[0]["file"] == "esp.img.enc"
+        && partitions[1]["role"] == "root"
+        && partitions[1]["sizeBytes"].as_u64() == Some(root_size)
+        && partitions[1]["imageSizeBytes"] == 40_800_092_160_u64
+        && partitions[1]["offsetBytes"].as_u64() == Some(root_start)
+        && partitions[1]["file"] == "root.img.enc"
+        && partitions.iter().all(|p| digest(&p["sha256"]))
+        && partitions.iter().all(|p| {
+            p["partitionGuid"]
+                .as_str()
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .is_some_and(|id| !id.is_nil())
+        })
+        && uuid::Uuid::parse_str(partitions[0]["partitionGuid"].as_str().unwrap_or_default()).ok()
+            != uuid::Uuid::parse_str(partitions[1]["partitionGuid"].as_str().unwrap_or_default())
+                .ok();
+    let free_matches = match target {
+        DirectTarget::Free { start_offset_bytes } => {
+            start == *start_offset_bytes && plan["shrink"].is_null() && plan["delete"].is_null()
+        }
+        DirectTarget::Shrink { .. } => plan["delete"].is_null(),
+        DirectTarget::Delete { .. } => plan["shrink"].is_null(),
+    };
+    if !valid || !free_matches {
+        return Err("The provider changed the reviewed Windows installation plan".into());
+    }
+    Ok(())
+}
+
+/// Never display installation success for a partial or unrelated completion.
+pub fn validate_direct_receipt(plan: &Value, receipt: &Value) -> Result<(), String> {
+    let matches = [
+        "operationId",
+        "planSha256",
+        "manifestSha256",
+        "diskUniqueId",
+        "targetKind",
+        "allocationBytes",
+        "shrink",
+        "delete",
+        "partitions",
+        "bootMenu",
+        "bootPolicy",
+        "encryption",
+        "protectionState",
+    ]
+    .iter()
+    .all(|key| receipt[*key] == plan[*key]);
+    let suspend = plan["bitLocker"]["suspendVolumes"]
+        .as_array()
+        .ok_or("The plan omitted its BitLocker changes")?;
+    let restored = &receipt["bitLockerRestoration"];
+    let boot_registered = receipt["bootEntry"].as_str().is_some_and(|entry| {
+        entry.len() == 8
+            && entry.starts_with("Boot")
+            && entry[4..].bytes().all(|b| b.is_ascii_hexdigit())
+    });
+    let required = !suspend.is_empty();
+    let restored_volumes = restored["volumes"].as_array().is_some_and(|volumes| {
+        volumes.len() == suspend.len()
+            && suspend.iter().all(|expected| {
+                let Some(id) = expected["volumeId"].as_str() else {
+                    return false;
+                };
+                volumes
+                    .iter()
+                    .filter(|actual| actual["volumeId"].as_str() == Some(id))
+                    .count()
+                    == 1
+            })
+    });
+    if !matches
+        || receipt["schemaVersion"] != 2
+        || receipt["status"] != "deployed"
+        || receipt["readbackVerified"] != true
+        || receipt["rebooted"] != false
+        || !boot_registered
+        || restored["required"] != required
+        || restored["verified"] != true
+        || !restored_volumes
+    {
+        return Err("The Windows installation receipt did not verify the approved disk, boot menu and encryption state".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod direct_receipt_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn fixture() -> (OperationRequest, Value, Value, Value) {
+        let allocation = 80 * 1_073_741_824_u64;
+        let request = OperationRequest {
+            protocol: 1,
+            source: SourceImage {
+                path: "fixture.iso".into(),
+                file_name: "fixture.iso".into(),
+                length: 1000,
+                sha256: "a".repeat(64),
+                signature: vec![],
+            },
+            destination: Destination::DirectX86 {
+                disk_number: 2,
+                disk_unique_id: "disk-two".into(),
+                target: DirectTarget::Free {
+                    start_offset_bytes: 1_048_576,
+                },
+                allocation_bytes: allocation,
+                boot_menu: BootMenu::default(),
+            },
+        };
+        let built = json!({"manifestSha256":"b".repeat(64)});
+        let plan = json!({"schemaVersion":2,"kind":"omarchy-windows-alongside-plan","operationId":"test-operation",
+            "diskNumber":2,"diskUniqueId":"disk-two","diskSizeBytes":200*1_073_741_824_u64,
+            "targetKind":"free","allocationBytes":allocation,"manifestSha256":built["manifestSha256"],"planSha256":"c".repeat(64),
+            "bootMenu":BootMenu::default(),"bootPolicy":"menu-first-preserve-existing-entries",
+            "encryption":"luks2","protectionState":"owner-setup-required","reboot":false,"shrink":null,"delete":null,
+            "bitLocker":{"suspendVolumes":[{"volumeId":"os-volume","driveLetter":"C:"}]},
+            "partitions":[
+                {"role":"esp","partitionGuid":"aaaaaaaa-0000-4000-8000-000000000001","offsetBytes":1_048_576,"sizeBytes":2_147_483_648_u64,"imageSizeBytes":2_147_483_648_u64,"file":"esp.img.enc","sha256":"d".repeat(64)},
+                {"role":"root","partitionGuid":"bbbbbbbb-0000-4000-8000-000000000002","offsetBytes":2_148_532_224_u64,"sizeBytes":allocation-2_147_483_648,"imageSizeBytes":40_800_092_160_u64,"file":"root.img.enc","sha256":"e".repeat(64)}]});
+        let mut receipt = plan.clone();
+        for (key, value) in json!({"status":"deployed","bootEntry":"Boot000A","readbackVerified":true,"rebooted":false,
+            "bitLockerRestoration":{"required":true,"verified":true,"volumes":[{"volumeId":"os-volume","protectionStatus":1}]}}).as_object().unwrap() {
+            receipt[key] = value.clone();
+        }
+        (request, built, plan, receipt)
+    }
+
+    #[test]
+    fn accepts_bound_plan_and_verified_restoration() {
+        let (request, built, mut plan, mut receipt) = fixture();
+        validate_direct_plan(&request, "test-operation", &built, &plan).unwrap();
+        validate_direct_receipt(&plan, &receipt).unwrap();
+        plan["bitLocker"]["suspendVolumes"] = json!([]);
+        receipt["bitLockerRestoration"] = json!({"required":false,"verified":true,"volumes":[]});
+        validate_direct_receipt(&plan, &receipt).unwrap();
+    }
+
+    #[test]
+    fn rejects_plan_changes_before_confirmation() {
+        let (request, built, plan, _) = fixture();
+        for (field, value) in [
+            ("diskNumber", json!(3)),
+            ("diskUniqueId", json!("other-disk")),
+            ("targetKind", json!("delete")),
+            ("allocationBytes", json!(40 * 1_073_741_824_u64)),
+            ("diskSizeBytes", json!(1024)),
+            ("operationId", json!("other-operation")),
+            ("manifestSha256", json!("f".repeat(64))),
+            ("planSha256", json!("invalid")),
+            (
+                "bootMenu",
+                json!({"defaultOs":"windows","timeoutSeconds":30}),
+            ),
+            ("delete", json!({"partitionNumber":1})),
+            ("reboot", json!(true)),
+        ] {
+            let mut changed = plan.clone();
+            changed[field] = value;
+            assert!(
+                validate_direct_plan(&request, "test-operation", &built, &changed).is_err(),
+                "{field}"
+            );
+        }
+        for (index, field, value) in [
+            (0, "offsetBytes", json!(2_097_152)),
+            (1, "offsetBytes", json!(1_048_576)),
+            (1, "imageSizeBytes", json!(4096)),
+            (0, "sha256", json!("bad")),
+            (
+                1,
+                "partitionGuid",
+                json!("AAAAAAAA-0000-4000-8000-000000000001"),
+            ),
+        ] {
+            let mut changed = plan.clone();
+            changed["partitions"][index][field] = value;
+            assert!(
+                validate_direct_plan(&request, "test-operation", &built, &changed).is_err(),
+                "partition {index} {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unrelated_or_incomplete_completion() {
+        let (_, _, plan, receipt) = fixture();
+        for field in [
+            "operationId",
+            "planSha256",
+            "manifestSha256",
+            "diskUniqueId",
+            "targetKind",
+            "allocationBytes",
+            "partitions",
+            "bootMenu",
+            "bootPolicy",
+            "encryption",
+            "protectionState",
+            "readbackVerified",
+            "bootEntry",
+            "rebooted",
+            "bitLockerRestoration",
+        ] {
+            let mut changed = receipt.clone();
+            changed.as_object_mut().unwrap().remove(field);
+            assert!(
+                validate_direct_receipt(&plan, &changed).is_err(),
+                "missing {field}"
+            );
+        }
+        for (field, value) in [
+            ("diskUniqueId", json!("other-disk")),
+            ("readbackVerified", json!(false)),
+            ("bootEntry", json!("unknown")),
+            ("rebooted", json!(true)),
+        ] {
+            let mut changed = receipt.clone();
+            changed[field] = value;
+            assert!(
+                validate_direct_receipt(&plan, &changed).is_err(),
+                "changed {field}"
+            );
+        }
+        for value in [
+            json!({"required":false,"verified":true,"volumes":[{"volumeId":"os-volume"}]}),
+            json!({"required":true,"verified":false,"volumes":[{"volumeId":"os-volume"}]}),
+            json!({"required":true,"verified":true,"volumes":[]}),
+            json!({"required":true,"verified":true,"volumes":[{"volumeId":"other-volume"}]}),
+            json!({"required":true,"verified":true,"volumes":[{"volumeId":"os-volume"},{"volumeId":"os-volume"}]}),
+        ] {
+            let mut changed = receipt.clone();
+            changed["bitLockerRestoration"] = value;
+            assert!(validate_direct_receipt(&plan, &changed).is_err());
+        }
+    }
 }
 
 // Shared binding for the in-app USB review and the helper's final write gate.

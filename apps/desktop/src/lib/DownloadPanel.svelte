@@ -3,6 +3,9 @@
   import { Check, Download, FolderOpen } from 'lucide-svelte';
   import quattro from '../assets/omarchy/quattro.webp';
   import { downloads, formatBytes, isActive } from './downloads';
+  export let compact = false;
+  export let locked = false;
+  let expanded = false;
   $: snapshot = $downloads.snapshot;
   $: release = snapshot?.release;
   $: active = isActive(snapshot?.status) || $downloads.pending;
@@ -14,26 +17,32 @@
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
 
-<section class="download-panel" aria-label="Omarchy image download">
+<section class="download-panel" class:compact={compact && complete} aria-label="Omarchy image download">
+  {#if compact && complete}
+    <div class="image-summary"><span role="status"><Check size={17}/>Omarchy {release?.version} · Verified</span><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
+  {/if}
+  {#if !compact || !complete || expanded}
   <div class="release">
     <div><h1>Omarchy {release?.version ?? 'ISO'}</h1><p>x86-64{#if release}<span> · {formatBytes(release.length)}</span>{/if}</p></div>
     <img src={quattro} alt="Omarchy Quattro wallpaper"/>
   </div>
   <div class="download-body">
-    <div class="destination"><FolderOpen size={17}/><div><span class="sr-only">Save to </span><span title={snapshot?.destination_directory}>{snapshot?.destination_directory ?? 'Downloads/Omarchy'}</span></div><button class="text-button" disabled={!downloads.native || active} onclick={() => { void downloads.chooseDirectory(); }}>Change</button></div>
+    <div class="destination"><FolderOpen size={17}/><div><span class="sr-only">Save to </span><span title={snapshot?.destination_directory}>{snapshot?.destination_directory ?? 'Downloads/Omarchy'}</span></div><button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Change</button></div>
     <div class="progress-label"><span class:verified={complete} role="status" aria-live="polite">{#if complete}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
     {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={complete}></progress>{/if}
     {#if $downloads.error || (snapshot?.error && snapshot.status !== 'cancelled')}<p class="error" role="alert">{$downloads.error ?? snapshot?.error}</p>{/if}
     <div class="controls">
       {#if transfer}<button class="secondary" disabled={$downloads.pending || snapshot?.cancel_requested} onclick={() => { void downloads.cancel(); }}>{snapshot?.status === 'downloading' ? 'Pause' : 'Cancel'}</button>
-      {:else if !complete}<button class="primary" disabled={!downloads.native || active} onclick={() => { if (release) void downloads.start(); else void downloads.resolve(); }}><Download size={16}/>{release ? (snapshot?.existing_image ? 'Verify' : snapshot?.status === 'cancelled' || snapshot?.status === 'failed' ? 'Resume' : 'Download') : (snapshot?.status === 'failed' || $downloads.error ? 'Retry' : 'Download')}</button>{/if}
-      {#if release}<details><summary>Details</summary><div class="detail-content"><p>{release.file_name}</p>{#if complete}<p>File size, SHA-256 and signature verified.</p>{:else}<p>File size, SHA-256 and signature are checked before use.</p>{/if}<p>SHA-256 <code>{release.sha256}</code></p><p>Signing key <code>{release.signer_fingerprint}</code></p>{#if snapshot?.image_path}<p>Saved to <code>{snapshot.image_path}</code></p>{/if}<button class="text-button" disabled={active} onclick={() => { void downloads.resolve(); }}>Check for updates</button></div></details>{/if}
+      {:else if !complete}<button class="primary" disabled={!downloads.native || active || locked} onclick={() => { if (release) void downloads.start(); else void downloads.resolve(); }}><Download size={16}/>{release ? (snapshot?.existing_image ? 'Verify' : snapshot?.status === 'cancelled' || snapshot?.status === 'failed' ? 'Resume' : 'Download') : (snapshot?.status === 'failed' || $downloads.error ? 'Retry' : 'Download')}</button>{/if}
+      {#if release}<details><summary>Details</summary><div class="detail-content"><p>{release.file_name}</p>{#if complete}<p>File size, SHA-256 and signature verified.</p>{:else}<p>File size, SHA-256 and signature are checked before use.</p>{/if}<p>SHA-256 <code>{release.sha256}</code></p><p>Signing key <code>{release.signer_fingerprint}</code></p>{#if snapshot?.image_path}<p>Saved to <code>{snapshot.image_path}</code></p>{/if}<button class="text-button" disabled={active || locked} onclick={() => { void downloads.resolve(); }}>Check for updates</button></div></details>{/if}
     </div>
   </div>
+  {/if}
 </section>
 
 <style>
   .download-panel{border:1px solid var(--border);border-radius:4px;background:var(--surface);overflow:hidden}
+  .image-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px}.image-summary>span{display:flex;align-items:center;gap:9px;color:var(--success);font-size:12px}.compact .release{border-top:1px solid var(--border)}
   .release{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px;border-bottom:1px solid var(--border)}
   h1{margin:0;font-size:22px;font-weight:400;line-height:1.4}.release p{margin:10px 0 0;color:var(--text-dim);font-size:11px}
   .release img{display:block;width:190px;aspect-ratio:16/9;object-fit:contain;border-radius:2px}
