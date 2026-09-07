@@ -1137,11 +1137,17 @@ fn run_elevated(
                     inner.snapshot.message = message.into();
                 } else {
                     inner.snapshot.message = match inner.snapshot.stage.as_str() {
-                        "writing" => "Writing the image…",
-                        "verifying" | "readback" => "Verifying the written image…",
-                        "ejecting" => "Finishing USB creation…",
-                        "hashing" => "Checking the image…",
-                        _ => "Preparing Omarchy…",
+                        "validating" => "Checking the image and USB drive…",
+                        "unmounting" => "Locking and unmounting USB volumes…",
+                        "writing" => "Writing the image to the USB drive…",
+                        "verifying" => "Verifying the written image…",
+                        "readback" => "Reading back the USB to verify its checksum…",
+                        "flushing" => "Flushing pending writes to the USB drive…",
+                        "ejecting" => "Ejecting the USB drive…",
+                        "hashing" => "Checking the source image checksum…",
+                        "finishing" => "Finishing the operation…",
+                        "finished" => "Completing setup…",
+                        _ => "Working…",
                     }
                     .into();
                 }

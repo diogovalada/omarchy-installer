@@ -199,8 +199,8 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
   validatePhysicalWrite(request);
   const writeSpanBytes = alignedWriteSpan(request.length, request.target.blockSize);
   const paddingBytes = writeSpanBytes - request.length;
-  const stage = (name: 'validating' | 'hashing' | 'unmounting' | 'writing' | 'verifying' | 'flushing' | 'readback' | 'ejecting', bytes?: number) =>
-    emit({ protocol: 1, type: 'event', stage: name, ...(bytes === undefined ? {} : { bytes, totalBytes: request.length }) });
+  const stage = (name: 'validating' | 'hashing' | 'unmounting' | 'writing' | 'verifying' | 'flushing' | 'readback' | 'ejecting', bytes?: number, message?: string) =>
+    emit({ protocol: 1, type: 'event', stage: name, ...(message ? { message } : {}), ...(bytes === undefined ? {} : { bytes, totalBytes: request.length }) });
   stage('validating');
   const source = await openStableSource(request);
   let device: HeldSdkDevice | undefined;
@@ -210,17 +210,21 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     await reidentify(request.target, request.sourcePath);
     const expected = request.sha256.toLowerCase();
     await verifyPhysicalSource(source, request, bytes => stage('hashing', bytes));
+    stage('validating', undefined, 'Rechecking the selected USB drive…');
     const selected = await reidentify(request.target, request.sourcePath);
     stage('unmounting');
     if (process.platform === 'win32') volumeLock = await lockWindowsVolumes(selected, criticalFailure);
     else await call(cb => mountutils.unmountDisk(selected.drive.device, cb));
     // The root source must live on another disk and remain mapped after unmount.
+    stage('validating', undefined, 'Checking the USB drive after unmounting…');
     const unmounted = await reidentify(request.target, request.sourcePath, !!volumeLock);
     if (process.platform !== 'win32' && unmounted.drive.mountpoints.length) fail('UNMOUNT_FAILED', 'Target still has mounted filesystems.');
     device = new HeldSdkDevice(unmounted.drive, request.length, markModified, request.target.logicalBlockSize);
     // Check pathname identity again while holding the exclusive descriptor. Fail closed
     // if this host cannot enumerate an exclusively opened device.
+    stage('validating', undefined, 'Opening the USB drive and checking its sector size…');
     await device.acquire(() => reidentify(request.target, request.sourcePath, !!volumeLock));
+    stage('validating', undefined, 'Confirming the source image is unchanged…');
     await assertSourceUnchanged(source, request.sourceVerification);
     device.enableWrites();
     stage('writing', 0);
@@ -248,8 +252,11 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     }
     const sha256 = hash.digest('hex');
     if (sha256 !== expected) fail('READBACK_MISMATCH', 'Full image SHA-256 readback differs from the authenticated source.');
+    stage('validating', undefined, 'Confirming the source image is unchanged…');
     await verifyPhysicalSource(source, request, bytes => stage('hashing', bytes));
+    stage('flushing');
     await device.flush();
+    stage('ejecting', undefined, 'Closing the USB drive and releasing volume locks…');
     await device.release(); device = undefined;
     await volumeLock?.release(); volumeLock = undefined;
     stage('ejecting');

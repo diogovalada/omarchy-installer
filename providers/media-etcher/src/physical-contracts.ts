@@ -91,7 +91,7 @@ export interface PhysicalWriteReceipt {
 export type PhysicalStage = 'validating' | 'hashing' | 'unmounting' | 'writing' |
   'verifying' | 'flushing' | 'readback' | 'ejecting';
 export type PhysicalEvent =
-  | { protocol: 1; type: 'event'; stage: PhysicalStage; bytes?: number; totalBytes?: number }
+  | { protocol: 1; type: 'event'; stage: PhysicalStage; message?: string; bytes?: number; totalBytes?: number }
   | { protocol: 1; type: 'result'; action: 'probe'; result: PhysicalProbe }
   | { protocol: 1; type: 'result'; action: 'list'; result: { drives: PhysicalDrive[] } }
   | { protocol: 1; type: 'result'; action: 'write'; result: PhysicalWriteReceipt }
