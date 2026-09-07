@@ -7,7 +7,7 @@
   "types": "dist/adapter.d.ts",
   "engines": { "node": ">=22 <25" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/prepare-direct-io.cjs && tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.cjs",
     "probe": "node scripts/probe.cjs",
     "qualify:runtime": "npm run build && node scripts/stage-runtime.cjs",

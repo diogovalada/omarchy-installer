@@ -12,6 +12,7 @@ const output = path.resolve(args[1]);
 if (fs.existsSync(output)) throw new Error('Output must be a new directory; staging never replaces or deletes existing files.');
 if (![22, 24].includes(Number(process.versions.node.split('.')[0]))) throw new Error('Stage with Node 22 or 24.');
 if (!fs.existsSync(path.join(root, 'dist', 'physical-cli.js'))) throw new Error('Run npm run build first.');
+if (process.platform === 'win32' && require('@ronomon/direct-io').omarchyGeometryVersion !== 1) throw new Error('Build the Windows native geometry extension before staging.');
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const sdk = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'etcher-sdk', 'package.json'), 'utf8'));
 if (sdk.version !== '10.2.14') throw new Error('Installed SDK version differs from pinned version.');
@@ -39,7 +40,7 @@ fs.cpSync(path.join(root, 'node_modules'), path.join(output, 'node_modules'), {
   recursive: true, dereference: true,
   filter(filename) {
     const local = path.relative(root, filename).split(path.sep).join('/');
-    if (developmentPackages.has(local) || local.split('/').includes('.bin') || local.endsWith('/.package-lock.json')) return false;
+    if (developmentPackages.has(local) || local.split('/').includes('.bin') || local.endsWith('/.package-lock.json') || path.basename(filename).startsWith('.omarchy-')) return false;
     if (buildOnly.test(filename) && fs.statSync(filename).isFile()) {
       omitted.buildFiles++; omitted.buildBytes += fs.statSync(filename).size;
       return false;

@@ -1,7 +1,13 @@
 # Bounded physical USB provider
 
 Implementation provenance: **gpt-6-astra**, 2026-09-06. Engine:
-**etcher-sdk 10.2.14**, installed from the unchanged pinned npm lockfile.
+**etcher-sdk 10.2.14**, installed from the pinned npm lockfile. Windows builds
+apply a source-hash-guarded compatibility extension to **@ronomon/direct-io
+3.0.1** and compile it locally; its upstream MIT license remains in the runtime.
+`scripts/prepare-direct-io.cjs` contains the pinned upstream SHA-256 and
+`scripts/native/windows-geometry.h` contains the replacement Windows query.
+`npm run build` and desktop staging both prepare this extension. Staging checks
+its native version marker and authenticates the modified source and binary.
 The original file-only API (`dist/adapter.js`) remains unchanged. The new API
 is `dist/physical-adapter.js`; the native application invokes
 `dist/physical-cli.js` using its packaged Node executable.
@@ -88,6 +94,16 @@ same child-exit requirement for callers that use its API.
   opened handle. Failure to re-enumerate a locked device aborts without relaxing
   identity policy. Only mounted-path stat failures caused by held Windows volume
   locks are exempted at the latter checkpoints.
+- Some USB drivers reject `StorageAccessAlignmentProperty` with Win32 error 1
+  or 50. Only these unsupported-query responses allow a Windows fallback.
+  `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` must still return the capacity and logical
+  sector size from the retained descriptor. The physical sector size then comes
+  from fresh, reidentified `Get-Disk` data, whose capacity and logical sectors
+  must agree with that handle. It is never assumed to be 512. All resolved
+  geometry must match the selected identity before writes are enabled. Other
+  query errors, incomplete descriptors, conflicting geometry, and nonzero
+  sector-alignment offsets abort the write. Native query errors include the
+  Win32 error number. See [the geometry evidence](../../docs/evidence/windows-usb-geometry-2026-09-07.md).
 - Physical sectors must be powers of two from 512 through 4096 bytes; logical
   sectors must divide physical sectors. The physical write span rounds the image
   length up to the next physical sector and must fit target capacity. Only the

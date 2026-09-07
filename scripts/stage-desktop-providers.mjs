@@ -20,6 +20,7 @@ function files(directory) {
 const media = join(root, 'providers/media-etcher');
 const compiler = join(media, 'node_modules/typescript/bin/tsc');
 if (!existsSync(compiler)) throw new Error('Install providers/media-etcher dependencies with npm ci first.');
+execFileSync(process.execPath, [join(media, 'scripts/prepare-direct-io.cjs')], { cwd: media, stdio: 'inherit' });
 execFileSync(process.execPath, [compiler, '-p', join(media, 'tsconfig.json')], { cwd: media, stdio: 'inherit' });
 const sourceFingerprint = digest(Buffer.concat([
   Buffer.from(`${process.version}/${process.platform}/${process.arch}`),

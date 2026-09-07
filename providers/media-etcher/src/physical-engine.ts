@@ -11,12 +11,14 @@ import { PhysicalWriteError, type DriveIdentity, type PhysicalEvent, type Physic
 import { fail, fingerprint, inventory, powershellPath, reidentify, sameIdentity, validSector, type InventoryEntry } from './physical-discovery.js';
 import { validatePathSyntax } from './safety.js';
 import { physicalOpenPath } from './physical-path.js';
+import { resolveHandleGeometry, type HandleGeometry } from './physical-geometry.js';
 import { openStableSource, assertSourceUnchanged, verifyPhysicalSource } from './physical-source.js';
 
 interface DirectIo {
+  omarchyGeometryVersion?: number;
   O_DIRECT: number; O_EXLOCK: number; O_SYNC: number;
   getAlignedBuffer(length: number, alignment: number): Buffer;
-  getBlockDevice(fd: number, callback: (error: Error | null, value: { size: number; logicalSectorSize: number; physicalSectorSize: number; serialNumber?: string }) => void): void;
+  getBlockDevice(fd: number, callback: (error: Error | null, value: HandleGeometry) => void): void;
   setF_NOCACHE(fd: number, value: number, callback: (error: Error | null) => void): void;
 }
 const io: DirectIo = require('@ronomon/direct-io');
@@ -71,7 +73,8 @@ class HeldSdkDevice extends BlockDevice {
   }
   protected override async _open(): Promise<void> { if (!this.held) fail('DEVICE_NOT_LOCKED', 'Device handle must be acquired explicitly.'); }
   protected override async _close(): Promise<void> { /* Retained until all verification finishes. */ }
-  async acquire(): Promise<void> {
+  async acquire(reidentifyHeld: () => Promise<InventoryEntry>): Promise<void> {
+    if (process.platform === 'win32' && io.omarchyGeometryVersion !== 1) fail('PLATFORM_PREREQUISITE', 'The Windows native geometry extension is missing. Rebuild the provider.');
     if ((process.platform !== 'darwin' && !io.O_DIRECT) || !io.O_SYNC || (process.platform !== 'linux' && !io.O_EXLOCK)) fail('LOCKING_UNAVAILABLE', 'Native direct I/O/exclusive flags are missing.');
     const flags = constants.O_RDWR | (process.platform === 'darwin' ? 0 : io.O_DIRECT) | io.O_SYNC |
       (process.platform === 'linux' ? constants.O_EXCL : io.O_EXLOCK);
@@ -79,9 +82,13 @@ class HeldSdkDevice extends BlockDevice {
     this.held = true;
     try {
       if (process.platform === 'darwin') await call(cb => io.setF_NOCACHE(this.fileHandle.fd, 1, cb));
-      const geometry = await new Promise<{ size: number; logicalSectorSize: number; physicalSectorSize: number }>((resolve, reject) => {
+      const nativeGeometry = await new Promise<HandleGeometry>((resolve, reject) => {
         io.getBlockDevice(this.fileHandle.fd, (e, v) => e ? reject(e) : resolve(v));
       });
+      // Reidentify while retaining this descriptor before resolving an optional
+      // missing physical-sector query from Windows' current disk information.
+      const heldIdentity = await reidentifyHeld();
+      const geometry = resolveHandleGeometry(nativeGeometry, process.platform === 'win32' ? heldIdentity.windows : undefined);
       if (geometry.size !== this.size || geometry.physicalSectorSize !== this.alignment || geometry.logicalSectorSize !== this.logicalSectorSize || !validSector(geometry.logicalSectorSize) ||
           geometry.physicalSectorSize % geometry.logicalSectorSize !== 0 || this.writeSpanBytes % geometry.physicalSectorSize !== 0 || this.writeSpanBytes > geometry.size) {
         fail('HANDLE_GEOMETRY_CHANGED', 'Opened device geometry differs from the selected target.');
@@ -211,10 +218,9 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     const unmounted = await reidentify(request.target, request.sourcePath, !!volumeLock);
     if (process.platform !== 'win32' && unmounted.drive.mountpoints.length) fail('UNMOUNT_FAILED', 'Target still has mounted filesystems.');
     device = new HeldSdkDevice(unmounted.drive, request.length, markModified, request.target.logicalBlockSize);
-    await device.acquire();
     // Check pathname identity again while holding the exclusive descriptor. Fail closed
     // if this host cannot enumerate an exclusively opened device.
-    await reidentify(request.target, request.sourcePath, !!volumeLock);
+    await device.acquire(() => reidentify(request.target, request.sourcePath, !!volumeLock));
     await assertSourceUnchanged(source, request.sourceVerification);
     device.enableWrites();
     stage('writing', 0);

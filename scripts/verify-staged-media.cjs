@@ -8,6 +8,7 @@ const { createHash } = require('node:crypto');
 const runtime = path.resolve(process.argv[2]);
 assert.equal(path.dirname(process.execPath).toLowerCase(), runtime.toLowerCase());
 require(path.join(runtime, 'dist/physical-engine.js'));
+if (process.platform === 'win32') assert.equal(require(path.join(runtime, 'node_modules/@ronomon/direct-io')).omarchyGeometryVersion, 1);
 const { physicalOpenPath } = require(path.join(runtime, 'dist/physical-path.js'));
 const physicalPath = physicalOpenPath('\\\\.\\PhysicalDrive1', 'win32');
 assert.equal(physicalPath, '\\\\?\\GLOBALROOT\\GLOBAL??\\PhysicalDrive1');
