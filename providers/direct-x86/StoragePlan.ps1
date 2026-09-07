@@ -35,7 +35,7 @@ function Get-ShrinkCandidate($Partition) {
     return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
 }
 function Get-Probe([string[]]$ProtectedPaths=@()) {
-    Emit 'progress' 'inspecting' @{message='Checking firmware and Windows encryption…';cancelAvailable=$false}
+    Emit 'progress' 'inspecting' @{message='Checking firmware and Windows encryption...';cancelAvailable=$false}
     $firmware=[Omarchy.DirectX86.NativeDisk]::Firmware(); $secure='unknown'
     try { $secure=if (Confirm-SecureBootUEFI) { 'enabled' } else { 'disabled' } } catch { }
     $bitLocker=Get-BitLockerSnapshot
@@ -46,7 +46,7 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
     $deletionContext=Get-DeletionContext $ProtectedPaths
     $disks=@()
     foreach ($disk in @(Get-Disk | Sort-Object Number)) {
-        Emit 'progress' 'inspecting' @{message=('Checking partitions and available space on Disk '+$disk.Number+'…');cancelAvailable=$false}
+        Emit 'progress' 'inspecting' @{message=('Checking partitions and available space on Disk '+$disk.Number+'...');cancelAvailable=$false}
         $blockers=New-Object 'Collections.Generic.List[string]'
         if ($firmware -ne 'uefi') { $blockers.Add('UEFI firmware is required.') }
         if ($secure -ne 'disabled') { $blockers.Add('Turn off Secure Boot in firmware before installing: this Omarchy release does not provide a compatible signed boot chain.') }
@@ -79,7 +79,7 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
         if (-not $hasSpace) { $blockers.Add('No unallocated space, supported NTFS shrink or eligible partition deletion can fit Omarchy.') }
         $disks += [ordered]@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;serialNumber=[string]$disk.SerialNumber;friendlyName=[string]$disk.FriendlyName;sizeBytes=[long]$disk.Size;logicalSectorBytes=[int]$disk.LogicalSectorSize;physicalSectorBytes=[int]$disk.PhysicalSectorSize;partitionStyle=[string]$disk.PartitionStyle;isOffline=[bool]$disk.IsOffline;isReadOnly=[bool]$disk.IsReadOnly;eligible=($blockers.Count -eq 0);blockers=@($blockers.ToArray());partitions=$partitions;freeExtents=$free;shrinkCandidates=$shrink;deleteCandidates=$delete}
     }
-    Emit 'progress' 'inspecting' @{message='Checking installation tools and free memory…';cancelAvailable=$false}
+    Emit 'progress' 'inspecting' @{message='Checking installation tools and free memory...';cancelAvailable=$false}
     $prerequisites=@(); $runtimePackaged=$false
     try { $runtimePackaged=$null -ne (Get-RuntimeDistribution) } catch { $prerequisites += @{code='runtime_distribution';available=$false;message=$_.Exception.Message} }
     try {

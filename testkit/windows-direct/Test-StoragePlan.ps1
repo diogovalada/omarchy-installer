@@ -7,6 +7,15 @@ function Fail($Code,$Message) { throw ($Code+': '+$Message) }
 function Emit($Kind,$Stage,$Fields) { }
 function Assert($Condition,$Message) { if (-not $Condition) { throw $Message } }
 function Reject($Action,$Message) { $rejected=$false; try { & $Action } catch { $rejected=$true }; Assert $rejected $Message }
+foreach ($name in @('StoragePlan.ps1','Deployment.ps1')) {
+ $path=Join-Path $root ('providers/direct-x86/'+$name)
+ $tokens=$null; $parseErrors=$null
+ $parsed=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$parseErrors)
+ Assert ($parseErrors.Count -eq 0) ('Provider parse failed: '+$name)
+ # Windows PowerShell 5.1 treats UTF-8 without a BOM as the ANSI code page.
+ # Ensure progress text is interpreted exactly as it is stored in the repo.
+ Assert ($parsed.Extent.Text -ceq [IO.File]::ReadAllText($path,[Text.Encoding]::UTF8)) ('Provider text encoding differs in Windows PowerShell: '+$name)
+}
 Add-Type @'
 namespace Omarchy.DirectX86 {
  public static class NativeDisk {

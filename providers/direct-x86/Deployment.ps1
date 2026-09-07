@@ -69,23 +69,23 @@ function Invoke-DirectDeploy($Request) {
             $targetSize=if ($role -eq 'esp') { $script:espBytes } else { [long]$plan.allocationBytes-$script:espBytes }
             if ($p.role -ne $role -or $p.partitionGuid -ne $o.partitionGuid -or $p.file -ne $o.file -or $p.sizeBytes -ne $targetSize -or $p.imageSizeBytes -ne $o.sizeBytes -or $p.sha256 -ne $o.sha256 -or ($i -eq 1 -and $p.offsetBytes -ne $plan.partitions[0].offsetBytes+$script:espBytes)) { Fail 'plan_mismatch' 'Plan extent or payload differs from the local encrypted image.' }
             $label=if ($role -eq 'esp') { 'boot files' } else { 'Omarchy system' }
-            Emit 'progress' 'authenticating' @{message=('Checking the prepared '+$label+'…');role=$role}
+            Emit 'progress' 'authenticating' @{message=('Checking the prepared '+$label+'...');role=$role}
             Assert-ArtifactHash $o $directory
         }
         if (Test-Path -LiteralPath (Join-Path $directory 'cancel.requested')) { Fail 'build_cancelled' 'Installation was cancelled before Windows changes.' }
         Assert-BitLockerUnchanged $plan.bitLocker.volumes @(Get-AffectedBitLocker (Get-BitLockerSnapshot) $disk.diskNumber)
         Assert-PhysicalDiskIdentity $plan
         $script:cancelAvailable=$false
-        Emit 'progress' 'preparing-recovery' @{message='Preparing Windows recovery…'}
+        Emit 'progress' 'preparing-recovery' @{message='Preparing Windows recovery...'}
         $recoveryContext=New-BitLockerRecovery $plan
         Write-Json (Join-Path $directory 'deployment-started.json') @{operationId=$script:operationId;planSha256=$Request.planSha256;startedAt=[DateTime]::UtcNow.ToString('o');status='windows-changes-starting';targetKind=$plan.targetKind;recoveryState=$(if ($null -ne $recoveryContext) { $recoveryContext.statePath } else { $null })}
         $script:mutationStarted=$true
-        if ($null -ne $recoveryContext) { Emit 'progress' 'suspending-bitlocker' @{message='Temporarily suspending BitLocker protection…'} }
+        if ($null -ne $recoveryContext) { Emit 'progress' 'suspending-bitlocker' @{message='Temporarily suspending BitLocker protection...'} }
         Suspend-PlannedBitLocker $recoveryContext
         Assert-PhysicalDiskIdentity $plan
         $layoutHash=$plan.layoutSha256
         if ($plan.targetKind -eq 'shrink') {
-            Emit 'progress' 'shrinking-ntfs' @{message='Making space on the selected Windows partition…';beforeSizeBytes=$plan.shrink.beforeSizeBytes;afterSizeBytes=$plan.shrink.afterSizeBytes}
+            Emit 'progress' 'shrinking-ntfs' @{message='Making space on the selected Windows partition...';beforeSizeBytes=$plan.shrink.beforeSizeBytes;afterSizeBytes=$plan.shrink.afterSizeBytes}
             $layoutHash=Invoke-ConfirmedShrink $plan $directory
             foreach ($p in @(Get-InspectedPartitions (Get-Disk -Number $disk.diskNumber -ErrorAction Stop))) {
                 if ([long]$plan.partitions[0].offsetBytes -lt [long]$p.Offset+[long]$p.Size -and [long]$p.Offset -lt [long]$plan.partitions[0].offsetBytes+[long]$plan.allocationBytes) { Fail 'shrink_extent_occupied' 'The expected freed allocation is still occupied after the Windows resize.' }
@@ -98,17 +98,17 @@ function Invoke-DirectDeploy($Request) {
                 if ([long]$plan.partitions[0].offsetBytes -lt [long]$p.Offset+[long]$p.Size -and [long]$p.Offset -lt [long]$plan.partitions[0].offsetBytes+[long]$plan.allocationBytes) { Fail 'delete_extent_occupied' 'The expected freed allocation is still occupied after deletion.' }
             }
         }
-        Emit 'progress' 'allocating' @{message='Creating the Omarchy partitions…'}
+        Emit 'progress' 'allocating' @{message='Creating the Omarchy partitions...'}
         $numbers=[Omarchy.DirectX86.NativeDisk]::Allocate($disk.diskNumber,$layoutHash,$plan.partitions[0].offsetBytes,$plan.partitions[1].sizeBytes,[guid]$plan.partitions[0].partitionGuid,[guid]$plan.partitions[1].partitionGuid)
         Write-Json (Join-Path $directory 'partitions-created.json') @{operationId=$script:operationId;partitionNumbers=$numbers;partitions=$plan.partitions}
         for ($i=0; $i -lt 2; $i++) {
             $p=$plan.partitions[$i]; $o=@($manifest.outputs | Where-Object { $_.role -eq $p.role })[0]; $script:writingRole=$p.role
             $label=if ($p.role -eq 'esp') { 'boot files' } else { 'Omarchy system' }
-            Emit 'progress' 'authenticating' @{message=('Opening the verified '+$label+'…');role=$p.role}
+            Emit 'progress' 'authenticating' @{message=('Opening the verified '+$label+'...');role=$p.role}
             $callback=[Action[string,long,long]] {
                 param($phase,$done,$total)
                 $label=if ($script:writingRole -eq 'esp') { 'boot files' } else { 'Omarchy system' }
-                $message=switch ($phase) { 'writing' { 'Writing the '+$label+'…' } 'verifying' { 'Verifying the '+$label+'…' } 'flushing' { 'Flushing pending writes…' } default { 'Installing Omarchy…' } }
+                $message=switch ($phase) { 'writing' { 'Writing the '+$label+'...' } 'verifying' { 'Verifying the '+$label+'...' } 'flushing' { 'Flushing pending writes...' } default { 'Installing Omarchy...' } }
                 Emit 'progress' $phase @{message=$message;role=$script:writingRole;completedBytes=$done;totalBytes=$total}
             }
             $plaintext=Open-Artifact $o $directory
@@ -126,14 +126,14 @@ function Invoke-DirectDeploy($Request) {
             }
             Assert-WindowsBootUnchanged $plan.windowsBoot
             Write-Json (Join-Path $directory 'boot-order-before.json') @{bootOrderBase64=$plan.windowsBoot.bootOrderBase64;bootOrderSha256=$plan.bootOrderSha256;windowsBoot=$plan.windowsBoot;bootMenu=$plan.bootMenu}
-            Emit 'progress' 'registering-boot' @{message='Setting up the Omarchy and Windows boot menu…'}
+            Emit 'progress' 'registering-boot' @{message='Setting up the Omarchy and Windows boot menu...'}
             $bootEntry=[Omarchy.DirectX86.NativeDisk]::RegisterBoot($numbers[0],$plan.partitions[0].offsetBytes,$script:espBytes,[guid]$plan.partitions[0].partitionGuid,$plan.bootOrderSha256,$plan.windowsBoot.entrySha256)
         } finally { if ($windowAcquired) { $recoveryContext.mutex.ReleaseMutex() } }
         $receipt=[ordered]@{schemaVersion=2;operationId=$script:operationId;status='deployed';planSha256=$Request.planSha256;manifestSha256=$Request.manifestSha256;diskUniqueId=$disk.diskUniqueId;targetKind=$plan.targetKind;allocationBytes=$plan.allocationBytes;shrink=$plan.shrink;partitions=$plan.partitions;bootEntry=$bootEntry;bootPolicy='menu-first-preserve-existing-entries';readbackVerified=$true;encryption='luks2';protectionState='owner-setup-required';firstBoot='Choose Omarchy in the firmware boot menu. First boot grows LUKS/Btrfs, configures hardware and completes personal encryption and owner setup.';physicalBootVerified=$false;rebooted=$false}
     } catch { $failure=$_ }
     finally {
         try {
-            if ($null -ne $recoveryContext) { Emit 'progress' 'restoring-bitlocker' @{message='Restoring and checking BitLocker protection…'} }
+            if ($null -ne $recoveryContext) { Emit 'progress' 'restoring-bitlocker' @{message='Restoring and checking BitLocker protection...'} }
             $restoration=Restore-PlannedBitLocker $recoveryContext
         } catch { $restoreFailure=$_ }
         if ($null -ne $recoveryContext) { $recoveryContext.mutex.Dispose() }
