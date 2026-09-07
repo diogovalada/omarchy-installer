@@ -164,7 +164,7 @@ fn confirm(
 struct PreparedSource {
     path: PathBuf,
     #[cfg(windows)]
-    _guard: crate::iso_source::HeldIso,
+    guard: crate::iso_source::HeldIso,
 }
 
 fn prepare_source(
@@ -270,7 +270,7 @@ fn prepare_source(
     stage(
         output,
         "authenticating",
-        "Checking the official image signature…",
+        "Verifying the official image…",
         true,
     );
     omarchy_release_client::authenticate_iso_offline(
@@ -281,7 +281,7 @@ fn prepare_source(
         cancel,
         |progress| {
             emit(output, json!({"protocol":1,"type":"event","stage":"authenticating",
-                "message":"Checking the official image signature…",
+                "message":"Verifying the official image…",
                 "bytes":progress.received_bytes,"totalBytes":progress.total_bytes,"cancelAvailable":true}));
         },
     )
@@ -298,7 +298,7 @@ fn prepare_source(
     Ok(PreparedSource {
         path,
         #[cfg(windows)]
-        _guard: guard,
+        guard,
     })
 }
 
@@ -849,11 +849,18 @@ fn execute(
                 stage(output, "writing", "Creating the bootable USB…", true);
                 let mut command = provider_process::media_command(&runtime, &manifest)?;
                 provider_process::privileged_environment(&mut command, &workspace)?;
+                let media_request = json!({"protocol":1,"action":"write","sourcePath":source.path,"length":request.source.length,"sha256":request.source.sha256,"target":identity});
+                #[cfg(windows)]
+                let media_request = {
+                    let mut value = media_request;
+                    // prepare_source authenticated both signature and SHA-256
+                    // while holding this guard. It stays alive until run exits.
+                    value["sourceVerification"] = source.guard.reader_binding()?;
+                    value
+                };
                 provider_process::run(
                     command,
-                    Some(
-                        json!({"protocol":1,"action":"write","sourcePath":source.path,"length":request.source.length,"sha256":request.source.sha256,"target":identity}),
-                    ),
+                    Some(media_request),
                     Arc::clone(&cancel),
                     None,
                     true,

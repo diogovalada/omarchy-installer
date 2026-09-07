@@ -56,10 +56,20 @@ same child-exit requirement for callers that use its API.
   Windows it retains the original ISO with read-only sharing and holds every
   ancestor against renaming until the provider process finishes. Other hosts
   retain the administrator-owned immutable source directory. This provider
-  rejects linked source components, opens once, requires exact length, hashes the
-  opened descriptor before writing, uses that descriptor in the SDK, and checks
-  source metadata and SHA-256 again before success. Its SHA-256 argument alone
-  does not establish upstream authenticity.
+  rejects linked source components, opens once, requires exact length, and uses
+  that same descriptor in the SDK. The Windows helper authenticates the signature
+  and SHA-256 in one pass, then supplies a `sourceVerification` binding containing
+  its PID, the volume serial and the exact 64-bit file index. The writer matches
+  that binding against its opened descriptor using bigint metadata, confirms the
+  retaining parent is alive, and checks source identity and metadata again before
+  writing and before success. The helper retains its deny-write/delete guard
+  until the child exits, including cancellation and failure. This removes two
+  redundant ISO scans without changing USB verification.
+  Callers without this Windows binding still hash the source before and after
+  writing. A supplied but invalid binding is rejected. The binding is an internal
+  handoff for a live operation, never a persisted verification cache or a field
+  accepted from the webview. Neither it nor the SHA-256 argument independently
+  establishes upstream authenticity; the privileged caller must authenticate first.
 - Fresh drivelist discovery is cross-checked with OS hardware identity. Windows
   uses fixed read-only Get-Disk inventory (serial, UniqueId, device interface,
   boot/system state and geometry); Linux uses sysfs device ancestry and hardware
@@ -73,7 +83,7 @@ same child-exit requirement for callers that use its API.
   An unresolvable source filesystem aborts the operation. Linux storage holders
   are rejected. Source images on unenumerated network/LVM/other ambiguous storage
   may therefore require relocation to a mapped local filesystem.
-- Reidentification occurs before hashing, before unmounting, after unmounting,
+- Reidentification occurs before source verification, before unmounting, after unmounting,
   and after acquiring the exclusive raw descriptor. Geometry is queried from the
   opened handle. Failure to re-enumerate a locked device aborts without relaxing
   identity policy. Only mounted-path stat failures caused by held Windows volume

@@ -53,7 +53,7 @@ async function execute(value: unknown): Promise<void> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) fail('INVALID_PROTOCOL', 'Expected a JSON command object.');
     const command = value as PhysicalCommand;
     if (command.protocol !== 1 || !['probe', 'list', 'write'].includes(command.action)) fail('INVALID_PROTOCOL', 'Only protocol 1 probe, list and write actions are accepted.');
-    const fields = command.action === 'write' ? ['protocol', 'action', 'sourcePath', 'length', 'sha256', 'target'] :
+    const fields = command.action === 'write' ? ['protocol', 'action', 'sourcePath', 'length', 'sha256', 'target', 'sourceVerification'] :
       command.action === 'list' ? ['protocol', 'action', 'sourcePath'] : ['protocol', 'action'];
     if (!keysOnly(command as unknown as Record<string, unknown>, fields)) fail('INVALID_PROTOCOL', 'Unknown command fields are not accepted.');
     if (command.action === 'write') {

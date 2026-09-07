@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { constants, type Stats } from 'node:fs';
-import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, type FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import { File } from 'etcher-sdk/build/source-destination/file';
 import { BlockDevice } from 'etcher-sdk/build/source-destination/block-device';
@@ -11,6 +11,7 @@ import { PhysicalWriteError, type DriveIdentity, type PhysicalEvent, type Physic
 import { fail, fingerprint, inventory, powershellPath, reidentify, sameIdentity, validSector, type InventoryEntry } from './physical-discovery.js';
 import { validatePathSyntax } from './safety.js';
 import { physicalOpenPath } from './physical-path.js';
+import { openStableSource, assertSourceUnchanged, verifyPhysicalSource } from './physical-source.js';
 
 interface DirectIo {
   O_DIRECT: number; O_EXLOCK: number; O_SYNC: number;
@@ -44,38 +45,6 @@ export function validatePhysicalWrite(value: PhysicalWriteRequest): void {
     fail('SECTOR_ALIGNMENT', 'Target physical/logical sector sizes or capacity are inconsistent.');
   }
   if (alignedWriteSpan(value.length, t.blockSize) > t.size) fail('CAPACITY', 'The image and its bounded final-sector zero padding exceed target capacity.');
-}
-
-async function openStableSource(request: PhysicalWriteRequest): Promise<{ handle: FileHandle; stat: Stats }> {
-  const resolved = path.resolve(request.sourcePath);
-  let component = path.parse(resolved).root;
-  for (const part of resolved.slice(component.length).split(path.sep).filter(Boolean)) {
-    component = path.join(component, part);
-    if ((await lstat(component)).isSymbolicLink()) fail('SYMLINK_REJECTED', 'Source symlinks and directory junctions are not accepted.');
-  }
-  if (await realpath(resolved) !== resolved && process.platform !== 'win32') fail('UNSAFE_SOURCE', 'Source path must be canonical.');
-  const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    const before = await handle.stat();
-    if (!before.isFile() || before.size !== request.length) fail('SOURCE_LENGTH', 'Source must be a regular file of the authenticated image length.');
-    return { handle, stat: before };
-  } catch (error) { await handle.close(); throw error; }
-}
-
-function stable(before: Stats, after: Stats): boolean {
-  return before.dev === after.dev && before.ino === after.ino && before.size === after.size &&
-    before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
-}
-async function hashSource(handle: FileHandle, before: Stats, emit: (bytes: number) => void): Promise<string> {
-  const hash = createHash('sha256');
-  const buffer = Buffer.alloc(1024 * 1024);
-  for (let position = 0; position < before.size;) {
-    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, before.size - position), position);
-    if (!bytesRead) fail('SHORT_SOURCE', 'The opened source ended early.');
-    hash.update(buffer.subarray(0, bytesRead)); position += bytesRead; emit(position);
-  }
-  if (!stable(before, await handle.stat())) fail('SOURCE_CHANGED', 'Opened source metadata changed during hashing.');
-  return hash.digest('hex');
 }
 
 class StableSdkSource extends File {
@@ -230,11 +199,10 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
   let device: HeldSdkDevice | undefined;
   let volumeLock: VolumeLock | undefined;
   try {
-    // Always reidentify before spending time hashing and once more before unmount/open.
+    // Reidentify before source verification and once more before unmount/open.
     await reidentify(request.target, request.sourcePath);
-    stage('hashing', 0);
     const expected = request.sha256.toLowerCase();
-    if (await hashSource(source.handle, source.stat, bytes => stage('hashing', bytes)) !== expected) fail('SOURCE_DIGEST', 'Source does not match the authenticated digest.');
+    await verifyPhysicalSource(source, request, bytes => stage('hashing', bytes));
     const selected = await reidentify(request.target, request.sourcePath);
     stage('unmounting');
     if (process.platform === 'win32') volumeLock = await lockWindowsVolumes(selected, criticalFailure);
@@ -247,7 +215,7 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     // Check pathname identity again while holding the exclusive descriptor. Fail closed
     // if this host cannot enumerate an exclusively opened device.
     await reidentify(request.target, request.sourcePath, !!volumeLock);
-    if (!stable(source.stat, await source.handle.stat())) fail('SOURCE_CHANGED', 'Opened source changed before writing.');
+    await assertSourceUnchanged(source, request.sourceVerification);
     device.enableWrites();
     stage('writing', 0);
     const result = await pipeSourceToDestinations({ source: new StableSdkSource(request.sourcePath, source.handle, request.length),
@@ -274,8 +242,7 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     }
     const sha256 = hash.digest('hex');
     if (sha256 !== expected) fail('READBACK_MISMATCH', 'Full image SHA-256 readback differs from the authenticated source.');
-    stage('hashing', 0);
-    if (await hashSource(source.handle, source.stat, bytes => stage('hashing', bytes)) !== expected) fail('SOURCE_CHANGED', 'Source changed during writing.');
+    await verifyPhysicalSource(source, request, bytes => stage('hashing', bytes));
     await device.flush();
     await device.release(); device = undefined;
     await volumeLock?.release(); volumeLock = undefined;

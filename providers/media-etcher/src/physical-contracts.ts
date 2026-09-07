@@ -26,8 +26,20 @@ export interface PhysicalWriteRequest {
   sourcePath: string;
   length: number;
   sha256: string;
+  /** Internal Windows handoff from the parent that authenticated and still locks
+   * this ISO. Never accepted as an upstream signature or persisted for reuse. */
+  sourceVerification?: ParentHeldIso;
   /** Exact identity returned by list. A pathname alone is never accepted. */
   target: DriveIdentity;
+}
+
+export interface ParentHeldIso {
+  kind: 'windows-held-iso-v1';
+  parentPid: number;
+  /** Win32 volume serial (low 32 bits of Node's bigint st_dev). */
+  volumeSerial: string;
+  /** Full 64-bit Windows file index, encoded without JS number rounding. */
+  fileIndex: string;
 }
 
 export type PhysicalCommand =

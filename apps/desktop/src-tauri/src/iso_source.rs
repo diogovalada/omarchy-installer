@@ -1,15 +1,17 @@
 //! Retain the original Windows ISO and every ancestor until consumers stop.
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+use std::os::windows::io::AsRawHandle;
 use std::path::{Component, Path, PathBuf, Prefix};
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
 
 pub(crate) struct HeldIso {
     path: PathBuf,
-    _file: File,
+    file: File,
     _directories: Vec<File>,
 }
 
@@ -62,13 +64,36 @@ impl HeldIso {
         }
         Ok(Self {
             path: path.to_path_buf(),
-            _file: file,
+            file,
             _directories: directories,
         })
     }
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Bind a child reader to this exact Windows file and the parent retaining
+    /// its deny-write/delete handle. The caller must authenticate the ISO first
+    /// and retain `self` until the child exits, including failed/cancelled runs.
+    pub(crate) fn reader_binding(&self) -> Result<serde_json::Value, String> {
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(self.file.as_raw_handle(), &mut info) } == 0 {
+            return Err(format!(
+                "Cannot identify the held ISO: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+        if index == 0 {
+            return Err("The held ISO has no stable Windows file identity.".into());
+        }
+        Ok(serde_json::json!({
+            "kind": "windows-held-iso-v1",
+            "parentPid": std::process::id(),
+            "volumeSerial": info.dwVolumeSerialNumber.to_string(),
+            "fileIndex": index.to_string()
+        }))
     }
 }
 
@@ -107,6 +132,88 @@ mod tests {
         drop(writer);
         assert!(HeldIso::open(&path, 4).is_err());
         fs::rename(&path, dir.path().join("renamed.iso")).unwrap();
+    }
+
+    #[test]
+    fn reader_binding_matches_node_file_identity_while_native_guard_blocks_writes() {
+        check_node_reader_binding(false);
+    }
+
+    #[test]
+    #[ignore = "requires the built media adapter; uses only a disposable locked fixture file"]
+    fn native_guard_handoff_reuses_verification_without_reading_source_bytes() {
+        check_node_reader_binding(true);
+    }
+
+    fn check_node_reader_binding(verify_handoff: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.iso");
+        fs::write(&path, b"fixture ISO").unwrap();
+        let held = HeldIso::open(&path, 11).unwrap();
+        let binding = held.reader_binding().unwrap();
+        // Resolve version-manager shims before checking the direct parent's PID.
+        let node = std::env::var_os("OMARCHY_TEST_NODE").unwrap_or_else(|| {
+            let output = std::process::Command::new("node")
+                .args(["-p", "process.execPath"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let path = String::from_utf8(output.stdout).unwrap();
+            assert!(!path.trim().is_empty());
+            path.trim().into()
+        });
+        let script = dir.path().join("inspect-reader.cjs");
+        fs::write(&script, r#"
+            (async () => {
+                const fs = require('node:fs');
+                const assert = require('node:assert/strict');
+                const p = process.argv[2];
+                const fd = fs.openSync(p, 'r');
+                try {
+                    const stat = fs.fstatSync(fd, { bigint: true });
+                    assert.throws(() => fs.openSync(p, 'r+'));
+                    assert.throws(() => fs.renameSync(p, p + '.moved'));
+                    if (process.argv[3]) {
+                        const { openStableSource, verifyPhysicalSource } = require(process.argv[3]);
+                        const request = { sourcePath: p, length: 11,
+                            sha256: require('node:crypto').createHash('sha256').update('fixture ISO').digest('hex'),
+                            sourceVerification: JSON.parse(process.argv[4]) };
+                        const source = await openStableSource(request);
+                        try {
+                            source.handle.read = async () => { throw new Error('Unexpected duplicate image scan'); };
+                            for (let pass = 0; pass < 2; pass++) {
+                                await verifyPhysicalSource(source, request, () => { throw new Error('Unexpected hashing stage'); });
+                            }
+                        } finally { await source.handle.close(); }
+                    }
+                    process.stdout.write(JSON.stringify({ parentPid: process.ppid,
+                        volumeSerial: String(stat.dev & 0xffffffffn), fileIndex: String(stat.ino) }));
+                } finally { fs.closeSync(fd); }
+            })().catch(error => { process.stderr.write(error.stack); process.exitCode = 1; });
+        "#).unwrap();
+        let mut command = std::process::Command::new(node);
+        crate::provider_process::hide(&mut command);
+        command.arg(&script).arg(&path);
+        if verify_handoff {
+            command
+                .arg(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../../providers/media-etcher/dist/physical-source.js"),
+                )
+                .arg(binding.to_string());
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let observed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for field in ["parentPid", "volumeSerial", "fileIndex"] {
+            assert_eq!(binding[field], observed[field], "{field}");
+        }
+        drop(held);
+        fs::write(&path, b"unlocked").unwrap();
     }
 
     #[test]
