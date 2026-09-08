@@ -5,6 +5,7 @@ export type DownloadStatus = 'idle' | 'resolving' | 'ready' | 'preparing' | 'dow
 export interface Release { version: string; file_name: string; length: number; sha256: string; signer_fingerprint: string }
 export interface DownloadSnapshot {
   status: DownloadStatus; release: Release | null; received_bytes: number; total_bytes: number;
+  image_locked?: boolean;
   existing_image: boolean; cancel_requested: boolean; image_path: string | null; error: string | null; destination_directory: string; host_os: string; host_architecture: string;
 }
 export const isActive = (status?: DownloadStatus) => !!status && ['resolving', 'preparing', 'downloading', 'verifying', 'saving'].includes(status);

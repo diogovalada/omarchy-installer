@@ -134,6 +134,9 @@ Controls:
 - repeat all safety-critical checks after elevation;
 - hold exclusive device access through mutation and verification;
 - use an already verified immutable artifact identity;
+- on Windows, reuse source authentication only through a live native verification
+  lease with overlapping file locks, exact file/process identity checks and an
+  authenticated acknowledgement; never trust a persisted verified flag;
 - reject device topology, geometry, or identity changes;
 - journal checkpoints and classify disconnect as failure, never success;
 - require a fresh plan after any material precondition change.

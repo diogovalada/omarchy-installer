@@ -16,6 +16,73 @@ pub(crate) struct HeldIso {
 }
 
 impl HeldIso {
+    fn process_started(pid: u32) -> Result<String, String> {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if raw.is_null() {
+            return Err("The verified source owner is unavailable".into());
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let mut created: FILETIME = unsafe { std::mem::zeroed() };
+        let mut exited = created;
+        let mut kernel = created;
+        let mut user = created;
+        if unsafe {
+            GetProcessTimes(
+                process.as_raw_handle(),
+                &mut created,
+                &mut exited,
+                &mut kernel,
+                &mut user,
+            )
+        } == 0
+        {
+            return Err("The verified source owner identity is unavailable".into());
+        }
+        Ok(
+            ((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+                .to_string(),
+        )
+    }
+    /// Native-only verification handoff over the authenticated parent/helper
+    /// connection. The caller must own a successfully verified download lease.
+    pub(crate) fn verified_binding(
+        &self,
+        source: &crate::setup_protocol::SourceImage,
+    ) -> Result<serde_json::Value, String> {
+        use sha2::{Digest, Sha256};
+        let mut binding = self.reader_binding()?;
+        binding["kind"] = serde_json::json!("windows-verified-download-v1");
+        binding["parentStarted"] = serde_json::json!(Self::process_started(std::process::id())?);
+        binding["length"] = serde_json::json!(source.length);
+        binding["sha256"] = serde_json::json!(source.sha256);
+        binding["signatureSha256"] =
+            serde_json::json!(format!("{:x}", Sha256::digest(&source.signature)));
+        Ok(binding)
+    }
+
+    /// Acquire our own guard before validating the lease. The authenticated
+    /// native parent retains its original guard until the operation returns,
+    /// so there is no unlocked interval during this ownership handoff.
+    pub(crate) fn validate_verified_binding(
+        &self,
+        source: &crate::setup_protocol::SourceImage,
+        binding: &serde_json::Value,
+        authenticated_parent: u32,
+    ) -> Result<(), String> {
+        let mut expected = self.verified_binding(source)?;
+        expected["parentPid"] = serde_json::json!(authenticated_parent);
+        expected["parentStarted"] = serde_json::json!(Self::process_started(authenticated_parent)?);
+        if *binding != expected {
+            return Err("The verified download lease does not match this ISO or desktop session. Verify the image again.".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn open(path: &Path, length: u64) -> Result<Self, String> {
         let parts: Vec<_> = path.components().collect();
         if !matches!(parts.first(), Some(Component::Prefix(p)) if matches!(p.kind(), Prefix::Disk(_)))
@@ -101,6 +168,52 @@ impl HeldIso {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn verified_binding_rejects_different_files_sessions_and_constraints() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.iso");
+        let other = dir.path().join("other.iso");
+        fs::write(&path, b"ISO").unwrap();
+        fs::write(&other, b"ISO").unwrap();
+        let source = crate::setup_protocol::SourceImage {
+            path: path.clone(),
+            file_name: "omarchy-test.iso".into(),
+            length: 3,
+            sha256: "0".repeat(64),
+            signature: b"fixture".to_vec(),
+        };
+        let parent = HeldIso::open(&path, 3).unwrap();
+        let binding = parent.verified_binding(&source).unwrap();
+        let helper = HeldIso::open(&path, 3).unwrap();
+        helper
+            .validate_verified_binding(&source, &binding, std::process::id())
+            .unwrap();
+        assert!(helper
+            .validate_verified_binding(&source, &binding, std::process::id().wrapping_add(1))
+            .is_err());
+        assert!(HeldIso::open(&other, 3)
+            .unwrap()
+            .validate_verified_binding(&source, &binding, std::process::id())
+            .is_err());
+        for key in [
+            "kind",
+            "volumeSerial",
+            "fileIndex",
+            "sha256",
+            "signatureSha256",
+            "length",
+        ] {
+            let mut changed = binding.clone();
+            changed[key] = serde_json::json!("changed");
+            assert!(
+                helper
+                    .validate_verified_binding(&source, &changed, std::process::id())
+                    .is_err(),
+                "{key}"
+            );
+        }
+    }
 
     #[test]
     fn original_remains_readable_but_cannot_be_written_deleted_or_moved_until_release() {

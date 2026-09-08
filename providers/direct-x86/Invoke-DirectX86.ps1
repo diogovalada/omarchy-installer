@@ -17,6 +17,8 @@ $mutationStarted = $false
 $cancelAvailable = $true
 $stagingKey = $null
 $stagingFrame = $null
+$sourceLease = $null
+$runtimeFrame = $null
 
 function Emit([string]$Type, [string]$Stage, [hashtable]$Fields) {
     $event = [ordered]@{ protocolVersion=1; type=$Type; operationId=$script:operationId; stage=$Stage; cancelAvailable=$script:cancelAvailable }
@@ -96,7 +98,7 @@ try {
     if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitProcess -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { Fail 'unsupported_host' 'This provider requires native Windows x64.' }
     [void](Assert-Path $providerRoot $true)
     [void](Assert-Path $builderRoot $true)
-    Add-Type -Path @((Join-Path $providerRoot 'NativeDisk.cs'),(Join-Path $providerRoot 'EncryptedImage.cs'),(Join-Path $providerRoot 'NativeBootEvidence.cs'))
+    Add-Type -Path @((Join-Path $providerRoot 'NativeDisk.cs'),(Join-Path $providerRoot 'EncryptedImage.cs'),(Join-Path $providerRoot 'NativeBootEvidence.cs'),(Join-Path $providerRoot 'NativeSource.cs'))
     foreach ($module in @('BitLocker.ps1','StoragePlan.ps1','DeletionPlan.ps1','BootPlan.ps1','EncryptedInputs.ps1','Deployment.ps1','FirmwarePreparation.ps1','RuntimePreparation.ps1')) {
         . (Assert-Path (Join-Path $providerRoot $module))
     }
@@ -118,7 +120,7 @@ try {
             Emit 'result' 'probed' @{result=(Get-Probe $protectedPaths)}
         }
         'build' {
-            Assert-Fields $request @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu') @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu')
+            Assert-Fields $request @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu','sourceVerification') @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu')
             Assert-Admin
             Assert-BootMenu $request.bootMenu
             [void](Get-VerifiedWindowsBoot)
@@ -138,8 +140,32 @@ try {
             if ($LASTEXITCODE -ne 0 -or ($engine -join '').Trim() -ne 'linux') { Fail 'linux_engine_required' 'A running Linux Docker engine is required.' }
             $image = & $docker image inspect $runtime.imageId --format '{{.Id}}' 2>$null
             if ($LASTEXITCODE -ne 0 -or ($image -join '').Trim() -ne $runtime.imageId) { Fail 'runtime_missing' 'Build and pin the required local runtime first; the provider never pulls an unqualified image.' }
-            Emit 'progress' 'verifying' @{message='Rechecking the signed official ISO before isolated construction.'}
-            if ((Sha $iso) -ne $release.sha256) { Fail 'source_changed' 'Official ISO digest changed.' }
+            $runtimeFrame = $stagingFrame
+            if (@($request.PSObject.Properties.Name) -contains 'sourceVerification') {
+                Assert-ProtectedDirectory (Split-Path -Parent $RequestPath)
+                $verified = $request.sourceVerification
+                $fields = @('kind','parentPid','parentStarted','volumeSerial','fileIndex','length','sha256','signatureSha256')
+                Assert-Fields $verified $fields $fields
+                if ($verified.kind -cne 'windows-verified-download-v1' -or $verified.length -ne $release.sizeBytes -or $verified.sha256 -cne $release.sha256 -or $verified.signatureSha256 -cne (Sha $sig)) {
+                    Fail 'source_lease_invalid' 'The verified source lease does not match the packaged release and signature.'
+                }
+                $sourceLease = New-Object Omarchy.DirectX86.NativeSource($iso,[long]$release.sizeBytes)
+                $sourceLease.Match([uint32]::Parse($verified.volumeSerial),[uint64]::Parse($verified.fileIndex))
+                # Check the actual parent only after acquiring our own guard.
+                # It cannot release its guard before this process has inherited
+                # responsibility for keeping the source and path immutable.
+                $self = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+                $parent = Get-Process -Id ([int]$verified.parentPid) -ErrorAction Stop
+                if ($self.ParentProcessId -ne $verified.parentPid -or $parent.HasExited -or $parent.StartTime.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture) -cne $verified.parentStarted) { Fail 'source_lease_invalid' 'The verified source helper is no longer the live parent.' }
+                $parent.Dispose()
+                $frame = $stagingFrame | ConvertFrom-Json
+                $runtimeFrame = (@{protocolVersion=3;stagingKey=$frame.stagingKey;verifiedSource=@{kind='windows-held-readonly-bind-v1';sha256=$release.sha256;length=$release.sizeBytes;signatureSha256=$verified.signatureSha256}} | ConvertTo-Json -Depth 4 -Compress)
+                $frame = $null
+                Emit 'progress' 'source-ready' @{message='Using the locked, verified ISO for isolated construction.'}
+            } else {
+                Emit 'progress' 'verifying' @{message='Checking the official ISO before isolated construction.'}
+                if ((Sha $iso) -ne $release.sha256) { Fail 'source_changed' 'Official ISO digest changed.' }
+            }
             $container = 'omarchy-direct-'+$operationId
             # The helper holds the ISO and its ancestors against writes/renames.
             # Bind only the two input files, from their separate host locations.
@@ -147,7 +173,7 @@ try {
             $buildResult = $null
             $arguments += @('--boot-default',[string]$request.bootMenu.defaultOs,'--boot-timeout',[string]$request.bootMenu.timeoutSeconds)
             try {
-                $stagingFrame | & $docker @arguments 2> (Join-Path (Split-Path -Parent $out) ($operationId+'-runtime.log')) | ForEach-Object {
+                $runtimeFrame | & $docker @arguments 2> (Join-Path (Split-Path -Parent $out) ($operationId+'-runtime.log')) | ForEach-Object {
                     $line = $_
                     try { $event = $line | ConvertFrom-Json } catch { Fail 'runtime_protocol' 'Build runtime emitted invalid structured output.' }
                     if ($event.protocolVersion -ne 1 -or $event.operationId -ne $operationId) { Fail 'runtime_protocol' 'Build runtime emitted an invalid operation event.' }
@@ -180,6 +206,7 @@ try {
     Emit 'error' $stage @{code=$code;message=$_.Exception.Message;mutationStarted=$mutationStarted;recovery= $(if ($mutationStarted) { 'Keep the protected operation and BitLocker recovery records. Windows may have been resized exactly as confirmed; new Omarchy partitions or boot setup may be incomplete. Do not blindly retry or delete partitions.' } else { 'No destination mutation was started.' })}
     exit 1
 } finally {
+    if ($null -ne $sourceLease) { $sourceLease.Dispose() }
     if ($null -ne $stagingKey) { [Array]::Clear($stagingKey,0,$stagingKey.Length) }
-    $stagingKey=$null; $stagingFrame=$null
+    $stagingKey=$null; $stagingFrame=$null; $runtimeFrame=$null
 }

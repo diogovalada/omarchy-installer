@@ -1067,9 +1067,15 @@ fn run_elevated(
     let mut export = crate::operation_records::Export::choose(app, &request.destination)?;
     let mut exported_path = None;
     let mut export_error = None;
+    #[cfg(windows)]
+    let verified_iso = app.state::<Downloads>().verified_lease(&request.source);
     let connection = elevation::launch()?;
     let writer = Arc::new(Mutex::new(connection.writer));
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    if let Some(guard) = &verified_iso {
+        envelope["sourceVerification"] = guard.verified_binding(&request.source)?;
+    }
     if let Some(export) = &export {
         envelope["recordsDirectory"] = json!(export.directory);
     }
@@ -1099,7 +1105,22 @@ fn run_elevated(
                     "usb" => (MessageDialogKind::Warning, "Erase USB and create installer"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
-                let approved = if operation == "record_export" {
+                let approved = if operation == "source_lease" {
+                    #[cfg(windows)]
+                    {
+                        verified_iso.as_ref().is_some_and(|guard| {
+                            guard
+                                .verified_binding(&request.source)
+                                .is_ok_and(|expected| {
+                                    expected == value["plan"]["sourceVerification"]
+                                })
+                        })
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        false
+                    }
+                } else if operation == "record_export" {
                     match export
                         .as_mut()
                         .ok_or("No records destination was prepared".to_owned())

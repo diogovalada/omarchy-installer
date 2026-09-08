@@ -20,6 +20,9 @@ experimental and have not completed physical hardware and boot testing.
 
 On Windows, the app runs from one portable executable. It keeps verified
 application files in a local cache and uses the downloaded ISO in place.
+After verification, it keeps the ISO read-only while the app is open so USB
+creation and Windows installation can reuse that verification. Close the app
+before moving or editing the ISO.
 Completed operation receipts are saved in `Omarchy-Setup-Records` beside the
 portable executable. If that location is unwritable or on the selected USB,
 the app asks for another folder. Protected temporary workspaces are removed

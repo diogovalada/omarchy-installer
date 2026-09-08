@@ -56,11 +56,31 @@ def command(args, *, timeout=30, input=None, check=True, text_mode=True):
                           capture_output=True, timeout=timeout, check=check)
 
 
-def verify_source(lock, run):
+def verify_source(lock, run, verified_source=None):
     iso = regular_file(INPUT / f"omarchy-{lock['version']}.iso", INPUT)
     signature = regular_file(INPUT / f"omarchy-{lock['version']}.iso.sig", INPUT)
     if iso.stat().st_size != lock['sizeBytes']:
         raise ValueError('Released ISO length does not match the pin')
+    if verified_source is not None:
+        # Only the native provider's private stdin handoff may supply this.
+        # It holds the exact authenticated Windows file and every ancestor,
+        # and constructs these two individual read-only Docker bind mounts.
+        if (set(verified_source) != {'kind', 'sha256', 'length', 'signatureSha256'}
+                or verified_source['kind'] != 'windows-held-readonly-bind-v1'
+                or verified_source['sha256'] != lock['sha256']
+                or type(verified_source['length']) is not int
+                or verified_source['length'] != lock['sizeBytes']
+                or verified_source['signatureSha256'] != sha256(signature)):
+            raise ValueError('Native source verification does not match the pinned input')
+        for path in (iso, signature):
+            mount = command(['findmnt', '-n', '-o', 'TARGET,OPTIONS', '-T', path]).stdout.strip().split()
+            if len(mount) != 2 or mount[0] != str(path) or 'ro' not in mount[1].split(',') or 'rw' in mount[1].split(','):
+                raise ValueError('Verified source requires individual read-only input mounts')
+        print('Using native verification of the locked, read-only ISO input', flush=True)
+        (run / 'signature-verification.txt').write_text(
+            'Verification reused from the native helper through a retained Windows file lock and read-only bind mount.\n'
+            + 'SHA-256: ' + lock['sha256'] + '\n')
+        return iso
     print('Verifying complete ISO checksum and detached signature', flush=True)
     if sha256(iso) != lock['sha256']:
         raise ValueError('Released ISO checksum does not match the pin')

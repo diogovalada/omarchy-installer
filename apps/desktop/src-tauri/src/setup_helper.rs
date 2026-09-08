@@ -72,6 +72,10 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     let output = Arc::new(Mutex::new(connection.writer));
     let mut reader = BufReader::new(connection.reader);
     let mut envelope = read_frame(&mut reader)?.ok_or("Missing operation request")?;
+    let source_verification = envelope
+        .as_object_mut()
+        .ok_or("Invalid operation request")?
+        .remove("sourceVerification");
     let records_directory = envelope
         .as_object_mut()
         .ok_or("Invalid operation request")?
@@ -117,6 +121,9 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     match execute(
         request,
         records_directory.as_deref(),
+        source_verification
+            .as_ref()
+            .map(|binding| (binding, parent)),
         &output,
         Arc::clone(&cancel),
         &confirmations,
@@ -190,6 +197,7 @@ fn prepare_source(
     directory: &Path,
     output: &Emitter,
     cancel: &AtomicBool,
+    verification: Option<(&Value, u32, &mpsc::Receiver<Value>)>,
 ) -> Result<PreparedSource, String> {
     cancelled(cancel)?;
     if !source.path.is_absolute()
@@ -285,13 +293,42 @@ fn prepare_source(
         drop(file);
         path
     };
-    stage(
-        output,
-        "authenticating",
-        "Verifying the official image…",
-        true,
-    );
-    omarchy_release_client::authenticate_iso_offline(
+    #[cfg(not(windows))]
+    if verification.is_some() {
+        return Err("This platform cannot reuse a Windows verified download lease".into());
+    }
+    #[cfg(windows)]
+    let reused = if let Some((binding, parent, confirmations)) = verification {
+        guard.validate_verified_binding(source, binding, parent)?;
+        // A live acknowledgement proves the native parent still owns its
+        // verified guard AFTER we acquired ours. A saved flag is insufficient.
+        confirm(
+            output,
+            confirmations,
+            cancel,
+            "Reuse the locked, verified image",
+            &json!({"kind":"source_lease","sourceVerification":binding}),
+        )?;
+        stage(
+            output,
+            "source-ready",
+            "Using the locked, verified image…",
+            true,
+        );
+        true
+    } else {
+        false
+    };
+    #[cfg(not(windows))]
+    let reused = false;
+    if !reused {
+        stage(
+            output,
+            "authenticating",
+            "Verifying the official image…",
+            true,
+        );
+        omarchy_release_client::authenticate_iso_offline(
         &path,
         source.length,
         &source.sha256,
@@ -304,6 +341,7 @@ fn prepare_source(
         },
     )
     .map_err(|e| e.to_string())?;
+    }
     let mut signature = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -366,12 +404,77 @@ mod source_tests {
         let output: Emitter = Arc::new(Mutex::new(Box::new(std::io::sink())));
         for cancel in [false, true] {
             assert!(
-                prepare_source(&source, &stage_dir, &output, &AtomicBool::new(cancel)).is_err()
+                prepare_source(&source, &stage_dir, &output, &AtomicBool::new(cancel), None)
+                    .is_err()
             );
             assert_eq!(fs::read(&path).unwrap(), b"ISO");
             assert_eq!(fs::read_dir(&stage_dir).unwrap().count(), 0);
             assert!(OpenOptions::new().write(true).open(&path).is_ok());
         }
+    }
+
+    #[test]
+    fn verified_download_handoff_requires_live_ack_and_does_not_scan_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("original.iso");
+        fs::write(&path, b"ISO").unwrap();
+        let source = SourceImage {
+            path: path.clone(),
+            file_name: "omarchy-test.iso".into(),
+            length: 3,
+            sha256: "0".repeat(64),
+            signature: b"test handoff fixture".to_vec(),
+        };
+        // Model the native side AFTER its separate signature-verification gate.
+        // Unsigned fixture bytes ensure an accidental second authentication is
+        // detected; the existing unbound test proves those bytes cannot pass it.
+        let parent_guard = crate::iso_source::HeldIso::open(&path, 3).unwrap();
+        let binding = parent_guard.verified_binding(&source).unwrap();
+        let plan = json!({"kind":"source_lease","sourceVerification":binding});
+        let acknowledgement = format!("{:x}", Sha256::digest(serde_json::to_vec(&plan).unwrap()));
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let output: Emitter = Arc::new(Mutex::new(Box::new(Capture(Arc::clone(&captured)))));
+        for approved in [false, true] {
+            let stage_dir = tempfile::tempdir().unwrap();
+            let (sender, receiver) = mpsc::channel();
+            sender
+                .send(json!({"binding":acknowledgement,"approved":approved}))
+                .unwrap();
+            let result = prepare_source(
+                &source,
+                stage_dir.path(),
+                &output,
+                &AtomicBool::new(false),
+                Some((&binding, std::process::id(), &receiver)),
+            );
+            assert_eq!(result.is_ok(), approved);
+            if !approved {
+                assert_eq!(fs::read_dir(stage_dir.path()).unwrap().count(), 0);
+            }
+            drop(result);
+        }
+        let events: Vec<Value> = String::from_utf8(captured.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(events.iter().any(|event| event["stage"] == "source-ready"));
+        assert!(!events
+            .iter()
+            .any(|event| event["stage"] == "authenticating"));
+
+        let stage_dir = tempfile::tempdir().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        drop(sender);
+        assert!(prepare_source(
+            &source,
+            stage_dir.path(),
+            &output,
+            &AtomicBool::new(false),
+            Some((&binding, std::process::id(), &receiver))
+        )
+        .is_err());
+        assert_eq!(fs::read_dir(stage_dir.path()).unwrap().count(), 0);
     }
 
     #[test]
@@ -396,7 +499,7 @@ mod source_tests {
         let output: Emitter = Arc::new(Mutex::new(Box::new(Capture(Arc::clone(&captured)))));
         let timer = std::time::Instant::now();
         let prepared =
-            prepare_source(&source, dir.path(), &output, &AtomicBool::new(false)).unwrap();
+            prepare_source(&source, dir.path(), &output, &AtomicBool::new(false), None).unwrap();
         assert_eq!(prepared.path, path);
         let staged = fs::read_dir(dir.path())
             .unwrap()
@@ -493,6 +596,7 @@ fn revalidate_usb(
 fn execute(
     request: OperationRequest,
     records_directory: Option<&Path>,
+    source_verification: Option<(&Value, u32)>,
     output: &Emitter,
     cancel: Arc<AtomicBool>,
     confirmations: &mpsc::Receiver<Value>,
@@ -578,7 +682,13 @@ fn execute(
                 output,
             )?;
             let receipt = {
-                let source = prepare_source(&request.source, &workspace, output, &cancel)?;
+                let source = prepare_source(
+                    &request.source,
+                    &workspace,
+                    output,
+                    &cancel,
+                    source_verification.map(|(binding, parent)| (binding, parent, confirmations)),
+                )?;
                 revalidate_usb(
                     &runtime,
                     &manifest,
@@ -819,7 +929,13 @@ fn execute(
                 );
             }
         }
-        let source = prepare_source(&request.source, &workspace, output, &cancel)?;
+        let source = prepare_source(
+            &request.source,
+            &workspace,
+            output,
+            &cancel,
+            source_verification.map(|(binding, parent)| (binding, parent, confirmations)),
+        )?;
         let callback = |value: Value| provider_event(output, value);
         let receipt = match &request.destination {
             Destination::InspectUsb { .. }
@@ -935,6 +1051,12 @@ fn execute(
                     &preliminary,
                 )?;
                 let build = json!({"operationId":id,"sourceIsoPath":source.path,"sourceSignaturePath":workspace.join(format!("{}.sig", request.source.file_name)),"outputDirectory":output_directory,"bootMenu":boot_menu});
+                #[cfg(windows)]
+                let build = {
+                    let mut value = build;
+                    value["sourceVerification"] = source.guard.verified_binding(&request.source)?;
+                    value
+                };
                 let build_request = write_request(&workspace, "build-request.json", &build)?;
                 let mut command =
                     provider_process::direct_command(&runtime, &manifest, "build", &build_request)?;

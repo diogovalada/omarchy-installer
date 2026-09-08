@@ -1,4 +1,7 @@
 import json
+import hashlib
+import base64
+import io
 from pathlib import Path
 import tempfile
 import subprocess
@@ -6,10 +9,27 @@ import unittest
 from unittest.mock import Mock, patch
 
 import builder
+import product_builder
 from configuration import configuration, DISK_BYTES, MIB, GIB
 
 
 class SafetyAndProofTests(unittest.TestCase):
+    def test_private_source_handoff_preserves_legacy_verification_and_rejects_bad_frames(self):
+        key = base64.b64encode(bytes(32)).decode()
+        for frame, expected in [({'protocolVersion': 2, 'stagingKey': key}, None),
+                                ({'protocolVersion': 3, 'stagingKey': key, 'verifiedSource': {'kind': 'fixture'}}, {'kind': 'fixture'})]:
+            with patch.object(product_builder.sys, 'stdin', Mock(buffer=io.BytesIO((json.dumps(frame) + '\n').encode()))):
+                actual_key, proof = product_builder.read_staging_input()
+                self.assertEqual(actual_key, bytes(32))
+                self.assertEqual(proof, expected)
+        for frame in [{'protocolVersion': 2, 'stagingKey': key, 'verifiedSource': {}},
+                      {'protocolVersion': 3, 'stagingKey': key},
+                      {'protocolVersion': 3, 'stagingKey': key, 'verifiedSource': True},
+                      {'protocolVersion': 3, 'stagingKey': key, 'verifiedSource': {}, 'skipVerification': True}]:
+            with patch.object(product_builder.sys, 'stdin', Mock(buffer=io.BytesIO((json.dumps(frame) + '\n').encode()))):
+                with self.assertRaises(ValueError):
+                    product_builder.read_staging_input()
+
     def test_only_virtual_target_and_bounded_partition_layout(self):
         config = configuration()
         disks = config['disk_config']['device_modifications']
@@ -85,6 +105,32 @@ class SafetyAndProofTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'checksum'):
                     builder.verify_source({'version': 'test', 'sizeBytes': 3, 'sha256': '0' * 64}, root)
                 execute.assert_not_called()
+
+    def test_native_verification_requires_exact_read_only_mounts_and_avoids_iso_scan(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            iso = root / 'omarchy-test.iso'
+            signature = root / 'omarchy-test.iso.sig'
+            iso.write_bytes(b'ISO')
+            signature.write_bytes(b'sig')
+            lock = {'version': 'test', 'sizeBytes': 3, 'sha256': 'a' * 64}
+            proof = {'kind': 'windows-held-readonly-bind-v1', 'sha256': lock['sha256'],
+                     'length': 3, 'signatureSha256': hashlib.sha256(b'sig').hexdigest()}
+            def digest(path):
+                self.assertNotEqual(path, iso, 'The verified ISO must not be read again')
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+            def mount(args, **kwargs):
+                self.assertEqual(args[:5], ['findmnt', '-n', '-o', 'TARGET,OPTIONS', '-T'])
+                return Mock(stdout=str(args[-1]) + ' ro,relatime\n')
+            with patch.object(builder, 'INPUT', root), patch.object(builder, 'sha256', side_effect=digest), patch.object(builder, 'command', side_effect=mount):
+                self.assertEqual(builder.verify_source(lock, root, proof), iso)
+                for key, value in [('kind', 'unknown'), ('sha256', 'b' * 64), ('length', 2), ('signatureSha256', '0' * 64)]:
+                    with self.assertRaises(ValueError):
+                        builder.verify_source(lock, root, {**proof, key: value})
+            for response in [str(iso) + ' rw,relatime', '/input ro,relatime', '']:
+                with patch.object(builder, 'INPUT', root), patch.object(builder, 'command', return_value=Mock(stdout=response)):
+                    with self.assertRaisesRegex(ValueError, 'read-only'):
+                        builder.verify_source(lock, root, proof)
 
     def test_guest_proof_requires_installed_root_identity_and_package(self):
         builder.assert_guest_proof('btrfs\n/dev/vda2[/@]\n' + 'a' * 32 + '\nomarchy 4.0.2\n')

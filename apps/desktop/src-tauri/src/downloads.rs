@@ -1,6 +1,8 @@
 use omarchy_release_client::{DownloadPhase, DownloadedImage, Release};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+#[cfg(all(test, windows))]
+use std::fs::OpenOptions;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -40,6 +42,7 @@ pub struct Snapshot {
     received_bytes: u64,
     total_bytes: u64,
     image_path: Option<PathBuf>,
+    image_locked: bool,
     error: Option<String>,
     cancel_requested: bool,
     destination_directory: PathBuf,
@@ -51,6 +54,14 @@ pub struct Snapshot {
 struct Inner {
     snapshot: Snapshot,
     cancel: Arc<AtomicBool>,
+    #[cfg(windows)]
+    verified_iso: Option<Arc<crate::iso_source::HeldIso>>,
+}
+
+struct VerifiedImage {
+    path: PathBuf,
+    #[cfg(windows)]
+    guard: Arc<crate::iso_source::HeldIso>,
 }
 
 #[derive(Clone)]
@@ -60,6 +71,47 @@ pub struct Downloads {
 }
 
 impl Downloads {
+    /// The webview cannot supply this lease or mark an image verified. Retain it
+    /// through the complete helper exchange even if download state is reset.
+    #[cfg(windows)]
+    pub(crate) fn verified_lease(
+        &self,
+        source: &crate::setup_protocol::SourceImage,
+    ) -> Option<Arc<crate::iso_source::HeldIso>> {
+        let inner = self.inner.lock().ok()?;
+        let release = inner.snapshot.release.as_ref()?;
+        if inner.snapshot.status != Status::Complete
+            || inner.snapshot.image_path.as_ref() != Some(&source.path)
+            || release.file_name() != source.file_name
+            || release.length() != source.length
+            || release.sha256() != source.sha256
+            || release.signature() != source.signature
+        {
+            return None;
+        }
+        inner.verified_iso.clone()
+    }
+
+    fn complete(&self, image: VerifiedImage, existing: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.cancel.load(Ordering::Relaxed) {
+                inner.snapshot.status = Status::Cancelled;
+                inner.snapshot.error = Some("Download cancelled".into());
+                inner.snapshot.image_path = None;
+                inner.snapshot.image_locked = false;
+                return;
+            }
+            #[cfg(windows)]
+            {
+                inner.verified_iso = Some(image.guard);
+                inner.snapshot.image_locked = true;
+            }
+            inner.snapshot.status = Status::Complete;
+            inner.snapshot.image_path = Some(image.path);
+            inner.snapshot.existing_image = existing;
+            inner.snapshot.error = None;
+        }
+    }
     pub(crate) fn verified_source(&self) -> Result<(PathBuf, Release), String> {
         let inner = self
             .inner
@@ -90,6 +142,7 @@ impl Downloads {
                     received_bytes: 0,
                     total_bytes: 0,
                     image_path: None,
+                    image_locked: false,
                     error: None,
                     cancel_requested: false,
                     destination_directory: destination.clone(),
@@ -98,6 +151,8 @@ impl Downloads {
                     host_architecture: std::env::consts::ARCH,
                 },
                 cancel: Arc::new(AtomicBool::new(false)),
+                #[cfg(windows)]
+                verified_iso: None,
             })),
             cache,
         }
@@ -119,15 +174,20 @@ impl Downloads {
     }
 
     fn finish_error(&self, error: String, cancelled: bool) {
-        self.update(|snapshot| {
-            snapshot.status = if cancelled {
+        if let Ok(mut inner) = self.inner.lock() {
+            #[cfg(windows)]
+            {
+                inner.verified_iso = None;
+            }
+            inner.snapshot.image_locked = false;
+            inner.snapshot.status = if cancelled {
                 Status::Cancelled
             } else {
                 Status::Failed
             };
-            snapshot.error = Some(error);
-            snapshot.image_path = None;
-        });
+            inner.snapshot.error = Some(error);
+            inner.snapshot.image_path = None;
+        }
     }
 
     fn begin_resolution(&self) -> Result<(), String> {
@@ -139,6 +199,11 @@ impl Downloads {
             return Err("An operation is already running".into());
         }
         inner.snapshot.status = Status::Resolving;
+        #[cfg(windows)]
+        {
+            inner.verified_iso = None;
+        }
+        inner.snapshot.image_locked = false;
         inner.snapshot.cancel_requested = false;
         inner.snapshot.error = None;
         inner.snapshot.release = None;
@@ -161,6 +226,11 @@ impl Downloads {
             return Err("Wait for the current operation to stop before changing folders".into());
         }
         if inner.snapshot.destination_directory != path {
+            #[cfg(windows)]
+            {
+                inner.verified_iso = None;
+            }
+            inner.snapshot.image_locked = false;
             inner.snapshot.destination_directory = path;
             inner.snapshot.image_path = None;
             inner.snapshot.error = None;
@@ -190,6 +260,11 @@ impl Downloads {
             .clone()
             .ok_or("Check the official release first")?;
         inner.cancel = Arc::new(AtomicBool::new(false));
+        #[cfg(windows)]
+        {
+            inner.verified_iso = None;
+        }
+        inner.snapshot.image_locked = false;
         inner.snapshot.status = Status::Preparing;
         inner.snapshot.cancel_requested = false;
         inner.snapshot.error = None;
@@ -278,37 +353,34 @@ pub fn start_download(downloads: State<'_, Downloads>) -> Result<Snapshot, Strin
                     };
                 });
             };
-            let result = if let Some(path) = &existing {
-                omarchy_release_client::verify_existing(&release, path, &cancel, progress)
-            } else {
-                omarchy_release_client::download(&release, &controller.cache, &cancel, progress)
-            };
-            match result {
-                Ok(image) => {
-                    if existing.is_some() {
-                        controller.update(|snapshot| {
-                            snapshot.status = Status::Complete;
-                            snapshot.image_path = Some(image.path);
-                            snapshot.existing_image = true;
-                            snapshot.error = None;
-                        });
-                        return;
-                    }
-                    controller.update(|snapshot| snapshot.status = Status::Saving);
-                    match save_verified_image(&image, &destination, &cancel) {
-                        Ok(path) => controller.update(|snapshot| {
-                            snapshot.status = Status::Complete;
-                            snapshot.image_path = Some(path);
-                            snapshot.error = None;
-                        }),
-                        Err(error) => {
-                            controller.finish_error(error, cancel.load(Ordering::Relaxed))
-                        }
-                    }
+            let result = (|| -> Result<VerifiedImage, String> {
+                if let Some(path) = &existing {
+                    return verify_and_retain(&release, path, &cancel, progress);
                 }
+                let image = omarchy_release_client::download(
+                    &release,
+                    &controller.cache,
+                    &cancel,
+                    progress,
+                )
+                .map_err(|error| error.to_string())?;
+                controller.update(|snapshot| snapshot.status = Status::Saving);
+                let path = save_verified_image(&image, &destination, &cancel)?;
+                #[cfg(windows)]
+                {
+                    // The cache and saved ISO are different files. Authenticate
+                    // the final file under its lifetime lock before showing Verified.
+                    verify_and_retain(&release, &path, &cancel, progress)
+                }
+                #[cfg(not(windows))]
+                {
+                    Ok(VerifiedImage { path })
+                }
+            })();
+            match result {
+                Ok(image) => controller.complete(image, existing.is_some()),
                 Err(error) => {
-                    let cancelled = matches!(error, omarchy_release_client::Error::Cancelled);
-                    controller.finish_error(error.to_string(), cancelled);
+                    controller.finish_error(error, cancel.load(Ordering::Relaxed));
                 }
             }
         });
@@ -317,6 +389,23 @@ pub fn start_download(downloads: State<'_, Downloads>) -> Result<Snapshot, Strin
         }
     });
     downloads.snapshot()
+}
+
+fn verify_and_retain(
+    release: &Release,
+    path: &Path,
+    cancel: &AtomicBool,
+    progress: impl FnMut(omarchy_release_client::DownloadProgress),
+) -> Result<VerifiedImage, String> {
+    #[cfg(windows)]
+    let guard = Arc::new(crate::iso_source::HeldIso::open(path, release.length())?);
+    omarchy_release_client::verify_existing(release, path, cancel, progress)
+        .map_err(|error| error.to_string())?;
+    Ok(VerifiedImage {
+        path: path.to_path_buf(),
+        #[cfg(windows)]
+        guard,
+    })
 }
 
 #[tauri::command]
@@ -470,6 +559,89 @@ fn hash_file(path: &Path, length: u64, expected: &str, cancel: &AtomicBool) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn download_lock_lives_through_operation_and_releases_on_reset_or_cancellation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("image.iso");
+        fs::write(&path, b"image").unwrap();
+        let controller = Downloads::new(temp.path().join("cache"), temp.path().to_path_buf());
+        let guard = Arc::new(crate::iso_source::HeldIso::open(&path, 5).unwrap());
+        let operation_lease = Arc::clone(&guard);
+        controller.complete(
+            VerifiedImage {
+                path: path.clone(),
+                guard,
+            },
+            true,
+        );
+        assert!(controller.snapshot().unwrap().image_locked);
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        controller.begin_resolution().unwrap();
+        assert!(!controller.snapshot().unwrap().image_locked);
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        drop(operation_lease);
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
+
+        let guard = Arc::new(crate::iso_source::HeldIso::open(&path, 5).unwrap());
+        controller
+            .inner
+            .lock()
+            .unwrap()
+            .cancel
+            .store(true, Ordering::Relaxed);
+        controller.complete(
+            VerifiedImage {
+                path: path.clone(),
+                guard,
+            },
+            true,
+        );
+        assert_eq!(controller.snapshot().unwrap().status, Status::Cancelled);
+        assert!(!controller.snapshot().unwrap().image_locked);
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Reads an existing official ISO and current release metadata; no administrator access or disk writes"]
+    fn existing_official_image_retains_its_first_verification() {
+        let path = PathBuf::from(std::env::var_os("OMARCHY_TEST_ISO").expect("ISO path required"));
+        let release = omarchy_release_client::resolve_current().unwrap();
+        let mut passes = 0;
+        let timer = std::time::Instant::now();
+        let image = verify_and_retain(&release, &path, &AtomicBool::new(false), |progress| {
+            if progress.phase == DownloadPhase::VerifyingSignature && progress.received_bytes == 0 {
+                passes += 1;
+            }
+        })
+        .unwrap();
+        assert_eq!(passes, 1);
+        let elapsed = timer.elapsed();
+        let source = crate::setup_protocol::SourceImage {
+            path: path.clone(),
+            file_name: release.file_name().into(),
+            length: release.length(),
+            sha256: release.sha256().into(),
+            signature: release.signature().to_vec(),
+        };
+        let controller = Downloads::new(PathBuf::new(), path.parent().unwrap().to_path_buf());
+        controller.update(|snapshot| snapshot.release = Some(release));
+        controller.complete(image, true);
+        let lease = controller.verified_lease(&source).unwrap();
+        let timer = std::time::Instant::now();
+        let binding = lease.verified_binding(&source).unwrap();
+        let helper_guard = crate::iso_source::HeldIso::open(&source.path, source.length).unwrap();
+        helper_guard
+            .validate_verified_binding(&source, &binding, std::process::id())
+            .unwrap();
+        println!("One locked verification of {} bytes in {:.3}s; helper identity handoff in {:.6}s with no ISO scan", source.length, elapsed.as_secs_f64(), timer.elapsed().as_secs_f64());
+        let mut changed = source.clone();
+        changed.sha256 = "00".repeat(32);
+        assert!(controller.verified_lease(&changed).is_none());
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+    }
 
     #[test]
     fn rejects_overlapping_operations() {

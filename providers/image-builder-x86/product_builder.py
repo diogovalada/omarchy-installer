@@ -33,19 +33,21 @@ class BuildCancelled(Exception):
     pass
 
 
-def read_staging_key():
+def read_staging_input():
     # One private stdin frame from the elevated operation. No secret in command
     # arguments, environment, manifest, log, ISO, CIDATA, or persistent files.
     frame = sys.stdin.buffer.readline(1025)
     if len(frame) > 1024 or not frame.endswith(b'\n'):
         raise ValueError('Missing bounded private staging-key frame')
     value = json.loads(frame)
-    if set(value) != {'protocolVersion', 'stagingKey'} or value['protocolVersion'] != 2:
+    legacy = set(value) == {'protocolVersion', 'stagingKey'} and value['protocolVersion'] == 2
+    verified = set(value) == {'protocolVersion', 'stagingKey', 'verifiedSource'} and value['protocolVersion'] == 3 and isinstance(value['verifiedSource'], dict)
+    if not (legacy or verified):
         raise ValueError('Invalid private staging-key protocol')
     key = bytearray(base64.b64decode(value['stagingKey'], validate=True))
     if len(key) != 32:
         raise ValueError('Staging key must contain 32 random bytes')
-    return key
+    return key, value.get('verifiedSource')
 
 
 def inspect_encrypted_contract(iso, inspection, lock, run):
@@ -172,7 +174,7 @@ def run_guest(vm, run, operation, timeout):
         raise TimeoutError('Construction timed out; no deployable manifest was produced')
 
 
-def build(operation, memory, timeout, staging_key, secret_file, boot_menu):
+def build(operation, memory, timeout, staging_key, secret_file, boot_menu, verified_source=None):
     validate_settings(boot_menu)
     run = Path('/output')
     builder.RUNS = run
@@ -182,7 +184,7 @@ def build(operation, memory, timeout, staging_key, secret_file, boot_menu):
     lock = json.loads((builder.PROOF / 'release-lock.json').read_text(encoding='utf-8-sig'))
     emit('progress', operation, 'verifying', message='Checking signed official source and runtime inputs')
     with contextlib.redirect_stdout(__import__('sys').stderr):
-        iso = builder.verify_source(lock, run)
+        iso = builder.verify_source(lock, run, verified_source)
         inspection = builder.inspect_iso(iso, run)
         runtime = builder.preflight()
     check_cancel()
@@ -279,7 +281,7 @@ def main():
     key = None
     secret_file = Path('/tmp/product-qcow.key')
     try:
-        key = read_staging_key()
+        key, verified_source = read_staging_input()
         # /tmp is a bounded container tmpfs supplied by the provider. Refuse a
         # disk-backed location: the native QCOW2 unlock secret must not persist.
         if builder.command(['findmnt', '-n', '-o', 'FSTYPE', '-T', '/tmp']).stdout.strip() != 'tmpfs':
@@ -288,7 +290,7 @@ def main():
         with secret_file.open('xb') as secret:
             secret.write(base64.b64encode(qcow_key))
         build(operation, args.memory, args.timeout, key, secret_file,
-              {'defaultOs': args.boot_default, 'timeoutSeconds': args.boot_timeout})
+              {'defaultOs': args.boot_default, 'timeoutSeconds': args.boot_timeout}, verified_source)
     except BuildCancelled as error:
         emit('error', operation, 'build', code='build_cancelled', message=str(error))
         return 1
