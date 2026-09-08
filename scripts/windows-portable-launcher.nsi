@@ -121,6 +121,9 @@ verified:
   Goto done
 launch:
   SetOutPath "$AppDir"
+  ; Receipt exports belong beside the portable launcher, not its extracted cache.
+  ; This is used only by the unelevated desktop for user-owned output files.
+  System::Call 'kernel32::SetEnvironmentVariableW(w "OMARCHY_PORTABLE_EXE", w "$EXEPATH")'
   ; Keep the extraction window alive until the child's real window is ready.
   ; Destroying it before launching drops the foreground activation handoff.
   ; NSIS is a 32-bit process, including when it launches this x64 application.

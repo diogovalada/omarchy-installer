@@ -14,7 +14,7 @@ export interface SetupSnapshot {
   cancelAvailable: boolean; cancelRequested: boolean; error: string | null;
   preparation?: {secureBoot:string;runtimePackaged:boolean;runtimeReady:boolean}|null;
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
-  receipt: { receiptPath?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
+  receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });

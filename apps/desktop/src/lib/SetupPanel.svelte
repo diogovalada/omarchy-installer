@@ -44,6 +44,7 @@
       {#if snapshot?.receipt?.receipt?.bitLockerRestoration?.required && snapshot.receipt.receipt.bitLockerRestoration.verified}<p>Windows BitLocker protection has been restored and verified.</p>{/if}
     {/if}
     {#if snapshot?.receipt?.receiptPath}<details><summary>Operation receipt</summary><p class="path">{snapshot.receipt.receiptPath}</p></details>{/if}
+    {#if snapshot?.receipt?.recordWarning}<p class="error">{snapshot.receipt.recordWarning}</p>{/if}
   {:else}
     {#if !active}
       <p>{kind === 'usb' ? 'Choose a USB drive.' : preparationNeeded ? 'Prepare this computer, then refresh disks to choose space for Omarchy.' : 'Choose space for Omarchy. You can keep using Windows.'}</p>
@@ -139,7 +140,7 @@
   {#if snapshot?.recovery && !active}
     <details><summary>{error ? 'Recovery and operation records' : 'Temporary files and operation records'}</summary>
       {#if snapshot.recovery.mutationStarted && error}<p>Storage changes started. Keep the records and inspect the planned partition sizes before retrying. If needed, select the existing Windows Boot Manager entry in firmware to return to Windows.</p>{/if}
-      <p>{snapshot.recovery.cleanup.complete ? 'Known temporary construction files were cleaned up. Operation records are retained.' : 'Some temporary files remain. Keep the operation records and confirm construction has stopped before removing anything.'}</p>
+      <p>{snapshot.recovery.cleanup.complete ? snapshot.recovery.message : 'Some temporary files remain. Keep the operation records and confirm construction has stopped before removing anything.'}</p>
       <p class="path">{snapshot.recovery.filesPath}</p>
     </details>
   {/if}

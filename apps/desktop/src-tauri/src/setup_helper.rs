@@ -71,9 +71,21 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     let connection = elevation::connect(id, parent)?;
     let output = Arc::new(Mutex::new(connection.writer));
     let mut reader = BufReader::new(connection.reader);
-    let request: OperationRequest =
-        serde_json::from_value(read_frame(&mut reader)?.ok_or("Missing operation request")?)
-            .map_err(|e| e.to_string())?;
+    let mut envelope = read_frame(&mut reader)?.ok_or("Missing operation request")?;
+    let records_directory = envelope
+        .as_object_mut()
+        .ok_or("Invalid operation request")?
+        .remove("recordsDirectory")
+        .map(serde_json::from_value::<PathBuf>)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    if records_directory
+        .as_ref()
+        .is_some_and(|path| !path.is_absolute() || !path.is_dir())
+    {
+        return Err("Invalid operation records directory".into());
+    }
+    let request: OperationRequest = serde_json::from_value(envelope).map_err(|e| e.to_string())?;
     if request.protocol != 1 {
         return Err("Unsupported operation protocol".into());
     }
@@ -102,7 +114,13 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
             }
         }
     });
-    match execute(request, &output, Arc::clone(&cancel), &confirmations) {
+    match execute(
+        request,
+        records_directory.as_deref(),
+        &output,
+        Arc::clone(&cancel),
+        &confirmations,
+    ) {
         Ok(result) => {
             emit(
                 &output,
@@ -474,6 +492,7 @@ fn revalidate_usb(
 
 fn execute(
     request: OperationRequest,
+    records_directory: Option<&Path>,
     output: &Emitter,
     cancel: Arc<AtomicBool>,
     confirmations: &mpsc::Receiver<Value>,
@@ -491,11 +510,21 @@ fn execute(
             true,
         );
         provider_runtime::copy_protected(&runtime_source, &runtime, &manifest, &cancel)?;
-        let protected_paths = vec![
+        let mut protected_paths = vec![
             request.source.path.clone(),
             std::env::current_exe().map_err(|e| e.to_string())?,
             workspace.clone(),
         ];
+        if let Some(directory) = records_directory {
+            protected_paths.push(directory.to_path_buf());
+            if let Destination::Usb { identity } | Destination::UsbPreserve { identity, .. } =
+                &request.destination
+            {
+                revalidate_usb(
+                    &runtime, &manifest, &workspace, directory, identity, &cancel, output,
+                )?;
+            }
+        }
         if let Destination::InspectUsb { identity } = &request.destination {
             revalidate_usb(
                 &runtime,
@@ -559,6 +588,11 @@ fn execute(
                     &cancel,
                     output,
                 )?;
+                if let Some(directory) = records_directory {
+                    revalidate_usb(
+                        &runtime, &manifest, &workspace, directory, identity, &cancel, output,
+                    )?;
+                }
                 crate::usb_preserve::install(
                     identity,
                     plan,
@@ -849,6 +883,11 @@ fn execute(
                 stage(output, "writing", "Creating the bootable USB…", true);
                 let mut command = provider_process::media_command(&runtime, &manifest)?;
                 provider_process::privileged_environment(&mut command, &workspace)?;
+                if let Some(directory) = records_directory {
+                    revalidate_usb(
+                        &runtime, &manifest, &workspace, directory, identity, &cancel, output,
+                    )?;
+                }
                 let media_request = json!({"protocol":1,"action":"write","sourcePath":source.path,"length":request.source.length,"sha256":request.source.sha256,"target":identity});
                 #[cfg(windows)]
                 let media_request = {
@@ -1103,7 +1142,7 @@ fn execute(
         let receipt_path = write_request(&workspace, "receipt.json", &record)?;
         Ok(json!({"operationId":id,"receipt":receipt,"receiptPath":receipt_path}))
     })();
-    let cleanup = crate::operation_cleanup::finish(
+    let mut cleanup = crate::operation_cleanup::finish(
         &workspace,
         &id,
         &request.source.file_name,
@@ -1111,8 +1150,61 @@ fn execute(
         outcome.is_ok(),
     );
     let _ = write_request(&workspace, "cleanup.json", &cleanup);
+    let mut workspace_removed = false;
+    let mut record_warning = None;
+    if outcome.is_ok() && workspace.join("receipt.json").is_file() && records_directory.is_some() {
+        let exported = (|| -> Result<(), String> {
+            let receipt: Value = serde_json::from_slice(
+                &std::fs::read(workspace.join("receipt.json")).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            let plan = json!({"kind":"record_export","operationId":id,"records":{"receipt":receipt,"cleanup":cleanup}});
+            if serde_json::to_vec(&plan).map_err(|e| e.to_string())?.len()
+                > crate::setup_protocol::MAX_FRAME - 4096
+            {
+                return Err("Operation records exceed the export limit".into());
+            }
+            confirm(
+                output,
+                confirmations,
+                &cancel,
+                "Save the completed operation records",
+                &plan,
+            )
+        })();
+        if exported.is_ok() {
+            if matches!(
+                request.destination,
+                Destination::Usb { .. } | Destination::UsbPreserve { .. }
+            ) && cleanup["complete"] == true
+            {
+                match crate::operation_cleanup::remove_completed_workspace(&workspace, &id) {
+                    Ok(()) => workspace_removed = true,
+                    Err(error) => {
+                        record_warning = Some(format!(
+                        "Records were exported, but some temporary operation files remain: {error}"
+                    ))
+                    }
+                }
+            }
+        } else {
+            record_warning = Some("Completed records could not be exported. The protected originals have been retained.".to_owned());
+        }
+    } else if outcome.is_ok()
+        && matches!(
+            request.destination,
+            Destination::InspectDirect
+                | Destination::InspectUsb { .. }
+                | Destination::PrepareRuntime
+        )
+        && cleanup["complete"] == true
+    {
+        workspace_removed =
+            crate::operation_cleanup::remove_completed_workspace(&workspace, &id).is_ok();
+    }
+    cleanup["workspaceRemoved"] = json!(workspace_removed);
     let recovery = json!({"filesPath":workspace,"mutationStarted":workspace.join("image/deployment-started.json").is_file(),
-    "cleanup":cleanup,"message":if outcome.is_ok() { "Operation records are retained." } else {
+    "cleanup":cleanup,"message":if workspace_removed { "Temporary operation files were removed." } else if outcome.is_ok() { "Known temporary files were cleaned up. Protected operation records are retained for recovery." } else {
         "Keep the operation records. If storage changes started, inspect the recorded target before retrying. Use the existing Windows Boot Manager firmware entry to return to Windows if needed."
     }});
     emit(
@@ -1122,6 +1214,10 @@ fn execute(
     match outcome {
         Ok(mut result) => {
             result["cleanup"] = cleanup;
+            result["workspaceRemoved"] = json!(workspace_removed);
+            if let Some(warning) = record_warning {
+                result["recordWarning"] = json!(warning);
+            }
             Ok(result)
         }
         Err(error) => {

@@ -20,9 +20,11 @@ experimental and have not completed physical hardware and boot testing.
 
 On Windows, the app runs from one portable executable. It keeps verified
 application files in a local cache and uses the downloaded ISO in place.
-Windows operation receipts and retained records live under
-`%ProgramData%\OmarchySetup\Operations\Omarchy-Setup-<operation-id>`, with
-administrator-only access. They survive moving or deleting the portable app.
+Completed operation receipts are saved in `Omarchy-Setup-Records` beside the
+portable executable. If that location is unwritable or on the selected USB,
+the app asks for another folder. Protected temporary workspaces are removed
+after successful USB operations and verified record export. Unresolved operation
+and direct-install recovery files remain under `%ProgramData%\OmarchySetup\Operations`.
 Direct installation on Linux and Intel Macs is not implemented.
 
 See the [support matrix](docs/support-matrix.md) for testing status and

@@ -1,10 +1,22 @@
-# Windows operation records in ProgramData
+# Portable receipts and protected Windows workspaces
 
 Windows helper workspaces now use the system-resolved ProgramData known folder:
 `%ProgramData%\OmarchySetup\Operations\Omarchy-Setup-<operation UUID>`.
-Receipts, cleanup results and retained operation records follow that workspace.
-The location remains stable when the portable executable is moved or deleted,
-including when it was launched from removable storage.
+Completed receipts and cleanup records are exported by the unelevated desktop to
+`Omarchy-Setup-Records\operation-<operation UUID>.json` beside the portable EXE.
+The launcher supplies its own path so export does not use the extracted cache.
+An unwritable output folder or one on the selected USB prompts for another folder
+before elevation. Both the desktop and helper check the records filesystem against
+the USB identity; direct-install plans include it among protected paths.
+
+Export writes, flushes and reads back a temporary file before publishing without
+overwriting an existing record. The desktop acknowledges the bound export plan
+only after saving it. A completed USB workspace is removed only after that
+acknowledgement and successful temporary-file cleanup. Cleanup preflights the
+whole workspace, rejects links and unexpected files, removes a fixed record
+allowlist plus the private temporary/profile contents, then removes empty folders.
+Successful inspection/preparation workspaces can also be removed. Failed work,
+failed exports and direct-install recovery workspaces remain in ProgramData.
 
 The helper creates the application namespace, operation collection and individual
 workspaces with an Administrators owner and a protected DACL allowing only
@@ -16,7 +28,12 @@ discovery remains unchanged.
 
 Validation on Windows x64:
 
-- Native library tests: 29 passed, four environment-dependent tests skipped.
+- Native library tests: 32 passed, four environment-dependent tests skipped.
+- UI tests: 22 passed. Svelte check: no errors, four existing warnings.
+- Export tests verify readable saved contents, refusal to replace existing
+  receipts and removal of abandoned temporary exports. Cleanup tests verify that
+  unknown files preserve all records and that known profile caches and empty
+  nested directories can be removed.
 - Explicit administrator integration test: passed. Created two successive empty
   operation folders in the new root, rejected duplicate creation, validated
   nested provider folder permissions and removed both test folders.

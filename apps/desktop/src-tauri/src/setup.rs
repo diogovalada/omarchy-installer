@@ -1064,13 +1064,20 @@ fn run_elevated(
 ) -> Result<Value, String> {
     let usb_approval = crate::setup_protocol::usb_confirmation_plan(&request)?;
     let mut usb_approval_used = false;
+    let mut export = crate::operation_records::Export::choose(app, &request.destination)?;
+    let mut exported_path = None;
+    let mut export_error = None;
     let connection = elevation::launch()?;
     let writer = Arc::new(Mutex::new(connection.writer));
+    let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
+    if let Some(export) = &export {
+        envelope["recordsDirectory"] = json!(export.directory);
+    }
     write_frame(
         &mut *writer
             .lock()
             .map_err(|_| "Helper connection is unavailable")?,
-        &request,
+        &envelope,
     )?;
     service.update(app, |inner| {
         inner.writer = Some(Arc::clone(&writer));
@@ -1092,7 +1099,22 @@ fn run_elevated(
                     "usb" => (MessageDialogKind::Warning, "Erase USB and create installer"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
-                let approved = if let Some(expected) = &usb_approval {
+                let approved = if operation == "record_export" {
+                    match export
+                        .as_mut()
+                        .ok_or("No records destination was prepared".to_owned())
+                        .and_then(|export| export.save(&value["plan"]))
+                    {
+                        Ok(path) => {
+                            exported_path = Some(path);
+                            true
+                        }
+                        Err(error) => {
+                            export_error = Some(error);
+                            false
+                        }
+                    }
+                } else if let Some(expected) = &usb_approval {
                     consume_usb_confirmation(expected, &value["plan"], &mut usb_approval_used)?;
                     !service
                         .inner
@@ -1120,7 +1142,14 @@ fn run_elevated(
             }
             Some("event") => service.update(app, |inner| {
                 if value["recovery"].is_object() {
-                    inner.snapshot.recovery = Some(value["recovery"].clone());
+                    inner.snapshot.recovery = if value["recovery"]["cleanup"]["workspaceRemoved"]
+                        == true
+                        && exported_path.is_none()
+                    {
+                        None
+                    } else {
+                        Some(value["recovery"].clone())
+                    };
                 }
                 let previous = inner.snapshot.stage.clone();
                 if let Some(stage) = value["stage"].as_str() {
@@ -1158,7 +1187,24 @@ fn run_elevated(
                     inner.snapshot.cancel_available = available;
                 }
             }),
-            Some("result") => return Ok(value["result"].clone()),
+            Some("result") => {
+                let mut result = value["result"].clone();
+                if let Some(path) = &exported_path {
+                    result["receiptPath"] = json!(path);
+                    service.update(app, |inner| {
+                        if result["workspaceRemoved"] == true {
+                            if let Some(recovery) = &mut inner.snapshot.recovery {
+                                recovery["filesPath"] = json!(path.parent());
+                                recovery["message"] = json!("Temporary operation files were removed. Records are saved beside the installer or in your chosen folder.");
+                            }
+                        }
+                    });
+                }
+                if let Some(error) = export_error {
+                    result["recordWarning"] = json!(format!("The operation completed, but records could not be exported: {error}. The protected originals have been retained."));
+                }
+                return Ok(result);
+            }
             Some("error") => {
                 return Err(value["message"]
                     .as_str()

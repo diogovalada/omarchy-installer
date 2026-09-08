@@ -6,6 +6,7 @@ mod elevation;
 #[cfg(windows)]
 mod iso_source;
 mod operation_cleanup;
+mod operation_records;
 mod provider_process;
 mod provider_runtime;
 mod setup;
