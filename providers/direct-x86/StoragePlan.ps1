@@ -34,7 +34,7 @@ function Get-ShrinkCandidate($Partition) {
     } catch { $issues.Add($_.Exception.Message) }
     return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
 }
-function Get-Probe([string[]]$ProtectedPaths=@()) {
+function Get-Probe([string[]]$ProtectedPaths=@(), $RuntimeArchive=$null) {
     Emit 'progress' 'inspecting' @{message='Checking firmware and Windows encryption...';cancelAvailable=$false}
     $firmware=[Omarchy.DirectX86.NativeDisk]::Firmware(); $secure='unknown'
     try { $secure=if (Confirm-SecureBootUEFI) { 'enabled' } else { 'disabled' } } catch { }
@@ -81,7 +81,7 @@ function Get-Probe([string[]]$ProtectedPaths=@()) {
     }
     Emit 'progress' 'inspecting' @{message='Checking installation tools and free memory...';cancelAvailable=$false}
     $prerequisites=@(); $runtimePackaged=$false
-    try { $runtimePackaged=$null -ne (Get-RuntimeDistribution) } catch { $prerequisites += @{code='runtime_distribution';available=$false;message=$_.Exception.Message} }
+    try { $runtimePackaged=$null -ne (Get-RuntimeDistribution $RuntimeArchive) } catch { $prerequisites += @{code='runtime_distribution';available=$false;message=$_.Exception.Message} }
     try {
         $docker=Get-Docker; $runtime=Get-Runtime
         $engine=& $docker info --format '{{.OSType}}' 2>$null

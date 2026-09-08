@@ -60,14 +60,17 @@ function Get-CimInstance {
   default { throw ('Unexpected CIM call: '+$ClassName) }
  }
 }
-function Get-RuntimeDistribution { return @{packaged=$true} }
+$script:seenArchive=$null
+function Get-RuntimeDistribution($ArchiveEvidence=$null) { $script:seenArchive=$ArchiveEvidence; return @{packaged=$true} }
 function Get-Runtime { return @{imageId='sha256:fixture'} }
 function Get-Docker { return 'Invoke-FixtureDocker' }
 function Invoke-FixtureDocker { $global:LASTEXITCODE=0; if ($args[0] -eq 'info') { 'linux' } else { 'sha256:fixture' } }
 function Get-ItemProperty { return [pscustomobject]@{DumpFile=''} }
 function Get-Content { return '<WindowsRE><WinreLocation offset="0"/></WindowsRE>' }
 
-$probe=Get-Probe
+$archiveEvidence=[pscustomobject]@{length=4;sha256=('a'*64)}
+$probe=Get-Probe @() $archiveEvidence
+Assert ($script:seenArchive -eq $archiveEvidence -and $probe.runtimePackaged) 'Probe must pass the compiled archive evidence to runtime availability inspection.'
 Assert ($probe.disks.Count -eq 1 -and $probe.disks[0].eligible) 'Blank GPT disk must remain eligible after a successful empty partition query.'
 Assert ($probe.disks[0].partitions.Count -eq 0 -and $probe.disks[0].freeExtents.Count -eq 1) 'Blank disk must expose one bounded free extent.'
 Assert ($probe.disks[0].freeExtents[0].offsetBytes -eq 1MB) 'Free extent must exclude the GPT header.'

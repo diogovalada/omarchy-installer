@@ -1,6 +1,6 @@
 # Imports only a release-packaged, digest-bound local archive. No network,
 # arbitrary image name, Dockerfile, build arguments or host-feature installation.
-function Get-RuntimeDistribution {
+function Get-RuntimeDistribution($ArchiveEvidence=$null) {
     $descriptor=Join-Path $script:builderRoot 'runtime-distribution.json'
     if (-not (Test-Path -LiteralPath $descriptor)) { return $null }
     $value=Read-Json $descriptor; $runtime=Get-Runtime
@@ -8,8 +8,17 @@ function Get-RuntimeDistribution {
     if ($value.schemaVersion -ne 1 -or $value.imageId -cne $runtime.imageId -or $value.archive -cne 'runtime.tar' -or $value.sizeBytes -le 0 -or $value.sizeBytes -gt 256MB -or $value.sha256 -cnotmatch '^[0-9a-f]{64}$') {
         Fail 'runtime_distribution_invalid' 'The packaged construction runtime descriptor does not match its pinned image.'
     }
-    $archive=Assert-Path (Join-Path $script:builderRoot 'runtime.tar')
-    if ((Get-Item -LiteralPath $archive).Length -ne $value.sizeBytes) { Fail 'runtime_distribution_invalid' 'The packaged construction runtime archive is incomplete.' }
+    if ($null -ne $ArchiveEvidence) {
+        # Read-only probe: compare the helper's compiled manifest record with
+        # the staged descriptor. Import never uses this metadata-only path.
+        Assert-Fields $ArchiveEvidence @('length','sha256') @('length','sha256')
+        if ($ArchiveEvidence.length -ne $value.sizeBytes -or $ArchiveEvidence.sha256 -cne $value.sha256) {
+            Fail 'runtime_distribution_invalid' 'The packaged construction runtime descriptor does not match the compiled archive record.'
+        }
+    } else {
+        $archive=Assert-Path (Join-Path $script:builderRoot 'runtime.tar')
+        if ((Get-Item -LiteralPath $archive).Length -ne $value.sizeBytes) { Fail 'runtime_distribution_invalid' 'The packaged construction runtime archive is incomplete.' }
+    }
     return $value
 }
 function Invoke-RuntimePreparation($Request) {

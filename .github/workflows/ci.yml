@@ -126,6 +126,12 @@ jobs:
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
       - name: Test native download state and export
         run: pnpm desktop:test:native
+      - name: Test Windows disk inspection and runtime metadata
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & ./testkit/windows-direct/Test-StoragePlan.ps1
+          & ./testkit/windows-direct/Test-RuntimeDistribution.ps1
 
   dependency-policy:
     name: Dependency policy

@@ -1,3 +1,4 @@
+use crate::setup_protocol::Destination;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -5,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const EMBEDDED: &str = include_str!(concat!(env!("OUT_DIR"), "/provider-lock.json"));
 
@@ -208,7 +210,7 @@ fn open_regular(root: &Path, relative: &str) -> Result<File, String> {
 #[cfg(test)]
 fn verify(root: &Path, manifest: &RuntimeManifest, cancel: &AtomicBool) -> Result<(), String> {
     for record in &manifest.files {
-        copy_one(root, None, record, cancel)?;
+        copy_one(root, None, record, cancel, &mut |_| {})?;
     }
     Ok(())
 }
@@ -241,7 +243,7 @@ pub fn verify_inspection(
         .iter()
         .filter(|file| file.path == inspection.executable || file.path.starts_with(&subtree))
     {
-        copy_one(root, None, record, cancel)?;
+        copy_one(root, None, record, cancel, &mut |_| {})?;
     }
     Ok(())
 }
@@ -338,12 +340,83 @@ pub fn copy_protected(
     root: &Path,
     destination: &Path,
     manifest: &RuntimeManifest,
+    operation: &Destination,
     cancel: &AtomicBool,
+    mut progress: impl FnMut(u64, u64),
 ) -> Result<(), String> {
-    for record in &manifest.files {
-        copy_one(root, Some(destination), record, cancel)?;
+    let files = operation_files(manifest, operation)?;
+    let total = files.iter().map(|file| file.length).sum();
+    let mut copied = 0;
+    let mut last_update = Instant::now();
+    progress(0, total);
+    for record in files {
+        copy_one(root, Some(destination), record, cancel, &mut |bytes| {
+            if last_update.elapsed() >= Duration::from_millis(100) {
+                progress(copied + bytes, total);
+                last_update = Instant::now();
+            }
+        })?;
+        copied += record.length;
     }
+    progress(copied, total);
     Ok(())
+}
+
+fn operation_files<'a>(
+    manifest: &'a RuntimeManifest,
+    operation: &Destination,
+) -> Result<Vec<&'a RuntimeFile>, String> {
+    let direct = matches!(
+        operation,
+        Destination::InspectDirect
+            | Destination::PrepareFirmware
+            | Destination::PrepareRuntime
+            | Destination::DirectX86 { .. }
+    );
+    let prefix = if direct {
+        let script = manifest
+            .direct_x86
+            .as_ref()
+            .ok_or("The direct-install provider is not packaged")?;
+        if script.entrypoint != "direct-x86/Invoke-DirectX86.ps1" {
+            return Err("Invalid direct-install runtime layout".into());
+        }
+        "direct-x86/".to_owned()
+    } else {
+        let (prefix, _) = manifest
+            .media
+            .executable
+            .rsplit_once('/')
+            .ok_or("Invalid media runtime layout")?;
+        format!("{prefix}/")
+    };
+    let inspection = matches!(
+        operation,
+        Destination::InspectDirect | Destination::PrepareFirmware
+    );
+    Ok(manifest
+        .files
+        .iter()
+        .filter(|file| {
+            file.path.starts_with(&prefix)
+                || (direct
+                    && if inspection {
+                        // Probe loads the direct provider's scripts and checks runtime
+                        // metadata. The archive is needed only when importing Docker.
+                        matches!(
+                            file.path.as_str(),
+                            "image-builder-x86/Dockerfile"
+                                | "image-builder-x86/runtime-lock.json"
+                                | "image-builder-x86/runtime-packages.lock"
+                                | "image-builder-x86/runtime-distribution.json"
+                        )
+                    } else {
+                        file.path.starts_with("image-builder-x86/")
+                    })
+                || (matches!(operation, Destination::UsbPreserve { .. })
+                    && file.path.starts_with("usb-preserve/"))
+        })
+        .collect())
 }
 
 fn copy_one(
@@ -351,7 +424,11 @@ fn copy_one(
     destination: Option<&Path>,
     record: &RuntimeFile,
     cancel: &AtomicBool,
+    progress: &mut impl FnMut(u64),
 ) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("Operation cancelled".into());
+    }
     if record.length > 256 * 1024 * 1024 || record.sha256.len() != 64 {
         return Err("Invalid runtime file constraint".into());
     }
@@ -396,13 +473,15 @@ fn copy_one(
                 .write_all(&buffer[..read])
                 .map_err(|error| error.to_string())?;
         }
+        progress(total);
     }
     if total != record.length || format!("{:x}", hash.finalize()) != record.sha256 {
         return Err(format!("Packaged runtime digest mismatch: {}", record.path));
     }
-    if let Some(target) = target {
-        target.sync_all().map_err(|error| error.to_string())?;
-    }
+    // These are disposable process inputs, not recovery records. Completed
+    // File writes are visible to the child without a physical flush per file;
+    // no operation resumes from this directory after a crash.
+    drop(target);
     #[cfg(unix)]
     if let Some(destination) = destination {
         use std::os::unix::fs::PermissionsExt;
@@ -414,4 +493,184 @@ fn copy_one(
         .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    fn fixture(root: &Path) -> RuntimeManifest {
+        let paths = [
+            "media/node",
+            "media/writer.js",
+            "media/node_modules/dependency.js",
+            "direct-x86/Invoke-DirectX86.ps1",
+            "direct-x86/NativeDisk.cs",
+            "image-builder-x86/Dockerfile",
+            "image-builder-x86/runtime-lock.json",
+            "image-builder-x86/runtime-packages.lock",
+            "image-builder-x86/runtime-distribution.json",
+            "image-builder-x86/runtime.tar",
+            "image-builder-x86/product_builder.py",
+            "usb-preserve/boot/BOOTX64.EFI",
+        ];
+        let files = paths
+            .iter()
+            .map(|path| {
+                let target = root.join(path);
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::write(target, b"good").unwrap();
+                RuntimeFile {
+                    path: (*path).into(),
+                    length: 4,
+                    sha256: format!("{:x}", Sha256::digest(b"good")),
+                }
+            })
+            .collect();
+        RuntimeManifest {
+            schema: 1,
+            platform: "test".into(),
+            architecture: "test".into(),
+            media: MediaRuntime {
+                executable: "media/node".into(),
+                entrypoint: "media/writer.js".into(),
+            },
+            media_inspection: None,
+            direct_x86: Some(ScriptRuntime {
+                entrypoint: "direct-x86/Invoke-DirectX86.ps1".into(),
+            }),
+            apple: None,
+            files,
+        }
+    }
+
+    #[test]
+    fn disk_check_skips_unneeded_payloads_and_reports_verified_bytes() {
+        let source = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let manifest = fixture(source.path());
+        // Neither an unavailable USB writer nor the large archive prevents a
+        // partition check. Their manifest records still describe the package.
+        fs::remove_file(source.path().join("media/node")).unwrap();
+        fs::remove_file(source.path().join("image-builder-x86/runtime.tar")).unwrap();
+        let mut updates = Vec::new();
+        copy_protected(
+            source.path(),
+            output.path(),
+            &manifest,
+            &Destination::InspectDirect,
+            &AtomicBool::new(false),
+            |bytes, total| updates.push((bytes, total)),
+        )
+        .unwrap();
+        assert_eq!(updates.first(), Some(&(0, 24)));
+        assert_eq!(updates.last(), Some(&(24, 24)));
+        assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert!(!output.path().join("media").exists());
+        assert!(!output.path().join("usb-preserve").exists());
+        assert!(!output.path().join("image-builder-x86/runtime.tar").exists());
+        assert!(!output
+            .path()
+            .join("image-builder-x86/product_builder.py")
+            .exists());
+        assert_eq!(
+            fs::read(output.path().join("direct-x86/NativeDisk.cs")).unwrap(),
+            b"good"
+        );
+        assert_eq!(
+            fs::read(output.path().join("image-builder-x86/runtime-lock.json")).unwrap(),
+            b"good"
+        );
+
+        let import_output = tempfile::tempdir().unwrap();
+        assert!(copy_protected(
+            source.path(),
+            import_output.path(),
+            &manifest,
+            &Destination::PrepareRuntime,
+            &AtomicBool::new(false),
+            |_, _| {}
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn staging_rejects_tampered_dependencies_and_cancellation() {
+        let source = tempfile::tempdir().unwrap();
+        let manifest = fixture(source.path());
+        let output = tempfile::tempdir().unwrap();
+        let cancelled = AtomicBool::new(true);
+        assert!(copy_protected(
+            source.path(),
+            output.path(),
+            &manifest,
+            &Destination::InspectDirect,
+            &cancelled,
+            |_, _| {}
+        )
+        .unwrap_err()
+        .contains("cancelled"));
+        assert_eq!(fs::read_dir(output.path()).unwrap().count(), 0);
+        fs::write(source.path().join("direct-x86/NativeDisk.cs"), b"evil").unwrap();
+        assert!(copy_protected(
+            source.path(),
+            output.path(),
+            &manifest,
+            &Destination::InspectDirect,
+            &AtomicBool::new(false),
+            |_, _| {}
+        )
+        .unwrap_err()
+        .contains("digest mismatch"));
+    }
+
+    #[test]
+    fn usb_staging_keeps_writer_dependencies_without_direct_tools() {
+        let source = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let manifest = fixture(source.path());
+        copy_protected(
+            source.path(),
+            output.path(),
+            &manifest,
+            &Destination::Usb {
+                identity: serde_json::json!({}),
+            },
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(output.path().join("media/node_modules/dependency.js")).unwrap(),
+            b"good"
+        );
+        assert!(!output.path().join("direct-x86").exists());
+        assert!(!output.path().join("image-builder-x86").exists());
+        assert!(!output.path().join("usb-preserve").exists());
+    }
+
+    #[test]
+    #[ignore = "Measures locally staged provider inputs; no host inspection or installation"]
+    fn profile_packaged_disk_check_staging() {
+        let manifest = manifest().unwrap();
+        let source = locate(&manifest).unwrap();
+        let files = operation_files(&manifest, &Destination::InspectDirect).unwrap();
+        let total: u64 = files.iter().map(|file| file.length).sum();
+        let output = tempfile::tempdir().unwrap();
+        let started = Instant::now();
+        copy_protected(
+            &source,
+            output.path(),
+            &manifest,
+            &Destination::InspectDirect,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        eprintln!(
+            "Disk-check staging: {} files, {total} bytes, {:?}",
+            files.len(),
+            started.elapsed()
+        );
+    }
 }

@@ -115,9 +115,10 @@ try {
         'prepare-firmware' { Invoke-FirmwarePreparation $request }
         'prepare-runtime' { Invoke-RuntimePreparation $request }
         'probe' {
-            Assert-Fields $request @('operationId','protectedPaths') @()
+            Assert-Fields $request @('operationId','protectedPaths','runtimeArchive') @()
             $protectedPaths=if (@($request.PSObject.Properties.Name) -contains 'protectedPaths') { @($request.protectedPaths) } else { @() }
-            Emit 'result' 'probed' @{result=(Get-Probe $protectedPaths)}
+            $runtimeArchive=if (@($request.PSObject.Properties.Name) -contains 'runtimeArchive') { $request.runtimeArchive } else { $null }
+            Emit 'result' 'probed' @{result=(Get-Probe $protectedPaths $runtimeArchive)}
         }
         'build' {
             Assert-Fields $request @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu','sourceVerification') @('operationId','sourceIsoPath','sourceSignaturePath','outputDirectory','bootMenu')

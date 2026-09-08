@@ -607,13 +607,28 @@ fn execute(
     let workspace = elevation::protected_directory(None, &format!("Omarchy-Setup-{id}"))?;
     let outcome: Result<Value, String> = (|| {
         let runtime = elevation::protected_directory(Some(&workspace), "providers")?;
-        stage(
-            output,
-            "preparing",
-            "Preparing the installation tools…",
-            true,
-        );
-        provider_runtime::copy_protected(&runtime_source, &runtime, &manifest, &cancel)?;
+        let preparing = if matches!(
+            request.destination,
+            Destination::InspectDirect | Destination::InspectUsb { .. }
+        ) {
+            "Preparing the disk check…"
+        } else {
+            "Preparing the installation tools…"
+        };
+        provider_runtime::copy_protected(
+            &runtime_source,
+            &runtime,
+            &manifest,
+            &request.destination,
+            &cancel,
+            |bytes, total| {
+                emit(
+                    output,
+                    json!({"protocol":1,"type":"event","stage":"preparing",
+                "message":preparing,"bytes":bytes,"totalBytes":total,"cancelAvailable":true}),
+                )
+            },
+        )?;
         let mut protected_paths = vec![
             request.source.path.clone(),
             std::env::current_exe().map_err(|e| e.to_string())?,
@@ -789,14 +804,23 @@ fn execute(
             );
         }
         if matches!(request.destination, Destination::InspectDirect) {
+            // Availability comes from the compiled package manifest. The probe
+            // compares it with the authenticated descriptor without copying
+            // the archive. Import still stages and verifies the actual bytes.
+            let archive = manifest
+                .files
+                .iter()
+                .find(|file| file.path == "image-builder-x86/runtime.tar")
+                .map(|file| json!({"length":file.length,"sha256":file.sha256}));
             let probe_request = write_request(
                 &workspace,
                 "probe-request.json",
-                &json!({"protectedPaths":protected_paths}),
+                &json!({"protectedPaths":protected_paths,"runtimeArchive":archive}),
             )?;
             let mut command =
                 provider_process::direct_command(&runtime, &manifest, "probe", &probe_request)?;
             provider_process::privileged_environment(&mut command, &workspace)?;
+            stage(output, "inspecting", "Checking disks and partitions…", true);
             let probe =
                 provider_process::run(command, None, Arc::clone(&cancel), None, false, |value| {
                     provider_event(output, value)

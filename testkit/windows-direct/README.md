@@ -7,6 +7,7 @@ From the repository root:
 ```powershell
 powershell.exe -NoProfile -File testkit/windows-direct/Test-Preflight.ps1
 powershell.exe -NoProfile -File testkit/windows-direct/Test-StoragePlan.ps1
+powershell.exe -NoProfile -File testkit/windows-direct/Test-RuntimeDistribution.ps1
 powershell.exe -NoProfile -File testkit/windows-direct/Test-PartitionTransfer.ps1
 ```
 
@@ -18,6 +19,18 @@ The recovery worker body is never executed.
 host boundaries. It covers blank GPT disks, failed or incomplete inventories,
 physical-sector limits, protected-path discovery with `ProgramData` absent,
 and allocation identity, size and alignment checks.
+
+`Test-RuntimeDistribution.ps1` checks probe-only archive metadata and confirms
+runtime import still requires the actual archive. It does not invoke Docker.
+
+After `pnpm providers:stage`, measure disk-check tool preparation with:
+
+```powershell
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked profile_packaged_disk_check_staging -- --ignored --nocapture
+```
+
+This copies and verifies the selected package files into a temporary directory;
+it does not run the disk probe or require administrator access.
 
 `Test-PartitionTransfer.ps1` compiles the production C# transfer loop and runs
 seven cases using real Windows unbuffered I/O into newly created temporary files.
