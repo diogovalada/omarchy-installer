@@ -23,8 +23,9 @@ export function parseMacApfsStores(plist: string): Map<string, string[]> {
   return result;
 }
 
-export function parseMacBackingDisks(plist: string, stores: Map<string, string[]>): string[] {
+export function parseMacBackingDisks(plist: string, stores: Map<string, string[]>, expectedDevice?: string): string[] {
   const info = Plist.parse(Buffer.from(plist, 'utf8')).data as Record<string, unknown>;
+  if (expectedDevice && info?.DeviceIdentifier !== expectedDevice) throw new PhysicalWriteError('EXCLUSION_UNAVAILABLE', 'macOS source volume identity changed.');
   const whole = info?.Whole === true ? info.DeviceIdentifier : info?.ParentWholeDisk;
   if (typeof whole !== 'string' || !/^disk\d+$/.test(whole)) throw new PhysicalWriteError('EXCLUSION_UNAVAILABLE', 'macOS filesystem backing disk is unavailable.');
   const backing = stores.get(whole);
@@ -40,7 +41,13 @@ export async function macApfsStores(): Promise<Map<string, string[]>> {
 }
 
 export async function macBackingDisks(filename: string, stores: Map<string, string[]>): Promise<string[]> {
-  return parseMacBackingDisks(await runTool('/usr/sbin/diskutil', ['info', '-plist', filename]), stores);
+  // diskutil accepts device identifiers or volume mountpoints, not arbitrary
+  // image/executable paths. df resolves a file through the actual mounted volume,
+  // including APFS firmlinks and system snapshots, without guessing path prefixes.
+  const rows = (await runTool('/bin/df', ['-P', filename])).trim().split('\n').slice(1);
+  const match = rows.length === 1 ? rows[0].match(/^\/dev\/(disk\d+(?:s\d+)*)\s+\d+\s+\d+\s+-?\d+\s+\d+%\s+\//) : null;
+  if (!match) throw new PhysicalWriteError('EXCLUSION_UNAVAILABLE', 'macOS source does not resolve to one local disk volume.');
+  return parseMacBackingDisks(await runTool('/usr/sbin/diskutil', ['info', '-plist', `/dev/${match[1]}`]), stores, match[1]);
 }
 
 /** ioreg contains CFData values which plutil cannot represent as JSON. */

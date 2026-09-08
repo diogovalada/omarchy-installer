@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseMacUsbRegistry, parseMacApfsStores, parseMacBackingDisks } = require('../dist/physical-macos.js');
+const { parseMacUsbRegistry, parseMacApfsStores, parseMacBackingDisks, macBackingDisks } = require('../dist/physical-macos.js');
+const tools = require('../dist/physical-tools.js');
 const { fingerprint, sameIdentity } = require('../dist/physical-discovery.js');
 
 function xml(value) {
@@ -64,4 +65,21 @@ test('macOS maps APFS snapshots and Fusion containers to every physical disk', (
     VirtualOrPhysical: 'Physical', FilesystemType: 'msdos' }), stores), ['/dev/disk2']);
   assert.throws(() => parseMacBackingDisks(plist({ ParentWholeDisk: 'disk4', VirtualOrPhysical: 'Virtual' }), stores), /unresolved|resolved/);
   assert.throws(() => parseMacApfsStores(plist({ Containers: [{ ContainerReference: 'disk3', PhysicalStores: [] }] })), /ambiguous/);
+});
+
+test('macOS resolves arbitrary source paths to disk identifiers before calling diskutil', async t => {
+  const source = '/Users/example/Downloads/Omarchy image.iso';
+  const stores = new Map([['disk3', ['/dev/disk0']]]);
+  const calls = [];
+  t.mock.method(tools, 'runTool', async (exe, args) => {
+    calls.push([exe, args]);
+    if (exe === '/bin/df') return 'Filesystem 512-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1000000 1000 900000 1% /System/Volumes/Data\n';
+    assert.deepEqual(args, ['info', '-plist', '/dev/disk3s5']);
+    return plist({ DeviceIdentifier: 'disk3s5', ParentWholeDisk: 'disk3', Whole: false, VirtualOrPhysical: 'Virtual', FilesystemType: 'apfs' });
+  });
+  assert.deepEqual(await macBackingDisks(source, stores), ['/dev/disk0']);
+  assert.deepEqual(calls[0], ['/bin/df', ['-P', source]]);
+  t.mock.method(tools, 'runTool', async () => 'Filesystem 512-blocks Used Available Capacity Mounted on\nserver:/share 1000 100 900 10% /Volumes/Network\n');
+  await assert.rejects(macBackingDisks(source, stores), /one local disk volume/);
+  assert.throws(() => parseMacBackingDisks(plist({ DeviceIdentifier: 'disk4s1' }), stores, 'disk3s5'), /identity changed/);
 });

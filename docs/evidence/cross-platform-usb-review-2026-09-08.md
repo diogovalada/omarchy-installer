@@ -33,6 +33,11 @@ unmount/open, identity/geometry checks, verification, cancellation and receipts.
    its tests because the configured providers directory did not exist. CI now
    stages authenticated native providers before compiling desktop tests, and runs
    media/discovery checks first.
+7. **macOS disk lookup received file paths instead of volume identifiers.** The
+   inspector passed ISO, executable and records-directory paths to diskutil.
+   It now resolves their mounted disk with `df -P`, queries diskutil using that
+   exact identifier, and rejects inconsistent or non-local results. This also
+   avoids guessing APFS firmlink and snapshot mappings from pathname prefixes.
 
 These fixes preserve exact hardware/geometry matching, administrator confirmation,
 source authentication, mandatory SDK verification and full image readback. No
@@ -40,8 +45,8 @@ physical device was written or unmounted during this review.
 
 ## Validation
 
-- Windows: 68 media tests, 64 passed, four POSIX-only skips, no failures.
-- Native Linux under WSL: 68 media tests, 57 passed, 11 Windows-only skips, no failures.
+- Windows: 69 media tests, 65 passed, four POSIX-only skips, no failures.
+- Native Linux under WSL: 69 media tests, 58 passed, 11 Windows-only skips, no failures.
 - Real Linux read-only discovery: six disks enumerated; the source filesystem
   resolved to an excluded disk; the prerequisite probe passed. No eligible USB
   was attached to this Linux environment.
@@ -56,8 +61,8 @@ physical device was written or unmounted during this review.
 
 Regression fixtures cover a serial-less drive behind a hub, macOS USB subclasses,
 overmounts at the target or an ancestor, mount replacement before unmount, and
-mount detection after raw-device acquisition. Failure tests require zero device
-writes and closed handles.
+mount detection after raw-device acquisition. The new pre-write refusal tests
+require zero device writes and closed handles.
 
 The native locking interpretation was checked against Apple's
 [IOMediaBSDClient source](https://github.com/apple-oss-distributions/IOStorageFamily/blob/main/IOMediaBSDClient.cpp):
