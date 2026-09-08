@@ -16,6 +16,13 @@ Download packages from the completed workflow's **Artifacts** section. They are
 retained for 14 days. This workflow builds previews; it does not publish a GitHub
 Release or claim production signing or hardware qualification.
 
+Initial validation (2026-09-08): GitHub blocked [all four jobs before startup](https://github.com/diogovalada/omarchy-installer/actions/runs/34245346651)
+because of an account billing/spending-limit issue. No release artifacts have
+been verified on those runners yet. Local checks passed for actionlint 1.7.12,
+the Tauri config, script syntax and Linux preview staging, including native SDK file writing and
+rejection of mixed development/preview providers. Resolve GitHub Billing & plans,
+then rerun the workflow to complete package validation.
+
 CI sets `OMARCHY_DISTRIBUTION=usb-preview`: it includes download and USB support,
 keeps No USB installation disabled, and omits the machine-local Docker image and
 direct-install providers. The default maintainer packaging profile still includes

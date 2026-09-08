@@ -83,6 +83,8 @@ jobs:
         if: runner.os == 'Linux'
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
+          # Provider binary hashes are embedded before packaging.
+          NO_STRIP: '1'
         run: pnpm --dir apps/desktop exec tauri build --config src-tauri/tauri.release-preview.conf.json --bundles deb,appimage
       - name: Build macOS packages
         if: runner.os == 'macOS'
