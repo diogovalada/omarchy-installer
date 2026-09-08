@@ -6,12 +6,6 @@ and detached OpenPGP verification. The single setup screen shows a download,
 its destination and progress, followed by the USB and install actions.
 The webview cannot supply URLs, keys or paths.
 
-The product name is **Omarchy Installer**. The existing application identifier
-(`community.omarchy.setup`), internal package names, cache paths and
-`Omarchy-Setup-Records` directory remain stable so the rename preserves settings,
-downloads and recovery records. Previously built executables retain their old
-name and branding; new builds use the updated product name.
-
 The two setup actions now open native disk/requirements flows. USB creation uses
 the pinned Etcher SDK through a separately elevated copy of this executable.
 Windows direct installation builds a system locally from the signed ISO, then
