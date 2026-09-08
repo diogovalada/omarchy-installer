@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>USB and app UX audit</title></head>
+<body><div id="app"></div><script type="module">
+// Development-only fixture: real components, in-memory responses, no native or disk access.
+const GiB=1024**3;
+const scenario=new URLSearchParams(location.search).get('state') ?? 'ready';
+const release={version:'4.0.2',file_name:'omarchy-4.0.2.iso',length:6227752960,sha256:'a'.repeat(64),signer_fingerprint:'B'.repeat(40)};
+let download={status:'complete',release,received_bytes:release.length,total_bytes:release.length,existing_image:true,image_locked:true,cancel_requested:false,image_path:'C:/Users/Example/Downloads/Omarchy/omarchy-4.0.2.iso',error:null,destination_directory:'C:/Users/Example/Downloads/Omarchy',host_os:'windows',host_architecture:'x86_64'};
+if(scenario==='download')Object.assign(download,{status:'ready',existing_image:false,image_path:null,image_locked:false,received_bytes:0});
+if(scenario==='download-failed')Object.assign(download,{status:'failed',existing_image:false,image_path:null,image_locked:false,received_bytes:2*GiB,error:'The download connection was interrupted. Try again to resume.'});
+if(scenario==='cancelled')Object.assign(download,{status:'cancelled',existing_image:true,image_path:null,image_locked:false,received_bytes:3*GiB});
+const usb={eligible:true,reasons:[],freeBytes:19*GiB,requiredBytes:release.length+64*1024**2,replacesBootloader:true,needsAdministrator:false};
+const drive={id:'usb-sandisk',label:'SanDisk Ultra',detail:'E: · \\.\\PhysicalDrive3 · USB',sizeBytes:32*GiB,eligible:true,reasons:[],allocation:null,deletion:null,usb:null};
+let snapshot={kind:null,status:'idle',stage:'idle',message:'',choices:[],requirements:[],bytes:0,totalBytes:0,cancelAvailable:false,cancelRequested:false,error:null,receipt:null};
+const ready=kind=>({...snapshot,kind,status:'ready',stage:'ready',message:'Choose a USB drive.',choices:scenario==='empty'?[]:[{...drive},{...drive,id:'usb-small',label:'Generic USB',detail:'F: · \\.\\PhysicalDrive4 · USB',sizeBytes:4*GiB,eligible:false,reasons:['This USB is too small for the selected image.']}],error:null,receipt:null,usbReview:null});
+if(['running','complete','eject-failed','failed','stopped'].includes(scenario)) {
+ snapshot=ready('usb');
+ if(scenario==='running')Object.assign(snapshot,{status:'running',stage:'verifying',message:'Reading back the USB to verify the image…',bytes:3*GiB,totalBytes:release.length,cancelAvailable:true});
+ if(['complete','eject-failed'].includes(scenario))Object.assign(snapshot,{status:'complete',stage:'complete',message:'Bootable USB created and verified.',receipt:{receiptPath:'C:/Tools/Omarchy-Setup-Records/usb-example/receipt.json',receipt:{eject:{status:scenario==='complete'?'ejected':'failed',message:scenario==='complete'?'USB safely ejected.':'Could not eject the USB automatically. Close programs using it, then safely remove it in Windows.'}}}});
+ if(scenario==='failed')Object.assign(snapshot,{status:'failed',error:'The USB was disconnected before verification finished.',recovery:{filesPath:'C:/Tools/Omarchy-Setup-Records/usb-example',mutationStarted:true,message:'Operation records saved. Temporary files removed.',cleanup:{complete:true}}});
+ if(scenario==='stopped')Object.assign(snapshot,{status:'cancelled',message:'USB creation cancelled.',recovery:{filesPath:'C:/Tools/Omarchy-Setup-Records/usb-example',mutationStarted:true,message:'Operation records saved. Temporary files removed.',cleanup:{complete:true}}});
+}
+window.isTauri=true;
+window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+ if(command==='download_status')return structuredClone(download);
+ if(command==='resolve_download'){download={...download,status:'ready',error:null};return structuredClone(download);}
+ if(command==='start_download'){download={...download,status:'complete',image_path:download.destination_directory+'/'+release.file_name,image_locked:true,error:null};return structuredClone(download);}
+ if(command==='choose_download_directory')return structuredClone(download);
+ if(command==='setup_status')return structuredClone(snapshot);
+ if(command==='inspect_setup'){snapshot=ready(args.kind);return structuredClone(snapshot);}
+ if(command==='inspect_usb_choice'){
+   let inspection={...usb};
+   if(scenario==='incompatible')inspection={...usb,eligible:false,freeBytes:1*GiB,reasons:['An existing NTFS data partition is required.','There is not enough free space for the ISO and a 64 MiB safety reserve.']};
+   if(scenario==='admin')inspection={...usb,eligible:!!args.elevated,freeBytes:null,needsAdministrator:!args.elevated,reasons:args.elevated?[]:['Administrator access is needed to read this USB layout.']};
+   snapshot={...snapshot,choices:snapshot.choices.map(c=>c.id===args.choiceId?{...c,usb:inspection}:c)};
+   return structuredClone(snapshot);
+ }
+ if(command==='review_usb_setup'){if(scenario==='command-failed')throw new Error('The selected USB changed. Refresh USB drives and select it again.');const c=snapshot.choices.find(c=>c.id===args.choiceId);snapshot={...snapshot,usbReview:{token:'fixture-only',choiceId:c.id,mode:args.mode,label:c.label,detail:c.detail,sizeBytes:c.sizeBytes,fileName:release.file_name,replacesBootloader:true}};return structuredClone(snapshot);}
+ if(command==='dismiss_usb_review'){snapshot={...snapshot,usbReview:null};return structuredClone(snapshot);}
+ if(command==='start_setup'){snapshot={...snapshot,usbReview:null,status:'running',stage:'writing',message:'Writing the verified image to the USB…',bytes:2*GiB,totalBytes:release.length,cancelAvailable:true};return structuredClone(snapshot);}
+ if(command==='cancel_setup'){snapshot={...snapshot,status:'cancelled',cancelAvailable:false,message:'USB creation cancelled.',recovery:{filesPath:'C:/Tools/Omarchy-Setup-Records/usb-example',mutationStarted:true,message:'Operation records saved. Temporary files removed.',cleanup:{complete:true}}};return structuredClone(snapshot);}
+ throw new Error('Visual fixture does not implement '+command);
+}};
+await import('/src/main.ts');
+</script></body></html>

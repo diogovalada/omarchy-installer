@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { ArrowLeft, Check, RefreshCw } from 'lucide-svelte';
   import { downloads, formatBytes } from './downloads';
   import { setup, setupActive, usbIssueSummary } from './setup';
@@ -10,6 +11,10 @@
   let defaultOs:'omarchy'|'windows'='omarchy';
   let timeoutSeconds=5;
   let firmwareReady=false;
+  let inspectionRequested=false;
+  let preserveButton:HTMLButtonElement;
+  let eraseButton:HTMLButtonElement;
+  let usbChoices:HTMLDivElement;
   $: snapshot = $setup.snapshot?.kind === kind ? $setup.snapshot : null;
   $: active = setupActive(snapshot?.status) || $setup.pending;
   $: complete = snapshot?.status === 'complete';
@@ -19,7 +24,23 @@
   $: percent = snapshot?.totalBytes ? Math.min(100, snapshot.bytes / snapshot.totalBytes * 100) : 0;
   $: error = $setup.error ?? snapshot?.error;
   $: usbReview = snapshot?.usbReview;
+  $: interrupted = kind === 'usb' && ['failed','cancelled'].includes(snapshot?.status ?? '');
+  $: if (kind === 'usb' && downloads.native && readyImage && !active && !inspectionRequested && (!snapshot || snapshot.status === 'idle')) {
+    inspectionRequested=true;
+    void setup.inspect('usb');
+  }
   const focusReview = (node:HTMLElement) => { node.focus(); };
+  async function inspectUsb(choiceId:string,elevated=false) {
+    await setup.inspectUsb(choiceId,elevated);
+    await tick();
+    usbChoices?.querySelector<HTMLInputElement>('input:checked')?.focus();
+  }
+  async function dismissReview() {
+    const mode=usbReview?.mode;
+    await setup.dismissUsbReview();
+    await tick();
+    (mode==='erase' ? eraseButton : preserveButton)?.focus();
+  }
   function confirmUsb() {
     if (!usbReview || active) return;
     void setup.start(usbReview.choiceId,undefined,undefined,undefined,usbReview.mode,usbReview.token);
@@ -27,17 +48,27 @@
 </script>
 
 <section class="flow" aria-label={kind === 'usb' ? 'Create bootable USB' : 'Install without USB'}>
-  <div class="heading"><h2>{kind === 'usb' ? 'Create bootable USB' : 'Install without USB'}</h2><button class="back" disabled={active} onclick={()=>{if(usbReview)void setup.dismissUsbReview();close();}}><ArrowLeft size={15}/>Back</button></div>
+  <div class="heading"><h2 tabindex="-1" use:focusReview>{kind === 'usb' ? 'Create bootable USB' : 'Install without USB'}</h2><button class="back" disabled={active} onclick={async()=>{if(usbReview)await setup.dismissUsbReview();close();}}><ArrowLeft size={15}/>Back</button></div>
+  {#if error}<p class="error" role="alert" tabindex="-1" use:focusReview>{error}</p>{/if}
   {#if !downloads.native}
     <p>Open the desktop app to inspect disks and continue.</p>
-  {:else if !readyImage && !active && !complete}
+  {:else if !readyImage && !active && !complete && !interrupted}
     <p>Download and verify the Omarchy image above to continue.</p>
   {:else if complete}
     <div class="done" role="status"><Check size={21}/>{kind === 'usb' ? 'Bootable USB created and verified.' : 'Omarchy has been installed.'}</div>
     {#if kind === 'usb'}
-      <p>{snapshot?.receipt?.receipt?.message ?? snapshot?.receipt?.receipt?.eject?.message ?? 'The image was written and read back successfully.'}</p>
+      {#if snapshot?.receipt?.receipt?.mode === 'preserve'}<p>Your existing files and partitions were kept.</p>{/if}
+      {#if snapshot?.receipt?.receipt?.eject?.status === 'ejected'}
+        <p>The USB was safely ejected. You can unplug it now.</p>
+      {:else}
+        <p>Safely eject the USB in your operating system before unplugging it.</p>
+        {#if snapshot?.receipt?.receipt?.eject?.status === 'failed'}<p class="error">Automatic ejection did not finish. Close any programs using the USB, then try safely ejecting it again.</p>{/if}
+      {/if}
+      <h3>Install from your USB</h3>
+      <ol class="next-steps"><li>Connect it to the x86-64 PC where you want to install Omarchy.</li><li>Restart that PC and choose the USB in its boot menu.</li><li>Follow the installer to choose the destination disk and finish setup.</li></ol>
+      <details><summary>USB not showing in the boot menu?</summary><p>Use the PC’s UEFI boot menu with Secure Boot off. The boot-menu key depends on the manufacturer.</p></details>
       {#if snapshot?.receipt?.receipt?.backupPath}<p>Boot recovery archive: <span class="path">{snapshot.receipt.receipt.backupPath}</span></p>{/if}
-      <button onclick={() => {selected='';void setup.inspect('usb');}}>Check USB drives</button>
+      <div class="actions"><button onclick={() => {selected='';void setup.inspect('usb');}}>Create another USB</button></div>
     {:else}
       <p>Restart when you’re ready, then choose Omarchy to finish setup and create your account.</p>
       <details><summary>What happens on restart?</summary><p>The boot menu offers Omarchy and Windows. It starts your chosen default after the countdown. Choosing Windows includes a brief extra restart.</p><p>Omarchy’s first boot finishes hardware setup and secures the installation with your account password.</p></details>
@@ -46,12 +77,13 @@
     {#if snapshot?.receipt?.receiptPath}<details><summary>Operation receipt</summary><p class="path">{snapshot.receipt.receiptPath}</p></details>{/if}
     {#if snapshot?.receipt?.recordWarning}<p class="error">{snapshot.receipt.recordWarning}</p>{/if}
   {:else}
-    {#if !active}
+    {#if !active && !usbReview && !interrupted}
       <p>{kind === 'usb' ? 'Choose a USB drive.' : preparationNeeded ? 'Prepare this computer, then refresh disks to choose space for Omarchy.' : 'Choose space for Omarchy. You can keep using Windows.'}</p>
     {/if}
     {#if active}
-      <p role="status" aria-live="polite">{snapshot?.cancelRequested ? 'Stopping safely…' : snapshot?.message ?? 'Checking this computer…'}</p>
+      <p role="status" aria-live="polite">{snapshot?.cancelRequested ? 'Stopping safely…' : setupActive(snapshot?.status) ? snapshot?.message : kind==='usb' ? 'Checking USB drives…' : 'Checking this computer…'}</p>
       {#if snapshot?.totalBytes}<progress max="100" value={percent} aria-label="Setup progress"></progress><p class="muted">{formatBytes(snapshot.bytes)} / {formatBytes(snapshot.totalBytes)}</p>{:else}<progress max="100" aria-label="Setup progress"></progress>{/if}
+      {#if kind === 'usb' && snapshot?.status === 'running'}<p class="muted">Keep the USB connected until creation and verification finish.</p>{/if}
       {#if snapshot?.cancelAvailable}<div class="actions"><button disabled={snapshot.cancelRequested || $setup.pending} onclick={() => { void setup.cancel(); }}>Cancel</button></div>{:else if snapshot?.status === 'running'}<p class="muted">Keep the computer powered on. Cancellation is unavailable during this stage.</p>{/if}
     {:else if kind === 'usb' && usbReview}
       <section class="usb-confirmation" aria-labelledby="usb-confirm-title">
@@ -65,9 +97,16 @@
           {#if usbReview.replacesBootloader}<p>The current bootloader will be backed up and replaced. Automatic restoration is unavailable.</p>{/if}
           <p>Boot using x64 UEFI with Secure Boot off.</p>
         {/if}
-        <p class="muted">Windows will ask for administrator access next.</p>
-        <div class="actions"><button onclick={()=>{void setup.dismissUsbReview();}}>Cancel</button><button class:danger={usbReview.mode === 'erase'} class:primary={usbReview.mode === 'preserve'} onclick={confirmUsb}>{usbReview.mode === 'erase' ? 'Erase USB and create installer' : 'Keep files and add installer'}</button></div>
+        <p class="muted">{($downloads.snapshot?.host_os ?? 'windows') === 'windows' ? 'Windows will ask for administrator access next.' : 'Your operating system will ask for administrator access next.'}</p>
+        <div class="actions"><button onclick={dismissReview}>Cancel</button><button class:danger={usbReview.mode === 'erase'} class:primary={usbReview.mode === 'preserve'} onclick={confirmUsb}>{usbReview.mode === 'erase' ? 'Erase USB and create installer' : 'Keep files and add installer'}</button></div>
       </section>
+    {:else if interrupted}
+      <div class="interrupted">
+        <h3 tabindex="-1" use:focusReview>{snapshot?.status === 'cancelled' ? 'USB creation cancelled' : 'USB creation did not finish'}</h3>
+        <p>The USB is not a verified installer. Reconnect it if needed, then refresh USB drives before trying again.</p>
+        {#if snapshot?.recovery?.mutationStarted}<p class="error">The USB may have been partly changed. If it contained files you need, keep the operation records and check the drive before erasing or retrying.</p>{/if}
+        <button onclick={() => {selected='';void setup.inspect('usb');}}><RefreshCw size={14}/>Refresh USB drives</button>
+      </div>
     {:else}
       {#if snapshot?.status === 'prepared'}<p role="status">{snapshot.message}</p>{/if}
       {#if kind === 'direct' && snapshot?.preparation?.secureBoot === 'enabled'}
@@ -102,10 +141,10 @@
         <details class="installation-details"><summary>Installation requirements and encryption</summary><p>Allow about 40 GiB for Omarchy, plus 85 GiB of temporary working space and 10 GiB of free memory. Secure Boot must be off.</p><p>Omarchy uses LUKS2 encryption. You set its password during first boot. If BitLocker changes are needed, you’ll review them before installation; Windows data stays encrypted.</p></details>
         {/if}
       {:else}
-        <div class="choices">
+        <div bind:this={usbChoices} class="choices" role="radiogroup" aria-label="USB drives">
           {#each snapshot?.choices ?? [] as choice}
             <label class:unavailable={!choice.eligible} class:selected={selected===choice.id}>
-              <input type="radio" name="setup-target" value={choice.id} bind:group={selected} disabled={!choice.eligible} onchange={()=>{void setup.inspectUsb(choice.id);}}/>
+              <input type="radio" name="setup-target" value={choice.id} bind:group={selected} disabled={!choice.eligible} onchange={()=>{void inspectUsb(choice.id);}}/>
               <span><strong>{choice.label || 'USB drive'}</strong><small>{choice.detail} · {formatBytes(choice.sizeBytes)}</small>{#each choice.reasons as reason}<small class="reason">{reason}</small>{/each}</span>
             </label>
           {/each}
@@ -115,31 +154,31 @@
             <h3>How should this USB be prepared?</h3>
             {#if selectedChoice.usb?.freeBytes != null}<p class="muted">{formatBytes(selectedChoice.usb.freeBytes)} free · {formatBytes(selectedChoice.usb.requiredBytes)} needed to keep files</p>{/if}
             <div class="usb-option">
-              <button class="primary" disabled={!readyImage || !selectedChoice.usb?.eligible} onclick={()=>{void setup.reviewUsb(selected,'preserve');}}>Keep files and add installer</button>
+              <button bind:this={preserveButton} class="primary" disabled={!readyImage || !selectedChoice.usb?.eligible} onclick={()=>{void setup.reviewUsb(selected,'preserve');}}>Keep files and add installer</button>
+              {#if selectedChoice.usb?.eligible}<p>Adds the installer alongside your files. You’ll review any boot changes next.</p>{/if}
               {#if selectedChoice.usb && !selectedChoice.usb.eligible}
                 <p role="status"><span class="error">Can’t keep files on this USB.</span> {usbIssueSummary(selectedChoice.usb)}</p>
                 {#if selectedChoice.usb.reasons.length}<details><summary>Details</summary>{#each selectedChoice.usb.reasons as reason}<p>{reason}</p>{/each}</details>{/if}
               {/if}
-              {#if !selectedChoice.usb}<p class="muted">Check this USB’s compatibility before keeping files.</p><button onclick={()=>{void setup.inspectUsb(selected);}}>Check compatibility</button>{/if}
-              {#if selectedChoice.usb?.needsAdministrator}<button onclick={()=>{void setup.inspectUsb(selected,true);}}>Check compatibility with administrator access</button>{/if}
+              {#if !selectedChoice.usb}<p class="muted">Check this USB’s compatibility before keeping files.</p><button onclick={()=>{void inspectUsb(selected);}}>Check compatibility</button>{/if}
+              {#if selectedChoice.usb?.needsAdministrator}<button onclick={()=>{void inspectUsb(selected,true);}}>Check compatibility with administrator access</button>{/if}
             </div>
             <div class="usb-option">
-              <button class="erase" disabled={!readyImage} onclick={()=>{void setup.reviewUsb(selected,'erase');}}>Erase USB and create installer</button>
+              <button bind:this={eraseButton} class="erase" disabled={!readyImage} onclick={()=>{void setup.reviewUsb(selected,'erase');}}>Erase USB and create installer</button>
               <p>Deletes all files on this USB.</p>
             </div>
           </div>
         {/if}
       {/if}
-      {#if snapshot?.status==='ready' && !snapshot.choices.length && !preparationNeeded}<p class="muted">{kind==='usb' ? 'No eligible USB drives found. Connect a USB drive and refresh.' : 'No eligible disks found.'}</p>{/if}
+      {#if snapshot?.status==='ready' && !snapshot.choices.length && !preparationNeeded}<p role="status">{kind==='usb' ? 'No USB drives found. Connect a USB drive and refresh.' : 'No eligible disks found.'}</p>{/if}
       <div class="actions">
-        <button onclick={() => { selected=''; void setup.inspect(kind); }}><RefreshCw size={14}/>{snapshot ? 'Refresh disks' : 'Check disks'}</button>
+        <button onclick={() => { selected=''; void setup.inspect(kind); }}><RefreshCw size={14}/>{kind==='usb' ? 'Refresh USB drives' : snapshot ? 'Refresh disks' : 'Check disks'}</button>
       </div>
     {/if}
   {/if}
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if snapshot?.recovery && !active}
-    <details><summary>{error ? 'Recovery and operation records' : 'Temporary files and operation records'}</summary>
-      {#if snapshot.recovery.mutationStarted && error}<p>Storage changes started. Keep the records and inspect the planned partition sizes before retrying. If needed, select the existing Windows Boot Manager entry in firmware to return to Windows.</p>{/if}
+    <details class="operation-details"><summary>{error || interrupted ? 'Recovery and operation records' : 'Temporary files and operation records'}</summary>
+      {#if kind === 'direct' && snapshot.recovery.mutationStarted && error}<p>Storage changes started. Keep the records and inspect the planned partition sizes before retrying. If needed, select the existing Windows Boot Manager entry in firmware to return to Windows.</p>{/if}
       <p>{snapshot.recovery.cleanup.complete ? snapshot.recovery.message : 'Some temporary files remain. Keep the operation records and confirm construction has stopped before removing anything.'}</p>
       <p class="path">{snapshot.recovery.filesPath}</p>
     </details>
@@ -159,4 +198,5 @@
   .preparation{border:1px solid var(--border);padding:16px;margin-top:18px}.preparation h3{font-size:13px;font-weight:400;margin:0}.preparation label{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.7;color:var(--text-muted);margin:12px 0}.preparation input{accent-color:var(--accent)}
   .usb-confirmation{border:1px solid var(--border-strong);padding:20px;margin-top:18px}.usb-confirmation h3{font-size:16px;font-weight:400;margin:0}.usb-confirmation .review-target{color:var(--text);font-size:13px}.review-target small{display:block;font-size:10px;color:var(--text-dim);margin-top:6px}.danger{background:var(--error);border-color:var(--error);color:var(--surface-deep)}
   .usb-options{margin-top:22px}.usb-options h3{font-size:12px;font-weight:400}.usb-option{border-top:1px solid var(--border);padding:18px 0 4px}.usb-option p{margin:10px 0}.erase{color:var(--error)}
+  h3{font-size:14px;font-weight:400}p,li{font-size:12px}button{font-size:12px;min-height:44px}.muted,.requirements,summary,.choices small,.review-target small{font-size:11px}.choices strong{font-size:13px}.heading .back{min-height:36px;padding:4px}.next-steps{padding-left:22px}.next-steps li{padding-left:4px;margin:10px 0}.operation-details{margin-top:22px}.interrupted{margin-top:20px}.interrupted h3{color:var(--text)}summary{padding:6px 0}
 </style>

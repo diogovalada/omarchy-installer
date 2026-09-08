@@ -19,5 +19,7 @@ describe('preview availability', () => {
     expect(screen.getByText('Open the desktop app to inspect disks and continue.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Check disks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Check with administrator access' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('button', { name: 'Install without USB' })).toHaveFocus();
   });
 });

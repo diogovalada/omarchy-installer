@@ -36,7 +36,7 @@ describe('USB review before administrator access',()=>{
   it('reviews erase in the app and starts only after confirming the bound review',async()=>{
     render(SetupPanel,{kind:'usb',close:vi.fn()});
     await fireEvent.click(screen.getByRole('radio'));
-    expect(calls.inspectUsb).toHaveBeenCalledExactlyOnceWith('chosen-usb');
+    expect(calls.inspectUsb).toHaveBeenCalledExactlyOnceWith('chosen-usb',false);
     await fireEvent.click(screen.getByRole('button',{name:'Erase USB and create installer'}));
     expect(calls.reviewUsb).toHaveBeenCalledExactlyOnceWith('chosen-usb','erase');
     expect(calls.start).not.toHaveBeenCalled();
@@ -53,6 +53,7 @@ describe('USB review before administrator access',()=>{
     expect(calls.dismissUsbReview).toHaveBeenCalledOnce();
     expect(calls.start).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading',{name:'Erase this USB?'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Erase USB and create installer'})).toHaveFocus();
   });
   it('reviews preserving separately and explains bootloader replacement before elevation',async()=>{
     render(SetupPanel,{kind:'usb',close:vi.fn()});await fireEvent.click(screen.getByRole('radio'));
@@ -83,5 +84,38 @@ describe('USB review before administrator access',()=>{
     setSetup(state({eligible:false,restoreAvailable:true}));
     render(SetupPanel,{kind:'usb',close:vi.fn()}); await fireEvent.click(screen.getByRole('radio'));
     expect(screen.queryByRole('button',{name:'Restore previous boot setup'})).not.toBeInTheDocument();
+  });
+  it('discovers USB drives on entry without selecting or modifying a drive',async()=>{
+    setSetup({pending:false,error:null,snapshot:null});
+    render(SetupPanel,{kind:'usb',close:vi.fn()});
+    expect(calls.inspect).toHaveBeenCalledExactlyOnceWith('usb');
+    expect(calls.start).not.toHaveBeenCalled();
+    expect(calls.inspectUsb).not.toHaveBeenCalled();
+  });
+  it('requires fresh discovery after cancellation and keeps USB recovery separate from Windows recovery',async()=>{
+    const initial=state();
+    setSetup({...initial,snapshot:{...initial.snapshot,status:'cancelled',recovery:{mutationStarted:true,filesPath:'C:/Records/usb',message:'Records saved.',cleanup:{complete:true}}}});
+    render(SetupPanel,{kind:'usb',close:vi.fn()});
+    expect(screen.getByRole('heading',{name:'USB creation cancelled'})).toHaveFocus();
+    expect(screen.getByText(/The USB is not a verified installer/)).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Windows Boot Manager/)).not.toBeInTheDocument();
+    expect(screen.getByText(/may have been partly changed/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button',{name:'Refresh USB drives'}));
+    expect(calls.inspect).toHaveBeenCalledExactlyOnceWith('usb');
+  });
+  it('does not claim successful ejection when only the image is verified',()=>{
+    const initial=state();
+    setSetup({...initial,snapshot:{...initial.snapshot,status:'complete',receipt:{receipt:{eject:{status:'failed',message:'Ejection failed.'}}}}});
+    render(SetupPanel,{kind:'usb',close:vi.fn()});
+    expect(screen.getByText(/Automatic ejection did not finish/)).toBeInTheDocument();
+    expect(screen.getByRole('heading',{name:'Install from your USB'})).toBeInTheDocument();
+    expect(screen.queryByText(/You can unplug it now/)).not.toBeInTheDocument();
+  });
+  it('focuses an action error so it is visible above the drive controls',()=>{
+    setSetup({...state(),error:'The selected USB changed. Refresh USB drives.'});
+    render(SetupPanel,{kind:'usb',close:vi.fn()});
+    expect(screen.getByRole('alert')).toHaveFocus();
+    expect(screen.getByRole('button',{name:'Refresh USB drives'})).toBeEnabled();
   });
 });

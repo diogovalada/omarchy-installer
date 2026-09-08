@@ -19,18 +19,19 @@ export interface SetupSnapshot {
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
 let epoch = 0; let reading = false;
+let commandError: string | null = null;
 async function refresh() {
   if (!isTauri() || reading || get(state).pending) return;
   reading = true; const generation = epoch;
-  try { const snapshot = await invoke<SetupSnapshot>('setup_status'); if (generation === epoch) state.update(s => ({ ...s, snapshot, error:null })); }
+  try { const snapshot = await invoke<SetupSnapshot>('setup_status'); if (generation === epoch) state.update(s => ({ ...s, snapshot, error:commandError })); }
   catch (error) { if (generation === epoch) state.update(s => ({ ...s, error:String(error) })); }
   finally { reading=false; }
 }
 async function command(name: string, args: Record<string, unknown> = {}) {
   if (!isTauri() || get(state).pending) return;
-  epoch += 1; state.update(s => ({ ...s, pending:true, error:null }));
+  epoch += 1; commandError=null; state.update(s => ({ ...s, pending:true, error:null }));
   try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot })); }
-  catch (error) { state.update(s => ({ ...s, error:String(error) })); }
+  catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError })); }
   finally { state.update(s => ({ ...s, pending:false })); }
 }
 export const setup = { subscribe:state.subscribe, refresh,

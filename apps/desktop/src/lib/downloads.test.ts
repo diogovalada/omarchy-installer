@@ -42,4 +42,21 @@ describe('native download controller', () => {
     expect(get(controller).snapshot?.status).toBe('complete');
     expect(call.mock.calls).toEqual([['start_download'], ['cancel_download'], ['download_status']]);
   });
+  it('keeps an action failure visible across background polls until a retry', async () => {
+    const call = vi.fn().mockRejectedValueOnce('Folder is unavailable').mockResolvedValue(snapshot('ready'));
+    const controller = createDownloads(call, true);
+    await controller.chooseDirectory();
+    await controller.refresh();
+    expect(get(controller).error).toBe('Folder is unavailable');
+    await controller.chooseDirectory();
+    expect(get(controller).error).toBeNull();
+  });
+  it('clears a temporary connection error after polling reconnects', async () => {
+    const call = vi.fn().mockRejectedValueOnce('Connection unavailable').mockResolvedValue(snapshot('ready'));
+    const controller = createDownloads(call, true);
+    await controller.refresh();
+    expect(get(controller).error).toBe('Connection unavailable');
+    await controller.refresh();
+    expect(get(controller).error).toBeNull();
+  });
 });

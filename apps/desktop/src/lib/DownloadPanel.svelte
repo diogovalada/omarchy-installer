@@ -13,17 +13,17 @@
   $: percent = snapshot?.total_bytes ? Math.min(100, snapshot.received_bytes / snapshot.total_bytes * 100) : 0;
   $: transfer = !!snapshot && ['preparing', 'downloading', 'verifying', 'saving'].includes(snapshot.status);
   $: indeterminate = !!snapshot && ['resolving', 'preparing', 'saving'].includes(snapshot.status);
-  $: statusText = complete ? 'Verified' : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: 'Paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
+  $: statusText = complete ? 'Verified' : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: snapshot?.existing_image ? 'Verification cancelled' : 'Download paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
 
 <section class="download-panel" class:compact={compact && complete} aria-label="Omarchy image download">
   {#if compact && complete}
-    <div class="image-summary"><span role="status"><Check size={17}/>Omarchy {release?.version} · Verified</span><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
+    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · Verified`}><span role="status"><Check size={17}/>Omarchy {release?.version} · Verified</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
   {/if}
   {#if !compact || !complete || expanded}
   <div class="release">
-    <div><h1>Omarchy {release?.version ?? 'ISO'}</h1><p>x86-64{#if release}<span> · {formatBytes(release.length)}</span>{/if}</p></div>
+    <div>{#if compact && complete}<h2>Omarchy {release?.version}</h2>{:else}<h1>Omarchy {release?.version ?? 'ISO'}</h1>{/if}<p>x86-64{#if release}<span> · {formatBytes(release.length)}</span>{/if}</p></div>
     <img src={quattro} alt="Omarchy Quattro wallpaper"/>
   </div>
   <div class="download-body">
@@ -42,9 +42,9 @@
 
 <style>
   .download-panel{border:1px solid var(--border);border-radius:4px;background:var(--surface);overflow:hidden}
-  .image-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px}.image-summary>span{display:flex;align-items:center;gap:9px;color:var(--success);font-size:12px}.compact .release{border-top:1px solid var(--border)}
+  .image-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px}.image-summary h1{font-size:12px}.image-summary span{display:flex;align-items:center;gap:9px;color:var(--success)}.compact .release{border-top:1px solid var(--border)}
   .release{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px;border-bottom:1px solid var(--border)}
-  h1{margin:0;font-size:22px;font-weight:400;line-height:1.4}.release p{margin:10px 0 0;color:var(--text-dim);font-size:11px}
+  h1,h2{margin:0;font-size:22px;font-weight:400;line-height:1.4}.release p{margin:10px 0 0;color:var(--text-dim);font-size:11px}
   .release img{display:block;width:190px;aspect-ratio:16/9;object-fit:contain;border-radius:2px}
   .download-body{padding:24px}.destination{display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:11px}.destination :global(svg){flex-shrink:0}.destination>div{min-width:0;flex:1;overflow-wrap:anywhere}
   button{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:40px;padding:10px 16px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface-raised);color:var(--text);font-size:12px;cursor:pointer}
@@ -55,4 +55,5 @@
   .error{font-size:11px;line-height:1.7;color:var(--error);overflow-wrap:anywhere;margin:0 0 18px}
   @media(max-width:550px){.release{padding:20px;gap:16px}.release img{width:125px}h1{font-size:18px}.release p{font-size:10px}.download-body{padding:20px}.progress-label{flex-wrap:wrap;gap:4px}.destination{font-size:10px}.controls:has(details[open]){flex-direction:column}.controls>details{width:100%}}
   @media(max-width:370px){.release img{width:95px}h1{font-size:16px}}
+  @media(max-width:550px){.image-summary{padding:12px 20px;flex-wrap:wrap;gap:6px}.image-summary h1{font-size:12px}}
 </style>

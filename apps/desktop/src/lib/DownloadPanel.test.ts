@@ -71,6 +71,7 @@ describe('single-screen native download flow', () => {
     await setState(state('complete'));
     render(App);
     expect(screen.queryByText('Verified')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your image is ready. Choose how to install Omarchy.')).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Install without USB' }));
     expect(screen.getByText('Download and verify the Omarchy image above to continue.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Check disks' })).not.toBeInTheDocument();

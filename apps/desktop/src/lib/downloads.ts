@@ -15,13 +15,14 @@ export function createDownloads(call: Invoke, native: boolean) {
   const state = writable<{ snapshot: DownloadSnapshot | null; error: string | null; pending: boolean }>({ snapshot: null, error: null, pending: false });
   let epoch = 0;
   let reading = false;
+  let commandError: string | null = null;
   async function refresh() {
     if (!native || reading || get(state).pending) return;
     reading = true;
     const requestEpoch = epoch;
     try {
       const snapshot = await call<DownloadSnapshot>('download_status');
-      if (epoch === requestEpoch) state.update(value => ({ ...value, snapshot, error: null }));
+      if (epoch === requestEpoch) state.update(value => ({ ...value, snapshot, error: commandError }));
     } catch (error) {
       if (epoch === requestEpoch) state.update(value => ({ ...value, error: String(error) }));
     } finally { reading = false; }
@@ -29,12 +30,14 @@ export function createDownloads(call: Invoke, native: boolean) {
   async function command(name: 'resolve_download' | 'start_download' | 'cancel_download' | 'choose_download_directory') {
     if (!native || get(state).pending) return;
     epoch += 1;
+    commandError = null;
     state.update(value => ({ ...value, pending: true, error: null }));
     try {
       const snapshot = await call<DownloadSnapshot>(name);
       state.update(value => ({ ...value, snapshot }));
     } catch (error) {
-      state.update(value => ({ ...value, error: String(error) }));
+      commandError = String(error);
+      state.update(value => ({ ...value, error: commandError }));
     } finally { state.update(value => ({ ...value, pending: false })); }
   }
   return { subscribe: state.subscribe, native, refresh, resolve: () => command('resolve_download'), start: () => command('start_download'), cancel: () => command('cancel_download'), chooseDirectory: () => command('choose_download_directory') };
