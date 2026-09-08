@@ -15,11 +15,15 @@ describe('preview availability', () => {
     expect(screen.queryByText('Verified')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create bootable USB' })).toBeEnabled();
     expect(screen.queryByText('Demo USB Drive')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install without USB' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Install without USB' })).toHaveAccessibleDescription('Coming soon');
     await fireEvent.click(screen.getByRole('button', { name: 'Install without USB' }));
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Create bootable USB' }));
     expect(screen.getByText('Open the desktop app to inspect disks and continue.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Check disks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Check with administrator access' })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.getByRole('button', { name: 'Install without USB' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Create bootable USB' })).toHaveFocus();
   });
 });
