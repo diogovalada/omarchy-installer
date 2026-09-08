@@ -9,6 +9,10 @@ staging-first proposal and records why direct control of BitLocker maintenance
 is preferable, without claiming boot-related recovery risk is eliminated.
 Staged installation and published prepared images remain secondary options.
 
+The [September 8 retained learnings](installation-options-learnings-2026-09-08.md)
+summarize virtualization, prebuilt-image and encryption tradeoffs from subsequent
+discussion; they do not select a replacement architecture.
+
 Status: both setup options are wired for development. The shared Etcher physical
 USB provider, native elevation/staging helper, Windows local construction and
 GPT deployment, and Apple native bridge/client are implemented. The user explicitly
