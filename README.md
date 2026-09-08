@@ -33,6 +33,21 @@ Direct installation on Linux and Intel Macs is not implemented.
 See the [support matrix](docs/support-matrix.md) for testing status and
 [platform behavior](docs/platform-behavior.md) for installation requirements.
 
+## Installation testing status
+
+End-to-end installation testing on physical hardware, grouped by the operating
+system running the app. Implementation availability is listed in the support
+matrix above.
+
+❌ Untested · ✅ Tested
+
+| Host operating system | USB | No USB (direct installation) |
+| --- | --- | --- |
+| Windows | ❌ Untested | ❌ Untested |
+| macOS — Intel (x86_64) | ❌ Untested | ❌ Untested |
+| macOS — Apple Silicon (ARM64) | ❌ Untested | ❌ Untested |
+| Linux | ❌ Untested | ❌ Untested |
+
 ## Future work
 
 The goal is a cross-platform Omarchy installer that runs on Windows, Linux and
