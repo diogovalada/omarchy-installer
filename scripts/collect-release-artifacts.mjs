@@ -74,7 +74,7 @@ if (process.platform === 'win32') {
 } else {
   const appimage = join(bundle, 'appimage');
   const appdir = one(appimage, name => name.endsWith('.AppDir'));
-  verifyProviders(join(appdir, 'usr/lib/omarchy-setup-desktop/providers'));
+  verifyProviders(join(appdir, 'usr/lib', config.productName, 'providers'));
   collect(one(appimage, name => name.endsWith('.AppImage')), `${stem}.AppImage`);
   collect(one(join(bundle, 'deb'), name => name.endsWith('.deb')), `${stem}.deb`);
 }

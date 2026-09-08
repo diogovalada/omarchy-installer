@@ -153,14 +153,19 @@ fn packaged_roots(exe: &Path, platform: &str) -> Result<Vec<PathBuf>, String> {
     if platform == "macos" {
         roots.push(parent.join("../Resources/providers"));
     } else if platform == "linux" {
-        // Tauri deb/rpm and AppDir layouts put resources in usr/lib/<package>,
+        // Tauri deb/rpm and AppDir layouts put resources in usr/lib/<product>,
         // while the executable is in usr/bin. A portable directory can keep
         // providers next to the executable. All candidates remain hash-checked.
-        roots.push(parent.join(format!("../lib/{}/providers", env!("CARGO_PKG_NAME"))));
-        roots.push(PathBuf::from(format!(
-            "/usr/lib/{}/providers",
-            env!("CARGO_PKG_NAME")
-        )));
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .map_err(|_| "Embedded application configuration is invalid")?;
+        let product = config["productName"]
+            .as_str()
+            .ok_or("Embedded application name is unavailable")?;
+        checked_path(Path::new("."), product)?;
+        for name in [product, env!("CARGO_PKG_NAME")] {
+            roots.push(parent.join(format!("../lib/{name}/providers")));
+            roots.push(PathBuf::from(format!("/usr/lib/{name}/providers")));
+        }
     }
     Ok(roots)
 }
@@ -259,6 +264,10 @@ mod inspection_tests {
             "linux",
         )
         .unwrap();
+        assert!(linux.contains(&PathBuf::from(
+            "/opt/AppDir/usr/bin/../lib/Omarchy Installer/providers"
+        )));
+        assert!(linux.contains(&PathBuf::from("/usr/lib/Omarchy Installer/providers")));
         assert!(linux.contains(&PathBuf::from(
             "/opt/AppDir/usr/bin/../lib/omarchy-setup-desktop/providers"
         )));
