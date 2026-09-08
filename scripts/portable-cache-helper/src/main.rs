@@ -91,7 +91,7 @@ fn load_manifest(path: &Path, expected: &str) -> Result<Manifest> {
             .checked_add(entry.size_bytes)
             .ok_or("Payload size overflow")?;
     }
-    if total > 1024 * 1024 * 1024 || !seen.contains("omarchy setup.exe") {
+    if total > 1024 * 1024 * 1024 || !seen.contains("omarchy installer.exe") {
         return Err("Invalid application payload".into());
     }
     Ok(manifest)
@@ -375,6 +375,24 @@ mod tests {
             ],
         }
     }
+    #[test]
+    fn manifest_requires_the_packaged_application_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("manifest.json");
+        for (name, accepted) in [
+            ("Omarchy Installer.exe", true),
+            ("Omarchy Setup.exe", false),
+        ] {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1,
+                "files": [{"path": name, "sizeBytes": 11, "sha256": hex_digest(b"application")}]
+            }))
+            .unwrap();
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(load_manifest(&path, &hex_digest(&bytes)).is_ok(), accepted);
+        }
+    }
+
     #[test]
     fn complete_cache_is_reusable_without_changing_files() {
         let dir = tempfile::tempdir().unwrap();

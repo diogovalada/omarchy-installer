@@ -126,12 +126,14 @@ jobs:
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
       - name: Test native download state and export
         run: pnpm desktop:test:native
-      - name: Test Windows disk inspection and runtime metadata
+      - name: Test Windows disk inspection and portable verification
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           & ./testkit/windows-direct/Test-StoragePlan.ps1
           & ./testkit/windows-direct/Test-RuntimeDistribution.ps1
+          cargo test --manifest-path scripts/portable-cache-helper/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Portable verifier tests failed.' }
 
   dependency-policy:
     name: Dependency policy
