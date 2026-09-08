@@ -21,5 +21,10 @@ for (const file of bundle.files) {
   if (!stat.isFile() || stat.size !== file.sizeBytes || stat.size > 256 * 1024 * 1024) throw new Error('Bundle file size mismatch.');
   if (createHash('sha256').update(readFileSync(path)).digest('hex') !== file.sha256) throw new Error('Bundle file hash mismatch.');
 }
-if (!seen.has('omarchy setup.exe') || !seen.has('providers/image-builder-x86/runtime.tar')) throw new Error('Required payload is absent.');
+if (!seen.has('omarchy installer.exe')) throw new Error('Required application is absent.');
+if (bundle.distribution === 'usb-preview') {
+  if ([...seen].some(name => /^providers\/(direct-x86|image-builder-x86)\//.test(name))) throw new Error('USB preview contains a direct-install provider.');
+} else if (bundle.distribution === 'development-full' || bundle.distribution === undefined) {
+  if (!seen.has('providers/image-builder-x86/runtime.tar')) throw new Error('Required construction runtime is absent.');
+} else throw new Error('Unknown distribution profile.');
 console.log(`Verified ${bundle.files.length} portable payload files.`);

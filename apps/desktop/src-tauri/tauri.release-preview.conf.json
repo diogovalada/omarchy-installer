@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "category": "Utility",
+    "shortDescription": "Download Omarchy and create bootable USB drives",
+    "longDescription": "Unofficial Omarchy Installer preview. Download and USB creation are available; installation without USB is in development.",
+    "linux": {
+      "deb": { "depends": ["pkexec", "libusb-1.0-0", "libudev1"] }
+    },
+    "macOS": {
+      "minimumSystemVersion": "15.0",
+      "signingIdentity": "-"
+    }
+  }
+}

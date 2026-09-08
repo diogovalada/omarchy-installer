@@ -1,0 +1,99 @@
+name: Release builds
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  OMARCHY_DISTRIBUTION: usb-preview
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: macos-15-intel
+            platform: macos-x64
+          - os: macos-15
+            platform: macos-arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: providers/media-etcher/package-lock.json
+      - name: Enable the repository-pinned pnpm version
+        run: corepack enable
+      - name: Select pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            scripts/portable-cache-helper -> target
+          key: release-${{ matrix.platform }}
+      - name: Install Linux build and packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libudev-dev patchelf libfuse2t64 pkexec
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install pinned USB dependencies
+        run: npm --prefix providers/media-etcher ci --no-audit --no-fund
+      - name: Verify preview UI and types
+        run: pnpm desktop:check
+      - name: Run frontend tests
+        run: pnpm --filter ./apps/desktop exec vitest run --maxWorkers=2 --no-file-parallelism
+      - name: Test USB adapter without physical writes
+        run: pnpm media:test
+      - name: Check native USB dependencies
+        run: pnpm media:probe
+      - name: Build Windows portable executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-windows-portable.ps1 -UnsignedPreview
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: pnpm --dir apps/desktop exec tauri build --config src-tauri/tauri.release-preview.conf.json --bundles deb,appimage
+      - name: Build macOS packages
+        if: runner.os == 'macOS'
+        run: pnpm --dir apps/desktop exec tauri build --config src-tauri/tauri.release-preview.conf.json --bundles app,dmg
+      - name: Verify and collect release packages
+        run: node scripts/collect-release-artifacts.mjs
+      - name: Upload release packages and checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Omarchy-Installer-${{ matrix.platform }}-${{ github.sha }}
+          path: artifacts/releases/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

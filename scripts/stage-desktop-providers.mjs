@@ -7,6 +7,12 @@ import { execFileSync } from 'node:child_process';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const staging = join(root, 'apps/desktop/.native-providers');
 const bundle = join(staging, 'bundle');
+const distribution = process.env.OMARCHY_DISTRIBUTION ?? 'development-full';
+if (!['development-full', 'usb-preview'].includes(distribution)) throw new Error('Unknown distribution profile.');
+const usbPreview = distribution === 'usb-preview';
+if (usbPreview && ['direct-x86', 'image-builder-x86'].some(name => existsSync(join(bundle, name)))) {
+  throw new Error('USB preview packaging requires a clean provider staging directory; use a fresh checkout.');
+}
 mkdirSync(bundle, { recursive: true });
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 function files(directory) {
@@ -42,7 +48,7 @@ const manifest = { schema: 1, platform: process.platform, architecture: process.
   media_inspection: { executable: `${mediaName}/${runtime.executable}`, entrypoint: `${mediaName}/${runtime.inspection_entrypoint}` },
   direct_x86: null, apple: null, files: records };
 
-for (const providerName of ['direct-x86', 'image-builder-x86', 'usb-preserve']) {
+for (const providerName of (usbPreview ? ['usb-preserve'] : ['direct-x86', 'image-builder-x86', 'usb-preserve'])) {
   const source = join(root, 'providers', providerName);
   if (!existsSync(source)) continue;
   for (const path of files(source)) {
@@ -56,7 +62,7 @@ for (const providerName of ['direct-x86', 'image-builder-x86', 'usb-preserve']) 
     manifest.files.push({ path: `${providerName}/${local}`, length: data.length, sha256: digest(data) });
   }
 }
-if (existsSync(join(bundle, 'direct-x86/Invoke-DirectX86.ps1'))) manifest.direct_x86 = { entrypoint: 'direct-x86/Invoke-DirectX86.ps1' };
+if (manifest.files.some(file => file.path === 'direct-x86/Invoke-DirectX86.ps1')) manifest.direct_x86 = { entrypoint: 'direct-x86/Invoke-DirectX86.ps1' };
 // Swift companion signing/packaging has its own descriptor and cannot be
 // replaced by copying an unsigned executable from the source submodule.
 manifest.files.sort((a, b) => a.path.localeCompare(b.path));

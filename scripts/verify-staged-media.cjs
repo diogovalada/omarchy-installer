@@ -18,7 +18,7 @@ for (const filename of Object.keys(require.cache)) {
   if (filename !== __filename) assert.ok(filename.toLowerCase().startsWith((runtime + path.sep).toLowerCase()), `Dependency escaped staged runtime: ${filename}`);
 }
 (async () => {
-  const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-packaging-check-'));
+    const fixture = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-packaging-check-')));
   try {
     const bytes = Buffer.alloc(2 * 1024 * 1024 + 73);
     for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + (i >>> 8)) & 255;

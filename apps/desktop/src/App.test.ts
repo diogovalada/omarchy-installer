@@ -16,7 +16,7 @@ describe('preview availability', () => {
     expect(screen.getByRole('button', { name: 'Create bootable USB' })).toBeEnabled();
     expect(screen.queryByText('Demo USB Drive')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Install without USB' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Install without USB' })).toHaveAccessibleDescription('Coming soon');
+    expect(screen.getByRole('button', { name: 'Install without USB' })).toHaveAccessibleDescription('In development');
     await fireEvent.click(screen.getByRole('button', { name: 'Install without USB' }));
     expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Create bootable USB' }));

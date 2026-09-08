@@ -28,14 +28,14 @@
 
 <main class="setup">
   <div class="setup-content">
-    <header><div class="wordmark"><OmarchyWordmark/></div><span>Setup <span class="edition">/ Community edition</span></span></header>
+    <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
     <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
     {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       <section class="next-actions" aria-label="Installation options">
         <button bind:this={usbButton} aria-describedby="usb-option-description" disabled={setupActive($setup.snapshot?.status) || $setup.pending} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>
         <button bind:this={directButton} aria-describedby="direct-option-description" disabled><HardDriveDownload size={21}/><span>Install without USB</span></button>
         <p id="usb-option-description">Make an installer for an x86-64 PC.</p>
-        <p id="direct-option-description">Coming soon</p>
+        <p id="direct-option-description">In development</p>
       </section>
       <p class="availability">{$downloads.snapshot?.status === 'complete' && $downloads.snapshot.image_path ? 'Your image is ready. Choose how to install Omarchy.' : 'Choose an option to check image and disk requirements.'}</p>
     {/if}

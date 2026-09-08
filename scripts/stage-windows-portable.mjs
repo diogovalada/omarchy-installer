@@ -28,7 +28,12 @@ const manifestBytes = readFileSync(join(root, 'apps/desktop/.native-providers/pr
 if (!application.includes(manifestBytes)) throw new Error('The staged provider manifest is not embedded in this executable. Rebuild before packaging.');
 const manifest = JSON.parse(manifestBytes);
 if (manifest.schema !== 1 || manifest.platform !== 'win32' || manifest.architecture !== 'x64' || !manifest.files.length || manifest.files.length > 50000) throw new Error('Unsupported provider manifest.');
-if (!manifest.files.some(file => file.path === 'image-builder-x86/runtime.tar')) throw new Error('The portable preview must include the construction runtime.');
+const distribution = process.env.OMARCHY_DISTRIBUTION ?? 'development-full';
+if (!['development-full', 'usb-preview'].includes(distribution)) throw new Error('Unknown distribution profile.');
+const usbPreview = distribution === 'usb-preview';
+if (usbPreview) {
+  if (manifest.direct_x86 !== null || manifest.apple !== null || manifest.files.some(file => /^(direct-x86|image-builder-x86)\//.test(file.path))) throw new Error('USB preview contains a direct-install provider.');
+} else if (!manifest.files.some(file => file.path === 'image-builder-x86/runtime.tar')) throw new Error('The full development package must include the construction runtime.');
 const outputParent = join(root, 'artifacts/windows-portable');
 mkdirSync(outputParent, { recursive: true });
 const packageId = randomUUID().slice(0, 8);
@@ -84,8 +89,7 @@ recreates it. Interrupted or damaged generations are set aside within the cache.
 Launch through the portable executable so the cache is checked before use.
 
 Requires Windows x64 and Microsoft Edge WebView2 Runtime.
-Direct Omarchy installation also requires Docker Desktop with its Linux engine,
-85 GiB of working storage after ISO staging and 10 GiB of free memory.
+${usbPreview ? 'Download and USB creation are included. Installation without USB is in development.' : 'Direct Omarchy installation also requires Docker Desktop with its Linux engine,\n85 GiB of working storage after ISO staging and 10 GiB of free memory.'}
 The application still stores downloads, cache and operation/recovery records
 in their normal locations and requests administrator access for privileged work.
 Completed operation receipts are saved in Omarchy-Setup-Records beside the
@@ -99,7 +103,7 @@ This is an unsigned, unofficial preview. Complete installation and boot/recovery
 qualification remain pending. The portable packaging does not change those limits.
 `, 'utf8'));
 put('verify-bundle.mjs', readFileSync(join(root, 'scripts/verify-portable-bundle.mjs')));
-put('bundle-files.json', Buffer.from(JSON.stringify({ schemaVersion: 1, files }, null, 2) + '\n'));
+put('bundle-files.json', Buffer.from(JSON.stringify({ schemaVersion: 1, distribution, files }, null, 2) + '\n'));
 // Compare copied bytes as well as their authenticated sources.
 for (const file of files) if (hash(readFileSync(join(portable, file.path))) !== file.sha256) throw new Error(`Portable copy mismatch: ${file.path}`);
 const recordPath = join(outputDirectory, 'portable-record.json');

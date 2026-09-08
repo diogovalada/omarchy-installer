@@ -82,6 +82,10 @@ Other planned improvements:
 
 ## Development
 
+CI builds preview packages for Windows, Linux, and macOS (Intel and Apple Silicon).
+See [release builds](docs/release-builds.md) for downloads, package formats and
+signing status.
+
 Use Rust 1.93, Node.js 22 or 24, pnpm 10.2.1, and the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 Clone with submodules, or run `git submodule update --init --recursive`.

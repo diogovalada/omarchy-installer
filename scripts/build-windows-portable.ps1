@@ -11,14 +11,21 @@ if ($env:OS -ne 'Windows_NT') { throw 'Windows packaging requires Windows.' }
 if (-not $UnsignedPreview) { throw 'Portable packaging currently produces unsigned previews. Explicitly pass -UnsignedPreview.' }
 if ($VerifiedPortableRecord -and -not $ReuseVerifiedBuild) { throw 'A prior portable record is only used with -ReuseVerifiedBuild.' }
 $buildProfile=if ($DebugBuild) { 'debug' } else { 'release' }
+$nsisCompiler=Join-Path $env:LOCALAPPDATA 'tauri/NSIS/makensis.exe'
 if (-not $ReuseVerifiedBuild) {
-    & (Join-Path $PSScriptRoot 'export-construction-runtime.ps1')
-    $arguments=@('--dir',(Join-Path $root 'apps/desktop'),'exec','tauri','build','--no-bundle')
+    if ($env:OMARCHY_DISTRIBUTION -ne 'usb-preview') {
+        & (Join-Path $PSScriptRoot 'export-construction-runtime.ps1')
+    }
+    $arguments=@('--dir',(Join-Path $root 'apps/desktop'),'exec','tauri','build')
+    if (Test-Path -LiteralPath $nsisCompiler) { $arguments += '--no-bundle' }
+    else {
+        # Tauri downloads and verifies its pinned NSIS toolchain on fresh hosts.
+        $arguments += @('--config',(Join-Path $root 'apps/desktop/src-tauri/tauri.windows-package.conf.json'))
+    }
     if ($DebugBuild) { $arguments += '--debug' }
     & pnpm @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }
 }
-$nsisCompiler=Join-Path $env:LOCALAPPDATA 'tauri/NSIS/makensis.exe'
 if (-not (Test-Path -LiteralPath $nsisCompiler)) { throw 'The packaging machine requires the verified NSIS compiler supplied by the Tauri toolchain.' }
 & cargo build --manifest-path (Join-Path $PSScriptRoot 'portable-cache-helper/Cargo.toml') --release --locked
 if ($LASTEXITCODE -ne 0) { throw 'Portable cache verifier build failed.' }
