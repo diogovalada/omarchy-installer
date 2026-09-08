@@ -149,3 +149,26 @@ test('Linux rechecks mount identity immediately before each unmount', async t =>
   });
   await assert.rejects(linux.unmountLinuxTarget('/dev/sdb'), /layout changed/);
 });
+
+test('Linux resolves and normally unmounts NTFS-3G through its real block source', async t => {
+  const sys = '/sys/devices/pci0000:00/usb1/block/sdb';
+  const partition = `${sys}/sdb1`;
+  const env = filesystem(t, { '/media/NTFS/source.iso': '', [`${sys}/dev`]: '8:16',
+    [`${partition}/partition`]: '1', [`${partition}/dev`]: '8:17',
+    '/proc/self/mountinfo': '31 1 0:45 / /media/NTFS rw - fuseblk /dev/disk/by-label/NTFS rw' },
+  { [sys]: ['sdb1', 'dev'], [`${sys}/slaves`]: [] },
+  { '/sys/class/block/sdb': sys, '/sys/class/block/sdb1': partition, [sys]: sys, '/dev/disk/by-label/NTFS': '/dev/sdb1' }, ['/dev/sdb1']);
+  assert.deepEqual(await linux.linuxBackingDisks('/media/NTFS/source.iso'), ['/dev/sdb']);
+  const calls = [];
+  t.mock.method(tools, 'runTool', async (exe, args) => {
+    calls.push([exe, args]); env.files['/proc/self/mountinfo'] = ''; return '';
+  });
+  await linux.unmountLinuxTarget('/dev/sdb');
+  assert.deepEqual(calls, [['/usr/bin/umount', ['--', '/media/NTFS']]]);
+});
+
+test('Linux gives an actionable refusal for a FUSE-mounted AppImage runtime', async t => {
+  filesystem(t, { '/tmp/.mount_omarchy/usr/bin/node': '',
+    '/proc/self/mountinfo': '31 1 0:46 / /tmp/.mount_omarchy ro - fuse.AppImage omarchy.AppImage ro' });
+  await assert.rejects(linux.linuxBackingDisks('/tmp/.mount_omarchy/usr/bin/node'), /--appimage-extract-and-run/);
+});

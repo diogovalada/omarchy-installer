@@ -25,6 +25,14 @@ unmount/open, identity/geometry checks, verification, cancellation and receipts.
 4. **An empty macOS USB inventory failed the prerequisite probe.** Successful
    `ioreg` output with no matching objects is now an empty inventory. Malformed
    nonempty plist output still fails.
+5. **Linux NTFS-3G mounts have synthetic device numbers.** FUSE block mounts now
+   resolve their actual block-device source for exclusions and normal unmounting.
+   A FUSE-mounted AppImage gives instructions to use extract-and-run or an installed
+   package; its backing storage and privileged execution cannot be assumed safe.
+6. **Native CI lacked packaged resources.** The macOS desktop build stopped before
+   its tests because the configured providers directory did not exist. CI now
+   stages authenticated native providers before compiling desktop tests, and runs
+   media/discovery checks first.
 
 These fixes preserve exact hardware/geometry matching, administrator confirmation,
 source authentication, mandatory SDK verification and full image readback. No
@@ -32,17 +40,19 @@ physical device was written or unmounted during this review.
 
 ## Validation
 
-- Windows: 66 media tests, 62 passed, four POSIX-only skips, no failures.
-- Native Linux under WSL: 66 media tests, 55 passed, 11 Windows-only skips, no failures.
+- Windows: 68 media tests, 64 passed, four POSIX-only skips, no failures.
+- Native Linux under WSL: 68 media tests, 57 passed, 11 Windows-only skips, no failures.
 - Real Linux read-only discovery: six disks enumerated; the source filesystem
   resolved to an excluded disk; the prerequisite probe passed. No eligible USB
   was attached to this Linux environment.
 - New CI integration check executes the real POSIX prerequisite and discovery
   commands and requires source/system exclusions, without requiring a USB or
   performing any write, unmount or eject operation.
-- The [previous commit's CI run](https://github.com/diogovalada/omarchy-installer/actions/runs/34239289467)
-  passed, including native macOS/Linux desktop tests, file-backed media tests and
-  isolated staged-runtime loading. This is software evidence, not hardware testing.
+- The earlier green run was a separate Dependabot workflow and is not native test
+  evidence. The [first review CI run](https://github.com/diogovalada/omarchy-installer/actions/runs/34240345975)
+  exposed the missing-resource issue above. Repository-wide spelling and license
+  policy checks also reported failures in existing files/dependencies outside this
+  USB change; they are not evidence of a successful full CI run.
 
 Regression fixtures cover a serial-less drive behind a hub, macOS USB subclasses,
 overmounts at the target or an ancestor, mount replacement before unmount, and

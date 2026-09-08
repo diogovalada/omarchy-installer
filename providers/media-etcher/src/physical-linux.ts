@@ -70,6 +70,17 @@ export async function linuxBlockDisks(sysPath: string, seen = new Set<string>())
 
 async function mountDisks(mount: LinuxMount, seen: Set<string>): Promise<string[]> {
   if (['tmpfs', 'ramfs'].includes(mount.type)) return [];
+  if (mount.type === 'fuseblk') {
+    // ntfs-3g uses a synthetic FUSE device number; its mount source identifies
+    // the actual block device. Never accept a regular file or arbitrary source.
+    if (!mount.source.startsWith('/dev/')) fail('FUSE block filesystem source is unavailable.');
+    const source = await realpath(mount.source);
+    if (!(await stat(source)).isBlockDevice()) fail('FUSE block filesystem source is not a block device.');
+    return linuxBlockDisks(`/sys/class/block/${path.basename(source)}`, seen);
+  }
+  if (['fuse.AppImage', 'fuse.squashfuse'].includes(mount.type)) {
+    fail('The application is running from a FUSE image. Launch the AppImage with --appimage-extract-and-run, or use an installed package, before creating a USB.');
+  }
   if (mount.type === 'btrfs') {
     // Btrfs subvolumes have synthetic st_dev values. Its sysfs membership also
     // includes every member of a multi-device filesystem, not just SOURCE.
@@ -151,10 +162,10 @@ export async function linuxTargetMounts(device: string): Promise<LinuxMount[]> {
   const result: LinuxMount[] = [];
   const mounts = parseLinuxMounts(await readFile('/proc/self/mountinfo', 'utf8'));
   for (const mount of mounts) {
-    if (mount.type === 'btrfs') {
+    if (['btrfs', 'fuseblk'].includes(mount.type)) {
       const disks = await mountDisks(mount, new Set());
       if (disks.includes(device)) {
-        if (disks.length !== 1) fail('Cannot unmount a Btrfs filesystem shared with another disk.');
+        if (disks.length !== 1) fail('Cannot unmount a filesystem shared with another disk.');
         result.push(mount);
       }
     } else if (numbers.has(mount.device)) result.push(mount);

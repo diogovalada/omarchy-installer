@@ -171,6 +171,8 @@ volume handles/re-enumeration fail explicitly and require later qualification.
 
 Linux resolves system, source and swap storage through sysfs partitions, LUKS/LVM,
 RAID members and loop backing files; Btrfs subvolumes protect every physical member.
+NTFS-3G/FUSE block mounts resolve their real block-device source. FUSE-mounted
+AppImages require extract-and-run or an installed package.
 Unknown backing storage fails closed. Active holders on a disk or any partition
 prevent selection. Mounts are matched by exact major/minor device numbers, including
 aliases and bind mounts. Normal `/usr/bin/umount -- <mountpoint>` runs deepest first
@@ -227,5 +229,5 @@ README.md is historical evidence only and does not qualify this physical provide
 The inspector includes the pinned `@balena/apple-plist` 0.0.3 and SAX dependency
 closure. `node scripts/check-staged-physical-runtime.cjs` stages and loads the native
 writer and an isolated inspector without enumerating or accessing disks. Linux
-desktop resources resolve from portable, AppImage and installed Tauri layouts;
-macOS uses app bundle Resources. Unix operation records live outside app resources.
+desktop resources resolve from portable, extracted AppImage and installed Tauri
+layouts. macOS uses app bundle Resources. Unix operation records live outside app resources.

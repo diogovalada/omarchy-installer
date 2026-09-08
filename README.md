@@ -34,6 +34,8 @@ Linux and macOS offer the erase-and-write USB method. On Apple Silicon, this
 creates media for another x86 computer. Operation records default to Documents
 on these hosts. See the [cross-platform USB implementation and test record](docs/evidence/cross-platform-usb-2026-09-08.md)
 for platform prerequisites, exclusions and remaining hardware checks.
+Linux AppImages must use `--appimage-extract-and-run` for USB preparation; a
+runtime mounted through FUSE is refused. Installed packages can run normally.
 
 See the [support matrix](docs/support-matrix.md) for testing status and
 [platform behavior](docs/platform-behavior.md) for installation requirements.

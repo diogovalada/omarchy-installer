@@ -107,10 +107,6 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build frontend assets
         run: pnpm desktop:build
-      - name: Check native formatting
-        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
-      - name: Test native download state and export
-        run: pnpm desktop:test:native
       - name: Install pinned Etcher adapter dependencies
         run: npm --prefix providers/media-etcher ci --no-audit --no-fund
       - name: Test file-backed Etcher writes
@@ -123,6 +119,12 @@ jobs:
       - name: Check packaged writer and isolated inspector
         working-directory: providers/media-etcher
         run: node scripts/check-staged-physical-runtime.cjs
+      - name: Stage authenticated native providers for desktop tests
+        run: pnpm providers:stage
+      - name: Check native formatting
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Test native download state and export
+        run: pnpm desktop:test:native
 
   dependency-policy:
     name: Dependency policy
