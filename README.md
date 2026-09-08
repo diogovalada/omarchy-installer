@@ -80,6 +80,12 @@ Other planned improvements:
   Etcher SDK in Rust to avoid shipping a separate Node.js runtime and its
   JavaScript dependencies for USB creation.
 
+Useful upstream support would be official prebuilt system images with Omarchy
+already installed, so direct installation would not require us to build and
+maintain our own images. Ideally, these would ship unencrypted for efficient
+compression, with native setup support to encrypt each installation with a
+fresh, unique key.
+
 ## Development
 
 CI builds preview packages for Windows, Linux, and macOS (Intel and Apple Silicon).
