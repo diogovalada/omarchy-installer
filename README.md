@@ -42,17 +42,17 @@ See the [support matrix](docs/support-matrix.md) for testing status and
 
 ## Installation testing status
 
-Testing status on physical hardware, grouped by the operating system running
-the app. Implementation availability is listed in the support matrix above.
+Development and physical testing status, grouped by the operating system running
+the app. Implementation details are listed in the support matrix above.
 
-❌ Untested · ✅ Tested
+❌ In Development · ⚠️ Needs Testing · ✅ Tested
 
 | Host operating system | USB | No USB (direct installation) |
 | --- | --- | --- |
-| Windows | ✅ Tested | ❌ Untested |
-| macOS — Intel (x86_64) | ❌ Untested | ❌ Untested |
-| macOS — Apple Silicon (ARM64) | ❌ Untested | ❌ Untested |
-| Linux | ❌ Untested | ❌ Untested |
+| Windows | ✅ Tested | ❌ In Development |
+| macOS — Intel (x86_64) | ⚠️ Needs Testing | ❌ In Development |
+| macOS — Apple Silicon (ARM64) | ❌ In Development | ❌ In Development |
+| Linux | ⚠️ Needs Testing | ❌ In Development |
 
 Windows USB testing covers erase-and-write preparation, full image readback and
 EFI boot-file verification on a physical USB drive. Booting and completing an
