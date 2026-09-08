@@ -212,15 +212,17 @@ mod tests {
     #[test]
     fn receipt_export_is_readable_and_never_replaces_existing_records() {
         let temp = tempfile::tempdir().unwrap();
+        // macOS's temporary directory may start with the /var symlink.
+        let parent = temp.path().canonicalize().unwrap();
         let id = uuid::Uuid::new_v4();
         let plan = json!({"operationId":id,"records":{"receipt":{"verified":true},"cleanup":{"complete":true}}});
-        let mut export = Export::prepare(temp.path(), &Destination::InspectDirect).unwrap();
+        let mut export = Export::prepare(&parent, &Destination::InspectDirect).unwrap();
         let path = export.save(&plan).unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
             plan["records"]
         );
-        let mut duplicate = Export::prepare(temp.path(), &Destination::InspectDirect).unwrap();
+        let mut duplicate = Export::prepare(&parent, &Destination::InspectDirect).unwrap();
         assert!(duplicate.save(&plan).is_err());
         assert_eq!(
             serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap(),
@@ -230,9 +232,25 @@ mod tests {
     #[test]
     fn abandoned_export_does_not_leave_a_pending_file() {
         let temp = tempfile::tempdir().unwrap();
-        let export = Export::prepare(temp.path(), &Destination::InspectDirect).unwrap();
+        let parent = temp.path().canonicalize().unwrap();
+        let export = Export::prepare(&parent, &Destination::InspectDirect).unwrap();
         let path = export.directory.clone();
         drop(export);
         assert_eq!(std::fs::read_dir(path).unwrap().count(), 0);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn linked_records_parent_is_rejected_before_creating_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().canonicalize().unwrap();
+        let target = parent.join("target");
+        let alias = parent.join("alias");
+        std::fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &alias).unwrap();
+        let error = Export::prepare(&alias, &Destination::InspectDirect)
+            .err()
+            .expect("symbolic records paths must be rejected");
+        assert!(error.contains("symbolic links"));
+        assert_eq!(std::fs::read_dir(target).unwrap().count(), 0);
     }
 }

@@ -38,6 +38,10 @@ unmount/open, identity/geometry checks, verification, cancellation and receipts.
    It now resolves their mounted disk with `df -P`, queries diskutil using that
    exact identifier, and rejects inconsistent or non-local results. This also
    avoids guessing APFS firmlink and snapshot mappings from pathname prefixes.
+8. **Receipt-export fixtures used macOS's symlinked temporary path.** Tests now
+   resolve their temporary parent before exercising valid exports. An additional
+   POSIX regression verifies that a symlinked records parent is still rejected
+   without creating records; production path checks remain in force.
 
 These fixes preserve exact hardware/geometry matching, administrator confirmation,
 source authentication, mandatory SDK verification and full image readback. No
@@ -53,6 +57,12 @@ physical device was written or unmounted during this review.
 - New CI integration check executes the real POSIX prerequisite and discovery
   commands and requires source/system exclusions, without requiring a USB or
   performing any write, unmount or eject operation.
+- The [second review CI run](https://github.com/diogovalada/omarchy-installer/actions/runs/34240922966)
+  passed media tests, dependency loading, real discovery, packaged-writer checks
+  and provider staging on both Linux and macOS. Its macOS desktop tests exposed
+  the temporary-path fixture issue above. Its Windows native job could not install
+  the pinned native dependencies because node-gyp did not find a compatible Visual
+  Studio installation on the runner.
 - The earlier green run was a separate Dependabot workflow and is not native test
   evidence. The [first review CI run](https://github.com/diogovalada/omarchy-installer/actions/runs/34240345975)
   exposed the missing-resource issue above. Repository-wide spelling and license
