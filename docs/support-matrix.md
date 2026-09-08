@@ -8,7 +8,7 @@ The [platform behavior guide](platform-behavior.md) records startup/defaults,
 storage, encryption, first-boot and Recovery differences. The Windows menu and
 Mac startup picker are separate platform behaviors; neither is hardware-qualified.
 
-Omarchy Setup is an **unofficial community project**. This matrix describes
+Omarchy Installer is an **unofficial community project**. This matrix describes
 implementation scope and current support. Development cells can be exercised by
 maintainers but have no supported release channel or hardware qualification.
 

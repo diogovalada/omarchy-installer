@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--team-id", required=True, help="Actual Apple signing Team ID for this distribution")
 parser.add_argument("--parent-bundle-id", default="community.omarchy.setup")
-parser.add_argument("--parent-app-path", default="/Applications/Omarchy Setup.app")
+parser.add_argument("--parent-app-path", default="/Applications/Omarchy Installer.app")
 parser.add_argument("--bridge-binary", type=Path, default=ROOT / ".build/release/omarchy-apple-bridge")
 parser.add_argument("--helper-binary", type=Path,
                     default=ROOT / "upstream/apps/omarchy-apple-installer/.build/release/OmarchyAppleInstallerHelper")

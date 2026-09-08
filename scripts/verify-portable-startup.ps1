@@ -8,7 +8,7 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $package=Get-Content -LiteralPath (Join-Path (Split-Path -Parent $Executable) 'portable-record.json') -Raw | ConvertFrom-Json
 $cacheDirectory=if ($package.cache) { Join-Path $env:LOCALAPPDATA ('OmarchySetup/p/'+$package.cache.id) } else { $null }
 $cacheBefore=if ($cacheDirectory -and (Test-Path -LiteralPath $cacheDirectory)) { (Get-Item -LiteralPath $cacheDirectory).CreationTimeUtc.Ticks } else { $null }
-$cachedExeBefore=if ($cacheDirectory -and (Test-Path -LiteralPath (Join-Path $cacheDirectory 'Omarchy Setup.exe'))) { (Get-Item -LiteralPath (Join-Path $cacheDirectory 'Omarchy Setup.exe')).CreationTimeUtc.Ticks } else { $null }
+$cachedExeBefore=if ($cacheDirectory -and (Test-Path -LiteralPath (Join-Path $cacheDirectory 'Omarchy Installer.exe'))) { (Get-Item -LiteralPath (Join-Path $cacheDirectory 'Omarchy Installer.exe')).CreationTimeUtc.Ticks } else { $null }
 if ($ExpectedCacheMode -eq 'cold' -and $null -ne $cacheBefore) { throw 'Cold-start verification requires an absent cache.' }
 if ($ExpectedCacheMode -in @('warm','repair') -and $null -eq $cacheBefore) { throw 'This verification requires an existing cache.' }
 Add-Type @'
@@ -31,7 +31,7 @@ public static class PortableStartupWindow {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 }
 '@
-$existing=@(Get-Process -Name 'Omarchy Setup' -ErrorAction SilentlyContinue | ForEach-Object Id)
+$existing=@(Get-Process -Name 'Omarchy Installer' -ErrorAction SilentlyContinue | ForEach-Object Id)
 $inputAtStart=[PortableStartupWindow]::LastInputTime()
 $timer=[Diagnostics.Stopwatch]::StartNew()
 # This is an intentional visible UI test, not a background helper/service.
@@ -48,7 +48,7 @@ while ($timer.Elapsed.TotalSeconds -lt 120) {
         $text=New-Object Text.StringBuilder 1024
         $control=[PortableStartupWindow]::GetDlgItem($launcher.MainWindowHandle,1030)
         [void][PortableStartupWindow]::GetWindowText($control,$text,$text.Capacity)
-        if ($text.ToString() -match '^(Opening Omarchy Setup|Checking saved application files|Extracting application files|Verifying application files)') {
+        if ($text.ToString() -match '^(Opening Omarchy Installer|Checking saved application files|Extracting application files|Verifying application files)') {
             $bannerSeconds=$timer.Elapsed.TotalSeconds
             $bannerText=$text.ToString()
         }
@@ -57,8 +57,8 @@ while ($timer.Elapsed.TotalSeconds -lt 120) {
         $verifier=Get-CimInstance Win32_Process -Filter "ParentProcessId=$($launcher.Id) AND Name='cache-check.exe'" | Select-Object -First 1
         if ($verifier.ExecutablePath) { $bootstrapDirectory=Split-Path -Parent $verifier.ExecutablePath }
     }
-    $application=Get-Process -Name 'Omarchy Setup' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Id -notin $existing -and $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like 'Omarchy Setup*' } |
+    $application=Get-Process -Name 'Omarchy Installer' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Id -notin $existing -and $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like 'Omarchy Installer*' } |
         Where-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").ParentProcessId -eq $launcher.Id } |
         Select-Object -First 1
     if ($application) { $windowSeconds=$timer.Elapsed.TotalSeconds; break }
@@ -98,7 +98,7 @@ if ($cacheDirectory) {
 if (-not $application.CloseMainWindow()) { throw 'Could not request normal closure of the test application.' }
 if (-not $launcher.WaitForExit(30000)) { throw 'Launcher did not exit after the application closed.' }
 $cacheRetained=$cacheDirectory -and (Test-Path -LiteralPath $cacheDirectory)
-$cacheReused=$cacheRetained -and $null -ne $cacheBefore -and $cacheBefore -eq (Get-Item -LiteralPath $cacheDirectory).CreationTimeUtc.Ticks -and $cachedExeBefore -eq (Get-Item -LiteralPath (Join-Path $cacheDirectory 'Omarchy Setup.exe')).CreationTimeUtc.Ticks
+$cacheReused=$cacheRetained -and $null -ne $cacheBefore -and $cacheBefore -eq (Get-Item -LiteralPath $cacheDirectory).CreationTimeUtc.Ticks -and $cachedExeBefore -eq (Get-Item -LiteralPath (Join-Path $cacheDirectory 'Omarchy Installer.exe')).CreationTimeUtc.Ticks
 $record=[ordered]@{
     executable=$Executable
     extractionIndicatorSeconds=$bannerSeconds

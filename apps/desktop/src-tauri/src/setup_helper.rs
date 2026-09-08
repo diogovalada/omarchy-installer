@@ -737,7 +737,7 @@ fn execute(
                 .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
                 .ok_or("Invalid firmware preparation plan")?;
             confirm(output, confirmations, &cancel,
-                "Restart this computer into UEFI firmware settings now? Save your work and have your Windows recovery key available. The helper will temporarily suspend active Windows OS BitLocker protection for this transition and arrange restoration when Windows returns. Existing suspension is preserved. In firmware, disable Secure Boot, leave TPM enabled, save, and return to Windows. Reopen Omarchy Setup and check with administrator access before installing. No partitions are changed by this step.", &info)?;
+                "Restart this computer into UEFI firmware settings now? Save your work and have your Windows recovery key available. The helper will temporarily suspend active Windows OS BitLocker protection for this transition and arrange restoration when Windows returns. Existing suspension is preserved. In firmware, disable Secure Boot, leave TPM enabled, save, and return to Windows. Reopen Omarchy Installer and check with administrator access before installing. No partitions are changed by this step.", &info)?;
             let path = write_request(
                 &workspace,
                 "firmware-request.json",

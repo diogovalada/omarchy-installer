@@ -1,10 +1,16 @@
-# Omarchy Setup desktop
+# Omarchy Installer desktop
 
 Tauri 2, Svelte and TypeScript. The download path uses native Rust commands for
 real official release discovery, HTTP download/resume, size and SHA-256 checks,
 and detached OpenPGP verification. The single setup screen shows a download,
 its destination and progress, followed by the USB and install actions.
 The webview cannot supply URLs, keys or paths.
+
+The product name is **Omarchy Installer**. The existing application identifier
+(`community.omarchy.setup`), internal package names, cache paths and
+`Omarchy-Setup-Records` directory remain stable so the rename preserves settings,
+downloads and recovery records. Previously built executables retain their old
+name and branding; new builds use the updated product name.
 
 The two setup actions now open native disk/requirements flows. USB creation uses
 the pinned Etcher SDK through a separately elevated copy of this executable.
@@ -44,7 +50,7 @@ Windows requires the ordinary Tauri WebView2/MSVC build prerequisites.
 
 The default Windows distribution is one portable executable. Run
 `pnpm desktop:package:windows -UnsignedPreview` to create an optimized release
-`Omarchy-Setup-0.1.0-x64-portable.exe` under `artifacts/windows-portable/`. Open
+`Omarchy-Installer-0.1.0-x64-portable.exe` under `artifacts/windows-portable/`. Open
 that executable directly. On first launch, an opening indicator appears while
 the launcher extracts and verifies its app and provider files into
 `%LOCALAPPDATA%\OmarchySetup\p\<id>`. Later launches verify and reuse that cache.

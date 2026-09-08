@@ -4,7 +4,7 @@ Status: draft
 
 Last reviewed: 2026-09-02
 
-This document covers the proposed Omarchy Setup architecture. The project is an
+This document covers the proposed Omarchy Installer architecture. The project is an
 **unofficial community project**, not an OmaCom or Omarchy release.
 
 ## Safety objectives

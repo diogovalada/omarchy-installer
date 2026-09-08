@@ -357,13 +357,13 @@ mod tests {
     use super::*;
     fn fixture(root: &Path) -> Manifest {
         fs::create_dir_all(root.join("providers")).unwrap();
-        fs::write(root.join("Omarchy Setup.exe"), b"application").unwrap();
+        fs::write(root.join("Omarchy Installer.exe"), b"application").unwrap();
         fs::write(root.join("providers/runtime.bin"), b"runtime").unwrap();
         Manifest {
             schema_version: 1,
             files: vec![
                 Entry {
-                    path: "Omarchy Setup.exe".into(),
+                    path: "Omarchy Installer.exe".into(),
                     size_bytes: 11,
                     sha256: hex_digest(b"application"),
                 },
@@ -379,7 +379,7 @@ mod tests {
     fn complete_cache_is_reusable_without_changing_files() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = fixture(dir.path());
-        let before = fs::metadata(dir.path().join("Omarchy Setup.exe"))
+        let before = fs::metadata(dir.path().join("Omarchy Installer.exe"))
             .unwrap()
             .created()
             .unwrap();
@@ -387,7 +387,7 @@ mod tests {
         drop(verify(dir.path(), &manifest).unwrap());
         assert_eq!(
             before,
-            fs::metadata(dir.path().join("Omarchy Setup.exe"))
+            fs::metadata(dir.path().join("Omarchy Installer.exe"))
                 .unwrap()
                 .created()
                 .unwrap()
@@ -426,10 +426,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let manifest = fixture(dir.path());
         let handles = verify(dir.path(), &manifest).unwrap();
-        assert!(fs::write(dir.path().join("Omarchy Setup.exe"), b"changed").is_err());
+        assert!(fs::write(dir.path().join("Omarchy Installer.exe"), b"changed").is_err());
         assert!(fs::rename(dir.path().join("providers"), dir.path().join("moved")).is_err());
         drop(handles);
-        assert!(fs::write(dir.path().join("Omarchy Setup.exe"), b"changed").is_ok());
+        assert!(fs::write(dir.path().join("Omarchy Installer.exe"), b"changed").is_ok());
     }
     #[test]
     fn interrupted_staging_is_preserved_and_restarted() {

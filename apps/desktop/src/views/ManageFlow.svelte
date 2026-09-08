@@ -6,7 +6,7 @@
 </script>
 
 <div class="flow-page">
-  <FlowHeader eyebrow="Manage" title="Everything Omarchy Setup owns." description="Review completed operations, cached images, provider health, and redacted diagnostics. Resources are removed only when ownership can be proven." />
+  <FlowHeader eyebrow="Manage" title="Everything Omarchy Installer owns." description="Review completed operations, cached images, provider health, and redacted diagnostics. Resources are removed only when ownership can be proven." />
   <div class="summary"><div><span class="sum-icon"><Archive size={18}/></span><span><strong>2</strong><small>Owned resources</small></span></div><div><span class="sum-icon"><ShieldCheck size={18}/></span><span><strong>Healthy</strong><small>Provider status</small></span></div><div><span class="sum-icon"><Download size={18}/></span><span><strong>6.4 GB</strong><small>Simulated cache</small></span></div></div>
   <section class="history"><div class="section-head"><div><h2>Recent activity</h2><p>Sample data for the dry-run experience</p></div><button>View all</button></div>
     <div class="row"><span class="row-icon"><CheckCircle2 size={16}/></span><span class="row-copy"><strong>Omarchy ISO verified</strong><small>Download · Today at 14:28</small></span><span class="success">Complete</span><button aria-label="More actions"><MoreHorizontal size={17}/></button></div>

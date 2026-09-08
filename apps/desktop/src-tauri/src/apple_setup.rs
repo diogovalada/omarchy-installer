@@ -388,7 +388,7 @@ mod native {
         action: AppleSetupAction,
     ) -> Result<AppleSetupSnapshot, String> {
         if !cfg!(target_arch = "aarch64") {
-            return Err("Use the native Apple Silicon build of Omarchy Setup".into());
+            return Err("Use the native Apple Silicon build of Omarchy Installer".into());
         }
         let accepted = {
             let mut inner = service
@@ -725,7 +725,7 @@ mod native {
         let dialog = app
             .dialog()
             .message(confirmation_text(plan, purpose))
-            .title("Omarchy Setup — Apple installation")
+            .title("Omarchy Installer — Apple installation")
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
                 button.into(),
@@ -815,8 +815,8 @@ mod native {
         // into script source, argv, environment, an on-disk script, or the webview.
         const SCRIPT: &str = r#"
 try
-  set ownerDialog to display dialog "Enter the short account name of this Mac's machine owner." default answer (system attribute "USER") with title "Omarchy Setup — Machine owner" buttons {"Cancel", "Continue"} default button "Continue" cancel button "Cancel"
-  set secretDialog to display dialog "Enter the machine owner's password to authorize the approved native installation." default answer "" with hidden answer with title "Omarchy Setup — Authorize installation" buttons {"Cancel", "Authorize"} default button "Authorize" cancel button "Cancel"
+  set ownerDialog to display dialog "Enter the short account name of this Mac's machine owner." default answer (system attribute "USER") with title "Omarchy Installer — Machine owner" buttons {"Cancel", "Continue"} default button "Continue" cancel button "Cancel"
+  set secretDialog to display dialog "Enter the machine owner's password to authorize the approved native installation." default answer "" with hidden answer with title "Omarchy Installer — Authorize installation" buttons {"Cancel", "Authorize"} default button "Authorize" cancel button "Cancel"
   return (text returned of ownerDialog) & linefeed & (text returned of secretDialog)
 on error number -128
   return ""

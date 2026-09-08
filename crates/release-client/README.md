@@ -1,6 +1,6 @@
 # Official release client
 
-Read-only release discovery and resumable HTTPS downloads for Omarchy Setup.
+Read-only release discovery and resumable HTTPS downloads for Omarchy Installer.
 This crate has no device discovery, disk-writing, elevation, installer launch,
 or downloaded-code execution capability.
 

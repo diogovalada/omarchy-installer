@@ -3,7 +3,7 @@ name = "device-policy"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Pure, fail-closed target classification for Omarchy Setup"
+description = "Pure, fail-closed target classification for Omarchy Installer"
 publish = false
 
 [dependencies]

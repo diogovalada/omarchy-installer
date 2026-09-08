@@ -2,7 +2,7 @@
 
 Describe the user-visible or architectural change and why it is needed.
 
-Omarchy Setup is a **community preview, not an official Omarchy release**. Do not imply endorsement by OmaCom or the Omarchy maintainers.
+Omarchy Installer is a **community preview, not an official Omarchy release**. Do not imply endorsement by OmaCom or the Omarchy maintainers.
 
 ## Safety classification
 

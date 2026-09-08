@@ -4,7 +4,7 @@ Status: native download slice implemented; installation and physical USB integra
 
 Last reviewed: 2026-09-05
 
-Omarchy Setup is an **unofficial community project**. It is not an OmaCom or
+Omarchy Installer is an **unofficial community project**. It is not an OmaCom or
 Omarchy release and must not imply endorsement without written permission.
 
 ## Purpose and boundaries

@@ -12,7 +12,7 @@
   <section class="modal" role="dialog" aria-modal="true" aria-labelledby="plan-title">
     <button class="close" aria-label="Close plan" onclick={close}><X size={17}/></button>
     <span class="modal-icon">{#if complete}<Check size={22}/>{:else}<FlaskConical size={22}/>{/if}</span>
-    <p class="eyebrow">Dry-run plan</p><h2 id="plan-title">{complete ? 'Simulation complete' : title}</h2><p class="intro">{complete ? 'The journey completed without accessing a disk, network, provider, or privileged command.' : `Review the exact actions Omarchy Setup would request on ${host.label}.`}</p>
+    <p class="eyebrow">Dry-run plan</p><h2 id="plan-title">{complete ? 'Simulation complete' : title}</h2><p class="intro">{complete ? 'The journey completed without accessing a disk, network, provider, or privileged command.' : `Review the exact actions Omarchy Installer would request on ${host.label}.`}</p>
     {#if !complete}
       <div class="digest"><span>Plan digest</span><code>SIM-{host.id.toUpperCase()}-7A19C2</code></div>
       <ol><li><span>1</span><div><strong>Resolve trusted metadata</strong><small>Use a bundled simulation catalog.</small></div></li><li><span>2</span><div><strong>Validate the complete plan</strong><small>Check host, inputs, limits, and provider compatibility.</small></div></li><li><span>3</span><div><strong>Emit simulated progress</strong><small>No system call or external process is available to this build.</small></div></li></ol>

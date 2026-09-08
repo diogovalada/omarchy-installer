@@ -64,7 +64,7 @@ pub fn run() {
             apple_setup::apple_setup_action,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build Omarchy Setup")
+        .expect("failed to build Omarchy Installer")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if operation_active(app) { api.prevent_exit(); }

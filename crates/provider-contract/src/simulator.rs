@@ -113,7 +113,7 @@ impl ProviderLifecycle for SimulatedProvider {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
             provider_id: ProviderId::new("omarchy.simulator").expect("static ID is valid"),
-            display_name: "Omarchy Setup Simulator".into(),
+            display_name: "Omarchy Installer Simulator".into(),
             provider_version: env!("CARGO_PKG_VERSION").into(),
             protocol_versions: vec![crate::PROVIDER_PROTOCOL_V1],
         }

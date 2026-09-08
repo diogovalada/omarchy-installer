@@ -4,7 +4,7 @@ Status: draft
 
 Last reviewed: 2026-09-02
 
-Omarchy Setup is an **unofficial community project**. Tester participation is
+Omarchy Installer is an **unofficial community project**. Tester participation is
 voluntary and does not make a feature safe for general use.
 
 ## Non-negotiable eligibility rules

@@ -18,7 +18,7 @@ const applicationSha = hash(application);
 if (mode === 'reuse') {
   const prior = JSON.parse(readFileSync(verifiedPortableRecord ? resolve(verifiedPortableRecord) : join(root, 'artifacts/windows-package/package-record.json'), 'utf8'));
   const priorMatches = verifiedPortableRecord
-    ? prior.format === 'portable-executable' && prior.launcher?.extractionAndHashesVerified === true && prior.sourceApplicationSha256 === applicationSha && prior.files.some(file => file.path === 'Omarchy Setup.exe' && file.sha256 === applicationSha && file.sizeBytes === application.length)
+    ? prior.format === 'portable-executable' && prior.launcher?.extractionAndHashesVerified === true && prior.sourceApplicationSha256 === applicationSha && prior.files.some(file => file.path === 'Omarchy Installer.exe' && file.sha256 === applicationSha && file.sizeBytes === application.length)
     : prior.files.some(file => resolve(file.path) === sourceExe && file.sha256 === applicationSha && file.sizeBytes === application.length);
   if (prior.profile !== profile || !priorMatches) {
     throw new Error('The existing executable does not match its verified build record. Build afresh.');
@@ -48,7 +48,7 @@ function put(relative, bytes) {
   writeFileSync(path, bytes, { flag: 'wx' });
   files.push({ path: relative, sizeBytes: bytes.length, sha256: hash(bytes) });
 }
-put('Omarchy Setup.exe', application);
+put('Omarchy Installer.exe', application);
 const seen = new Set();
 const bundle = join(root, 'apps/desktop/.native-providers/bundle');
 for (const file of manifest.files) {
@@ -71,9 +71,9 @@ put('LICENSE.txt', readFileSync(join(root, 'LICENSE')));
 put('THIRD_PARTY_NOTICES.md', readFileSync(join(root, 'THIRD_PARTY_NOTICES.md')));
 put('LICENSE-Omarchy.txt', readFileSync(join(root, 'apps/desktop/src/assets/omarchy/LICENSE-Omarchy.txt')));
 put('OFL-JetBrainsMono.txt', readFileSync(join(root, 'apps/desktop/src/assets/omarchy/OFL-JetBrainsMono.txt')));
-put('README.txt', Buffer.from(`Omarchy Setup — portable community preview
+put('README.txt', Buffer.from(`Omarchy Installer — portable community preview
 
-The distribution is one executable. Open Omarchy-Setup-0.1.0-x64-portable.exe.
+The distribution is one executable. Open Omarchy-Installer-0.1.0-x64-portable.exe.
 It extracts the payload once into a cache under LocalAppData/OmarchySetup/p.
 Later launches verify and reuse the exact bundled contents. Missing or changed
 files cause a fresh extraction. Different payloads use separate cache versions.
@@ -111,4 +111,4 @@ const cacheId = cacheHash.slice(0, 20); // Short paths; the full SHA-256 is alwa
 const cacheManifestPath = join(outputDirectory, 'cache-manifest.json');
 writeFileSync(cacheManifestPath, cacheManifest, { flag: 'wx' });
 writeFileSync(recordPath, JSON.stringify({ schemaVersion: 1, model: 'gpt-6-astra', createdAt: new Date().toISOString(), format: 'portable-executable', profile, signed: false, installationQualified: false, windowsGuiSubsystemVerified: true, sourceApplicationSha256: applicationSha, providerManifestSha256: hash(manifestBytes), providerFilesVerified: manifest.files.length, cache: { id: cacheId, manifestSha256: cacheHash, payloadBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0) }, files }, null, 2) + '\n', { flag: 'wx' });
-console.log(JSON.stringify({ outputDirectory, payloadDirectory: portable, recordPath, cacheManifestPath, cacheHash, cacheId, executablePath: join(outputDirectory, 'Omarchy-Setup-0.1.0-x64-portable.exe'), nodeRelative: manifest.media.executable.replaceAll('/', '\\') }));
+console.log(JSON.stringify({ outputDirectory, payloadDirectory: portable, recordPath, cacheManifestPath, cacheHash, cacheId, executablePath: join(outputDirectory, 'Omarchy-Installer-0.1.0-x64-portable.exe'), nodeRelative: manifest.media.executable.replaceAll('/', '\\') }));

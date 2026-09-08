@@ -3,7 +3,7 @@ name = "omarchy-provider-contract"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Versioned, data-only lifecycle contract for Omarchy Setup providers"
+description = "Versioned, data-only lifecycle contract for Omarchy Installer providers"
 
 [dependencies]
 schemars = { version = "1.0.4", features = ["derive"] }

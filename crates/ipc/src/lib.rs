@@ -1,4 +1,4 @@
-//! Strict protocol types for communication across the Omarchy Setup privilege
+//! Strict protocol types for communication across the Omarchy Installer privilege
 //! boundary.
 //!
 //! This crate deliberately contains no transport, operating-system IPC, disk,

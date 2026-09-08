@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/omarchy-setup/testkit/host-fixture.schema.json",
-  "title": "Omarchy Setup synthetic host fixture",
+  "title": "Omarchy Installer synthetic host fixture",
   "type": "object",
   "additionalProperties": false,
   "required": ["fixture_version", "id", "description", "policy_id", "host", "disk_fixture", "expect"],

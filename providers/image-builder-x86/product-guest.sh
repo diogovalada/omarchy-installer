@@ -77,7 +77,7 @@ PY
 arch-chroot /mnt /usr/local/sbin/omarchy-boot-menu --apply
 cat >> /mnt/etc/default/limine <<'EOF'
 
-# Omarchy Setup keeps upstream kernels and snapshots in this group.
+# Omarchy Installer keeps upstream kernels and snapshots in this group.
 TARGET_OS_NAME="Advanced Omarchy options"
 # The constructed image has its own ESP and explicit Windows firmware route.
 FIND_BOOTLOADERS=no

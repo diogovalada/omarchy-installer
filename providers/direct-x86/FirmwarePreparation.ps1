@@ -50,7 +50,7 @@ function Invoke-FirmwarePreparation($Request) {
         & $shutdown /r /fw /t 0
         if ($LASTEXITCODE -ne 0) { Fail 'firmware_restart_failed' 'Windows could not schedule the firmware restart. Protection is being restored.' }
         $restarting=$true
-        Emit 'result' 'firmware-restart' @{result=@{restartRequested=$true;message='In firmware settings, disable Secure Boot and leave TPM enabled. Save, return to Windows, reopen Omarchy Setup and check with administrator access.'}}
+        Emit 'result' 'firmware-restart' @{result=@{restartRequested=$true;message='In firmware settings, disable Secure Boot and leave TPM enabled. Save, return to Windows, reopen Omarchy Installer and check with administrator access.'}}
     } finally {
         if (-not $restarting -and $null -ne $context) { [void](Restore-PlannedBitLocker $context) }
         if ($null -ne $context) { $context.mutex.Dispose() }

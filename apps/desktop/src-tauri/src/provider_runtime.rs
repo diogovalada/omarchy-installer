@@ -262,12 +262,12 @@ mod inspection_tests {
         )));
         assert!(linux.contains(&PathBuf::from("/usr/lib/omarchy-setup-desktop/providers")));
         let mac = packaged_roots(
-            Path::new("/Applications/Omarchy Setup.app/Contents/MacOS/omarchy-setup-desktop"),
+            Path::new("/Applications/Omarchy Installer.app/Contents/MacOS/omarchy-setup-desktop"),
             "macos",
         )
         .unwrap();
         assert!(mac.contains(&PathBuf::from(
-            "/Applications/Omarchy Setup.app/Contents/MacOS/../Resources/providers"
+            "/Applications/Omarchy Installer.app/Contents/MacOS/../Resources/providers"
         )));
         assert_eq!(
             packaged_roots(Path::new("portable/app.exe"), "windows").unwrap(),

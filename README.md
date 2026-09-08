@@ -1,4 +1,4 @@
-# Omarchy Setup
+# Omarchy Installer
 
 A desktop app for downloading Omarchy, creating an installation USB, and
 installing alongside an existing operating system.

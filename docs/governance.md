@@ -4,7 +4,7 @@ Status: provisional until repository ownership and maintainers are established
 
 Last reviewed: 2026-09-02
 
-Omarchy Setup is an **unofficial community project**. Governance must not imply
+Omarchy Installer is an **unofficial community project**. Governance must not imply
 authority over OmaCom, Omarchy, or independently maintained providers.
 
 ## Roles

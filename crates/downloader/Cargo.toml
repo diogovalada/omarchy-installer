@@ -3,7 +3,7 @@ name = "omarchy-downloader"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Offline-testable verified artifact cache primitives for Omarchy Setup"
+description = "Offline-testable verified artifact cache primitives for Omarchy Installer"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

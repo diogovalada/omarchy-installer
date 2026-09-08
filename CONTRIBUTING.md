@@ -1,4 +1,4 @@
-# Contributing to Omarchy Setup
+# Contributing to Omarchy Installer
 
 Thank you for helping build a safer cross-platform Omarchy setup experience.
 This is an **unofficial community project** and is not an OmaCom or Omarchy

@@ -1,4 +1,4 @@
-//! Pure, side-effect-free safety model for Omarchy Setup.
+//! Pure, side-effect-free safety model for Omarchy Installer.
 //!
 //! This crate never probes hardware, opens files, or touches a block device. It
 //! accepts observations made by less-trusted adapters, evaluates explicit

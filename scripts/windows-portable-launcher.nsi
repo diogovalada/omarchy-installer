@@ -1,7 +1,7 @@
 ; Portable launcher only: no installation directory, registry registration,
 ; shortcuts, uninstaller or elevation. Exact payloads share a verified user cache.
 Unicode true
-Name "Omarchy Setup"
+Name "Omarchy Installer"
 OutFile "${OUTPUT_FILE}"
 Icon "${APP_ICON}"
 RequestExecutionLevel user
@@ -11,8 +11,8 @@ CRCCheck force
 ; Independent blocks let a cache hit load only the small trusted verifier.
 SetCompressor zlib
 VIProductVersion "0.1.0.0"
-VIAddVersionKey "ProductName" "Omarchy Setup Portable"
-VIAddVersionKey "FileDescription" "Portable Omarchy Setup community preview"
+VIAddVersionKey "ProductName" "Omarchy Installer Portable"
+VIAddVersionKey "FileDescription" "Portable Omarchy Installer community preview"
 VIAddVersionKey "FileVersion" "0.1.0"
 VIAddVersionKey "LegalCopyright" "Community preview; upstream notices included"
 !include FileFunc.nsh
@@ -42,7 +42,7 @@ accepted:
   ; Declare the plugin before the payload so a solid archive can show this
   ; immediately, without first decompressing the application to load the plugin.
   StrCmp $VerifyOnly "1" quiet_init
-  Banner::show /set 1030 "Opening Omarchy Setup..." "Omarchy Setup"
+  Banner::show /set 1030 "Opening Omarchy Installer..." "Omarchy Installer"
   Banner::getWindow
   Pop $BannerWindow
 quiet_init:
@@ -132,8 +132,8 @@ launch:
   System::Call '*(p 0, p 0, i 0, i 0) p.r2'
   StrCmp $1 0 allocation_failed
   StrCmp $2 0 allocation_failed
-  StrCpy $7 '"$AppDir\Omarchy Setup.exe"'
-  System::Call 'kernel32::CreateProcessW(w "$AppDir\Omarchy Setup.exe", w r7, p 0, p 0, i 0, i 0, p 0, w "$AppDir", p r1, p r2) i.r0'
+  StrCpy $7 '"$AppDir\Omarchy Installer.exe"'
+  System::Call 'kernel32::CreateProcessW(w "$AppDir\Omarchy Installer.exe", w r7, p 0, p 0, i 0, i 0, p 0, w "$AppDir", p r1, p r2) i.r0'
   System::Call '*$2(p.r3, p.r4, i.r5, i.r6)'
   System::Free $1
   System::Free $2
@@ -198,7 +198,7 @@ allocation_failed:
 failed:
   StrCmp $VerifyOnly "1" quiet
   Banner::destroy
-  MessageBox MB_OK|MB_ICONSTOP "Omarchy Setup could not prepare or verify its application cache. Close other Omarchy Setup windows, check available disk space, and try again."
+  MessageBox MB_OK|MB_ICONSTOP "Omarchy Installer could not prepare or verify its application cache. Close other Omarchy Installer windows, check available disk space, and try again."
 quiet:
   SetErrorLevel 2
 done:

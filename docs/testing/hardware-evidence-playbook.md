@@ -5,7 +5,7 @@ Status: template; not authorization to test a real device
 Last reviewed: 2026-09-02
 
 Use this only with an immutable candidate that explicitly requests your test
-ring. Read the [tester policy](tester-policy.md) first. Omarchy Setup is an
+ring. Read the [tester policy](tester-policy.md) first. Omarchy Installer is an
 **unofficial community project**.
 
 ## 1. Candidate record

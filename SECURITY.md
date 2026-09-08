@@ -2,7 +2,7 @@
 
 Status: draft; private reporting address pending repository setup
 
-Omarchy Setup is an **unofficial community project** and is not an OmaCom or
+Omarchy Installer is an **unofficial community project** and is not an OmaCom or
 Omarchy release. Do not send reports about this project to upstream Omarchy
 maintainers unless an upstream component is independently affected.
 
@@ -80,5 +80,5 @@ table will name exact supported release lines when signed candidates exist.
 
 If a report affects an upstream project, maintainers will coordinate privately
 with its security contact and avoid disclosing the upstream flaw prematurely.
-Project advisories must distinguish Omarchy Setup defects from upstream defects
+Project advisories must distinguish Omarchy Installer defects from upstream defects
 and must not imply that OmaCom reviewed or endorsed the response.

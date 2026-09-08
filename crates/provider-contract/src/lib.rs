@@ -1,4 +1,4 @@
-//! Stable, data-only contracts between Omarchy Setup and capability providers.
+//! Stable, data-only contracts between Omarchy Installer and capability providers.
 //!
 //! This crate intentionally contains no provider discovery, dynamic loading, shell
 //! invocation, or process execution. A host application chooses the transport and

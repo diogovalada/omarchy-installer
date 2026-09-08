@@ -3,7 +3,7 @@ name = "omarchy-setup-catalog"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Strict signed artifact catalog verification for Omarchy Setup"
+description = "Strict signed artifact catalog verification for Omarchy Installer"
 
 [dependencies]
 base64 = "0.22"

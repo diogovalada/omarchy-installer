@@ -1,4 +1,4 @@
-# Omarchy Setup — Project Roadmap
+# Omarchy Installer — Project Roadmap
 
 Status: Windows direct completion pass implemented; automated checks passing; machine qualification pending
 
@@ -58,7 +58,7 @@ Try Omarchy is outside v1 and may return as an optional later integration.
 Removal and repair are offered only where a backend implements and qualifies
 them; a generic Manage screen is not evidence that those operations work.
 
-The working name is **Omarchy Setup**. Until OmaCom grants branding permission,
+The working name is **Omarchy Installer**. Until OmaCom grants branding permission,
 all public builds must say **community preview — not an official Omarchy
 release** and must not imply official endorsement.
 
@@ -505,7 +505,7 @@ unavailable on Linux. Try/QEMU/KVM product integration stays beyond v1.
 - Resume and explain incomplete operations.
 - Re-download/repair owned assets and boot entries.
 - Export redacted support evidence.
-- Remove only resources proven to belong to Omarchy Setup.
+- Remove only resources proven to belong to Omarchy Installer.
 - Treat removal and host-filesystem expansion as separate operations.
 - Prepare repository transfer or provider-by-provider upstream adoption once
   OmaCom accepts the security, support, and maintenance model.
@@ -650,7 +650,7 @@ The default low-interruption workflow is:
 Unless changed before implementation begins:
 
 - Standalone local repository with a neutral history, not a fork.
-- Provisional name: `omarchy-setup`.
+- Provisional name: `omarchy-installer`.
 - Proposed license: MIT with preserved third-party notices.
 - Status: unofficial community project.
 - No telemetry; manual, previewable diagnostics only.

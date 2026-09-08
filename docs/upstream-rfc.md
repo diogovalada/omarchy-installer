@@ -9,7 +9,7 @@ Suggested venue: Omarchy Suggestions discussion
 ## Summary
 
 I would like to incubate an **unofficial community project** provisionally named
-Omarchy Setup: one safe front door for trying Omarchy, downloading a verified
+Omarchy Installer: one safe front door for trying Omarchy, downloading a verified
 image, creating installation media, and handing off to qualified platform-
 specific installation engines.
 
@@ -86,7 +86,7 @@ sacrificial-device testing and recovery evidence.
    mirrors should a community downloader/USB writer consume, and is there an
    upstream catalog format or key-rotation plan it should align with?
 4. **Name and branding:** May an explicitly unofficial project use the working
-   name “Omarchy Setup” and text-only Omarchy references; which name, artwork and
+   name “Omarchy Installer” and text-only Omarchy references; which name, artwork and
    disclaimer rules should apply now and if the work is later adopted?
 
 ## Proposed first milestone

@@ -269,7 +269,7 @@ impl Transport {
                 .no_brotli()
                 .no_deflate()
                 .no_zstd()
-                .user_agent("Omarchy-Setup/0.1 (verified release discovery)")
+                .user_agent("Omarchy-Installer/0.1 (verified release discovery)")
                 .build()?,
             home: HOME_URL.into(),
             origin: ISO_ORIGIN.into(),

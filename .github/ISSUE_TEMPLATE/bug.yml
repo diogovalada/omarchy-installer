@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Omarchy Setup is a **community preview, not an official Omarchy release**.
+        Omarchy Installer is a **community preview, not an official Omarchy release**.
         Redact logs before posting them. Never attach disk contents, credentials, recovery keys, private keys, or unreviewed diagnostic archives.
 
   - type: input

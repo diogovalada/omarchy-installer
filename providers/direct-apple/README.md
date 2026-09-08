@@ -62,7 +62,7 @@ python3 providers/direct-apple/scripts/assemble-bundle.py --team-id YOURTEAMID
 `YOURTEAMID` must be the actual ten-character Apple signing Team ID selected for
 the distribution. Supply `--parent-bundle-id` or `--parent-app-path` if the Tauri
 identity differs from `community.omarchy.setup` or its installed path differs
-from `/Applications/Omarchy Setup.app`.
+from `/Applications/Omarchy Installer.app`.
 
 The acquisition command downloads the separately pinned 19.4 MB PKG, verifies
 its exact SHA-256 and size, and extracts only known members to `.release-input`.

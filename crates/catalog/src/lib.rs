@@ -1,4 +1,4 @@
-//! Strict, fail-closed verification for Omarchy Setup artifact catalogs.
+//! Strict, fail-closed verification for Omarchy Installer artifact catalogs.
 //!
 //! A signed envelope contains the exact catalog JSON bytes as base64. Signing
 //! those bytes, rather than a re-serialized JSON value, avoids JSON

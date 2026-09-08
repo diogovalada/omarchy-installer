@@ -10,8 +10,8 @@ $cacheRoot=[IO.Path]::GetFullPath((Join-Path $cacheParent $record.cache.id))
 $savedRoot=[IO.Path]::GetFullPath((Join-Path $cacheParent ($record.cache.id+'.concurrency-'+[Guid]::NewGuid().ToString('N').Substring(0,8))))
 # Both resolved targets must remain in this app's explicitly named cache directory.
 if (-not $cacheRoot.StartsWith($cacheParent+[IO.Path]::DirectorySeparatorChar) -or -not $savedRoot.StartsWith($cacheParent+[IO.Path]::DirectorySeparatorChar)) { throw 'Invalid fixture cache paths.' }
-$appPath=Join-Path $cacheRoot 'Omarchy Setup.exe'
-if (@(Get-Process -Name 'Omarchy Setup' -ErrorAction SilentlyContinue | Where-Object Path -eq $appPath).Count) { throw 'This cache is in use; test leaves existing app instances untouched.' }
+$appPath=Join-Path $cacheRoot 'Omarchy Installer.exe'
+if (@(Get-Process -Name 'Omarchy Installer' -ErrorAction SilentlyContinue | Where-Object Path -eq $appPath).Count) { throw 'This cache is in use; test leaves existing app instances untouched.' }
 $savedCache=$null
 if (Test-Path -LiteralPath $cacheRoot) {
     if ((Get-Item -LiteralPath $cacheRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Cache fixture must not be a link.' }
@@ -25,7 +25,7 @@ $launcherIds=@($first.Id,$second.Id)
 $timer=[Diagnostics.Stopwatch]::StartNew()
 $applications=@()
 while ($timer.Elapsed.TotalSeconds -lt 120) {
-    $applications=@(Get-Process -Name 'Omarchy Setup' -ErrorAction SilentlyContinue |
+    $applications=@(Get-Process -Name 'Omarchy Installer' -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -eq $appPath -and $_.MainWindowHandle -ne [IntPtr]::Zero } |
         Where-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").ParentProcessId -in $launcherIds })
     if ($applications.Count -eq 2) { break }

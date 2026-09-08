@@ -1,4 +1,4 @@
-# Omarchy Setup — Project and Research Handoff
+# Omarchy Installer — Project and Research Handoff
 
 Status: Windows completion pass implemented; automated validation resumed; machine qualification pending
 
@@ -129,7 +129,7 @@ The underlying goal remains valid: make it substantially easier and safer for a
 Windows or macOS user to get from interest in Omarchy to a verified trial or
 installation, while retaining a path to Linux-host support.
 
-The original broad `Omarchy Setup` roadmap should **not** resume unchanged.
+The original broad `Omarchy Installer` roadmap should **not** resume unchanged.
 Between September 3 and 5, both Try Omarchy VM applications moved into the
 official Omacom GitHub organization and advanced quickly. A new independent
 application should not recreate or absorb their VM lifecycle, updater,

@@ -3,7 +3,7 @@ name = "omarchy-journal"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Crash-aware, hash-chained operation journal for Omarchy Setup"
+description = "Crash-aware, hash-chained operation journal for Omarchy Installer"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

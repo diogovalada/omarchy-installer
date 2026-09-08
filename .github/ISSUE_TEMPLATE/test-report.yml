@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for testing the unofficial Omarchy Setup community preview. Routine testing must use simulation or file-backed devices. Test physical media only under a published tester playbook, using a disposable external drive on a non-essential machine.
+        Thank you for testing the unofficial Omarchy Installer community preview. Routine testing must use simulation or file-backed devices. Test physical media only under a published tester playbook, using a disposable external drive on a non-essential machine.
 
         A successful report is evidence for a specific host/device combination; it does not make the capability generally safe or stable.
 

@@ -13,7 +13,7 @@ or to choose an existing maintainer's repository as the universal home.
 
 ## Decision
 
-Develop Omarchy Setup in a neutral standalone repository with independent,
+Develop Omarchy Installer in a neutral standalone repository with independent,
 clearly unofficial branding. Define shared contracts and integrate upstream
 engines through providers or signed handoffs. Do not use the history of the
 SwiftUI Apple installer, an official Omarchy repository, or a VM project as the
