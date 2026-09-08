@@ -72,7 +72,7 @@ test('Linux unmount uses exact device numbers, aliases and nested bind mounts', 
   const unrelated = '34 1 8:432 / /media/other rw - vfat /dev/sdba rw';
   const env = filesystem(t, { [`${sys}/dev`]: '8:16', [`${sys}/sdb1/partition`]: '1', [`${sys}/sdb1/dev`]: '8:17',
     '/proc/self/mountinfo': ['31 1 8:17 / /media/My\\040USB rw - vfat /dev/disk/by-label/MYUSB rw',
-      '32 1 8:17 /sub /media/My\\040USB/nested rw - vfat /dev/sdb1 rw', unrelated].join('\n') },
+      '32 31 8:17 /sub /media/My\\040USB/nested rw - vfat /dev/sdb1 rw', unrelated].join('\n') },
   { [sys]: ['sdb1', 'dev'] }, { '/sys/class/block/sdb': sys });
   const calls = [];
   t.mock.method(tools, 'runTool', async (exe, args) => {
@@ -103,4 +103,49 @@ test('zram swap is memory-backed and swap paths preserve escaped spaces', async 
     { [`${zram}/slaves`]: [] }, { '/sys/class/block/zram0': zram });
   assert.deepEqual(await linux.linuxBlockDisks('/sys/class/block/zram0'), []);
   assert.deepEqual(await linux.linuxSwapPaths(), ['/dev/zram0', '/home/swap file']);
+});
+
+test('Linux USB identity never borrows an upstream hub serial', async t => {
+  const hub = '/sys/devices/pci0000:00/usb1/1-1';
+  const usb = `${hub}/1-1.2`;
+  const sys = `${usb}/1-1.2:1.0/host1/target1/block/sdb`;
+  const env = filesystem(t, { [`${hub}/serial`]: 'hub-only', [`${hub}/idVendor`]: '0001', [`${hub}/idProduct`]: '0002',
+    [`${usb}/idVendor`]: '0003', [`${usb}/idProduct`]: '0004', [`${sys}/dev`]: '8:16' },
+  { [sys]: ['dev', 'holders'], [`${sys}/holders`]: [] }, { '/sys/class/block/sdb': sys });
+  await assert.rejects(linux.linuxHardwareId('/dev/sdb'), error => error.code === 'IDENTITY_UNAVAILABLE');
+  env.files[`${usb}/serial`] = 'own-usb-serial';
+  assert.deepEqual(JSON.parse(await linux.linuxHardwareId('/dev/sdb')), { serial: 'own-usb-serial', sys, dev: '8:16' });
+  delete env.files[`${usb}/serial`];
+  env.files[`${sys}/device/serial`] = 'own-scsi-serial';
+  assert.equal(JSON.parse(await linux.linuxHardwareId('/dev/sdb')).serial, 'own-scsi-serial');
+});
+
+for (const coveringMount of [
+  '32 31 8:33 / /media/usb/child rw - ext4 /dev/sdc1 rw',
+  '32 1 8:33 / /media/usb rw - ext4 /dev/sdc1 rw',
+]) {
+  test(`Linux refuses a hidden target mount before any unmount: ${coveringMount}`, async t => {
+    const sys = '/sys/devices/pci0000:00/usb1/block/sdb';
+    filesystem(t, { [`${sys}/dev`]: '8:16', '/media/usb/child/source.iso': '',
+      '/proc/self/mountinfo': `1 1 8:1 / / rw - ext4 /dev/sda1 rw\n31 1 8:16 / /media/usb/child rw - vfat /dev/sdb rw\n${coveringMount}` },
+    { [sys]: ['dev'] }, { '/sys/class/block/sdb': sys });
+    await assert.rejects(linux.unmountLinuxTarget('/dev/sdb'), /overlapping mounts/);
+    // With an overmounted ancestor, longest-path matching must not guess the
+    // now-hidden filesystem as the backing disk for a visible source file.
+    if (coveringMount.includes(' /media/usb rw')) {
+      await assert.rejects(linux.linuxBackingDisks('/media/usb/child/source.iso'), /overlapping mounts/);
+    }
+  });
+}
+
+test('Linux rechecks mount identity immediately before each unmount', async t => {
+  const sys = '/sys/devices/pci0000:00/usb1/block/sdb';
+  filesystem(t, { [`${sys}/dev`]: '8:16' }, { [sys]: ['dev'] }, { '/sys/class/block/sdb': sys });
+  let reads = 0;
+  t.mock.method(fs, 'readFile', async filename => {
+    if (filename === `${sys}/dev`) return '8:16';
+    assert.equal(filename, '/proc/self/mountinfo');
+    return `${++reads === 1 ? 31 : 32} 1 8:16 / /media/usb rw - vfat /dev/sdb rw`;
+  });
+  await assert.rejects(linux.unmountLinuxTarget('/dev/sdb'), /layout changed/);
 });

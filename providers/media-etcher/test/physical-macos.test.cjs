@@ -29,7 +29,15 @@ test('macOS excludes partitions and USB devices without their own serial', () =>
   ])]));
   assert.equal(result.size, 0);
 });
+test('macOS USB subclasses cannot inherit an upstream hub serial', () => {
+  const result = parseMacUsbRegistry(plist([usb([
+    { IOObjectClass: 'AppleUSBDevice', IOObjectInheritance: ['IOService', 'IOUSBHostDevice', 'AppleUSBDevice'],
+      locationID: 5678, IORegistryEntryChildren: [media()] },
+  ])]));
+  assert.equal(result.size, 0);
+});
 test('macOS rejects duplicate media identities and malformed registry input', () => {
+  assert.equal(parseMacUsbRegistry('').size, 0);
   assert.throws(() => parseMacUsbRegistry(plist([usb([media(), media()])])), /ambiguous/);
   assert.throws(() => parseMacUsbRegistry('not a plist'));
   assert.throws(() => parseMacUsbRegistry(plist([usb([media({ IORegistryEntryID: 9007199254740992 })])])), /ambiguous/);

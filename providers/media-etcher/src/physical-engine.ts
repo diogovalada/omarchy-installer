@@ -89,6 +89,9 @@ class HeldSdkDevice extends BlockDevice {
       // Reidentify while retaining this descriptor before resolving an optional
       // missing physical-sector query from Windows' current disk information.
       const heldIdentity = await reidentifyHeld();
+      if (process.platform !== 'win32' && heldIdentity.drive.mountpoints.length) {
+        fail('UNMOUNT_FAILED', 'The USB was remounted before writing.');
+      }
       const geometry = resolveHandleGeometry(nativeGeometry, process.platform === 'win32' ? heldIdentity.windows : undefined);
       if (geometry.size !== this.size || geometry.physicalSectorSize !== this.alignment || geometry.logicalSectorSize !== this.logicalSectorSize || !validSector(geometry.logicalSectorSize) ||
           geometry.physicalSectorSize % geometry.logicalSectorSize !== 0 || this.writeSpanBytes % geometry.physicalSectorSize !== 0 || this.writeSpanBytes > geometry.size) {

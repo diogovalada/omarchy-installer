@@ -88,6 +88,7 @@ async function fixture(t, { length = 2 * 1024 * 1024 + 73, sector = 512, fault, 
   t.mock.method(discovery, 'reidentify', async (identity, source) => {
     assert.deepEqual(identity, target); assert.equal(source, sourcePath);
     if (fault === 'identity' && handle) throw new Error('Injected target identity change');
+    if (fault === 'discovered-remount' && handle) return { ...entry, drive: { ...entry.drive, mountpoints: [{ path: '/fixture-only' }] } };
     return entry;
   });
   t.mock.method(discovery, 'inventory', async () => ejected ? [] : [entry]);
@@ -145,7 +146,7 @@ async function fixture(t, { length = 2 * 1024 * 1024 + 73, sector = 512, fault, 
     }
     if (handle) assert.equal(handle.fd, -1);
     assert.equal(volumeReleased, true);
-    if (['geometry', 'identity', 'unmount', 'node-identity', 'remounted'].includes(fault)) { assert.equal(modifications, 0); assert.deepEqual(writes, []); }
+    if (['geometry', 'identity', 'unmount', 'node-identity', 'remounted', 'discovered-remount'].includes(fault)) { assert.equal(modifications, 0); assert.deepEqual(writes, []); }
     else assert.ok(modifications > 0);
   } finally {
     t.mock.restoreAll();
@@ -179,7 +180,7 @@ test('failed ejection retains a verified image receipt with a manual-removal war
   await fixture(t, { fault: 'eject' });
 });
 
-for (const fault of ['unmount', 'node-identity']) {
+for (const fault of ['unmount', 'node-identity', 'discovered-remount']) {
   test(`POSIX ${fault} failure prevents every raw write`, { skip: windows }, async t => {
     await fixture(t, { fault });
   });

@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { access, readFile, realpath, stat } from 'node:fs/promises';
+import { access, realpath, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Drive } from 'drivelist';
 import { PhysicalWriteError, type DriveIdentity, type PhysicalDrive, type PhysicalProbe } from './physical-contracts.js';
 import { validatePathSyntax } from './safety.js';
 import { runTool } from './physical-tools.js';
-import { linuxBackingDisks, linuxHasHolders, linuxSwapPaths, linuxTargetMounts } from './physical-linux.js';
+import { linuxBackingDisks, linuxHardwareId, linuxSwapPaths, linuxTargetMounts } from './physical-linux.js';
 import { macUsbMedia, macApfsStores, macBackingDisks, type MacUsbMedia } from './physical-macos.js';
 export { runTool } from './physical-tools.js';
 
@@ -33,29 +33,6 @@ export function windowsHardwareId(disk: WindowsDisk): string {
 export async function windowsDisks(): Promise<WindowsDisk[]> {
   const json = JSON.parse(await runTool(powershellPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_INVENTORY]));
   return json === null ? [] : Array.isArray(json) ? json : [json];
-}
-
-async function linuxHardwareId(drive: Drive): Promise<string> {
-  const name = path.basename(drive.device);
-  const sys = await realpath(`/sys/class/block/${name}`);
-  try { await access(`${sys}/partition`); fail('NOT_WHOLE_DEVICE', 'Partitions cannot be written.'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  if (!sys.startsWith('/sys/devices/')) fail('IDENTITY_UNAVAILABLE', 'Device sysfs ancestry is unavailable.');
-  if (await linuxHasHolders(sys)) fail('DEVICE_IN_USE', 'Device or its partitions have active storage holders.');
-  let serial = '';
-  let current = sys;
-  while (current !== '/sys/devices') {
-    try { serial = (await readFile(`${current}/serial`, 'utf8')).trim(); } catch { /* try parent */ }
-    if (serial) break;
-    current = path.dirname(current);
-    if (!current.startsWith('/sys/devices')) break;
-  }
-  if (!serial) {
-    try { serial = (await readFile(`${sys}/device/serial`, 'utf8')).trim(); } catch { /* fail closed below */ }
-  }
-  if (!serial) fail('IDENTITY_UNAVAILABLE', 'USB hardware serial is unavailable.');
-  const dev = (await readFile(`${sys}/dev`, 'utf8')).trim();
-  return JSON.stringify({ serial, sys, dev });
 }
 
 function wholeDevice(drive: Drive): boolean {
@@ -200,7 +177,7 @@ export async function inventory(sourcePath?: string): Promise<InventoryEntry[]> 
           if (native.Size !== drive.size || native.LogicalSectorSize !== drive.logicalBlockSize || native.PhysicalSectorSize !== drive.blockSize) reasons.push('IDENTITY_DISAGREEMENT');
           hardwareId = windowsHardwareId(native);
         } else if (process.platform === 'linux') {
-          hardwareId = await linuxHardwareId(drive);
+          hardwareId = await linuxHardwareId(drive.device);
           drive.mountpoints = (await linuxTargetMounts(drive.device)).map(m => ({ path: m.mountpoint, label: null }));
         } else {
           const media = mac.get(drive.device);

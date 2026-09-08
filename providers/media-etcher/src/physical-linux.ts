@@ -5,20 +5,39 @@ import { runTool } from './physical-tools.js';
 
 function fail(message: string): never { throw new PhysicalWriteError('EXCLUSION_UNAVAILABLE', message); }
 const decode = (value: string) => value.replace(/\\(040|011|012|134)/g, (_match, code) => String.fromCharCode(parseInt(code, 8)));
-export interface LinuxMount { id: number; device: string; mountpoint: string; type: string; source: string }
+export interface LinuxMount { id: number; parent: number; device: string; mountpoint: string; type: string; source: string }
 
 export function parseLinuxMounts(text: string): LinuxMount[] {
   if (text.length > 32 * 1024 * 1024) fail('Linux mount inventory exceeded its bound.');
   return text.trim().split('\n').filter(Boolean).map(line => {
     const fields = line.split(' ');
     const separator = fields.indexOf('-');
-    if (separator < 6 || fields.length < separator + 4 || !/^\d+$/.test(fields[0]) || !/^\d+:\d+$/.test(fields[2])) {
+    if (separator < 6 || fields.length < separator + 4 || !/^\d+$/.test(fields[0]) || !/^\d+$/.test(fields[1]) || !/^\d+:\d+$/.test(fields[2])) {
       fail('Linux mount inventory is incomplete.');
     }
     const mountpoint = decode(fields[4]);
     if (!mountpoint.startsWith('/')) fail('Linux mountpoint is not absolute.');
-    return { id: Number(fields[0]), device: fields[2], mountpoint, type: fields[separator + 1], source: decode(fields[separator + 2]) };
+    return { id: Number(fields[0]), parent: Number(fields[1]), device: fields[2], mountpoint, type: fields[separator + 1], source: decode(fields[separator + 2]) };
   });
+}
+
+function assertVisibleMount(selected: LinuxMount, mounts: LinuxMount[]): void {
+  const byId = new Map(mounts.map(mount => [mount.id, mount]));
+  if (byId.size !== mounts.length) fail('Linux mount identities are ambiguous.');
+  const ancestors = new Set<number>();
+  let current: LinuxMount | undefined = selected;
+  while (current) {
+    if (ancestors.has(current.id)) fail('Linux mount ancestry is cyclic.');
+    ancestors.add(current.id);
+    if (current.parent === current.id && current.mountpoint === '/') break;
+    current = byId.get(current.parent);
+  }
+  // A mount at this pathname, or covering an ancestor directory, can hide an
+  // older mount. umount(path) would operate on that other filesystem instead.
+  if (mounts.some(mount => !ancestors.has(mount.id) &&
+      (selected.mountpoint === mount.mountpoint || selected.mountpoint.startsWith(mount.mountpoint === '/' ? '/' : mount.mountpoint + '/')))) {
+    fail('A Linux mount is hidden by overlapping mounts; resolve them before writing.');
+  }
 }
 
 async function exists(filename: string): Promise<boolean> {
@@ -74,6 +93,7 @@ export async function linuxBackingDisks(filename: string, seen = new Set<string>
   const candidates = mounts.filter(m => canonical === m.mountpoint || canonical.startsWith(m.mountpoint === '/' ? '/' : m.mountpoint + '/'));
   candidates.sort((a, b) => b.mountpoint.length - a.mountpoint.length || b.id - a.id);
   if (!candidates.length) fail('Cannot find the Linux filesystem containing the source or application.');
+  assertVisibleMount(candidates[0], mounts);
   return mountDisks(candidates[0], seen);
 }
 
@@ -94,6 +114,32 @@ export async function linuxHasHolders(sys: string): Promise<boolean> {
   return false;
 }
 
+export async function linuxHardwareId(device: string): Promise<string> {
+  const sys = await realpath(`/sys/class/block/${path.basename(device)}`);
+  if (!sys.startsWith('/sys/devices/')) fail('Device sysfs ancestry is unavailable.');
+  if (await exists(`${sys}/partition`)) throw new PhysicalWriteError('NOT_WHOLE_DEVICE', 'Partitions cannot be written.');
+  if (await linuxHasHolders(sys)) throw new PhysicalWriteError('DEVICE_IN_USE', 'Device or its partitions have active storage holders.');
+  let current = sys;
+  let serial = '';
+  while (current.startsWith('/sys/devices/')) {
+    if (await exists(`${current}/idVendor`) && await exists(`${current}/idProduct`)) {
+      try { serial = (await readFile(`${current}/serial`, 'utf8')).trim(); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      // This is the disk's own USB device. Never inherit an upstream hub serial.
+      break;
+    }
+    current = path.dirname(current);
+  }
+  if (!current.startsWith('/sys/devices/')) throw new PhysicalWriteError('IDENTITY_UNAVAILABLE', 'USB device ancestry is unavailable.');
+  if (!serial) {
+    try { serial = (await readFile(`${sys}/device/serial`, 'utf8')).trim(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  if (!serial) throw new PhysicalWriteError('IDENTITY_UNAVAILABLE', 'USB hardware serial is unavailable.');
+  const dev = (await readFile(`${sys}/dev`, 'utf8')).trim();
+  return JSON.stringify({ serial, sys, dev });
+}
+
 /** Exact device membership, including aliases and bind mounts; never a pathname prefix. */
 export async function linuxTargetMounts(device: string): Promise<LinuxMount[]> {
   if (!/^\/dev\/sd[a-z]+$/.test(device)) fail('Expected a whole Linux USB disk.');
@@ -103,7 +149,8 @@ export async function linuxTargetMounts(device: string): Promise<LinuxMount[]> {
     if (await exists(`${sys}/${name}/partition`)) numbers.add((await readFile(`${sys}/${name}/dev`, 'utf8')).trim());
   }
   const result: LinuxMount[] = [];
-  for (const mount of parseLinuxMounts(await readFile('/proc/self/mountinfo', 'utf8'))) {
+  const mounts = parseLinuxMounts(await readFile('/proc/self/mountinfo', 'utf8'));
+  for (const mount of mounts) {
     if (mount.type === 'btrfs') {
       const disks = await mountDisks(mount, new Set());
       if (disks.includes(device)) {
@@ -112,11 +159,16 @@ export async function linuxTargetMounts(device: string): Promise<LinuxMount[]> {
       }
     } else if (numbers.has(mount.device)) result.push(mount);
   }
+  for (const mount of result) assertVisibleMount(mount, mounts);
   return result.sort((a, b) => b.mountpoint.length - a.mountpoint.length || b.id - a.id);
 }
 
 export async function unmountLinuxTarget(device: string): Promise<void> {
   for (const mount of await linuxTargetMounts(device)) {
+    const fresh = (await linuxTargetMounts(device)).find(candidate => candidate.id === mount.id);
+    if (!fresh || fresh.mountpoint !== mount.mountpoint || fresh.device !== mount.device || fresh.parent !== mount.parent) {
+      throw new PhysicalWriteError('UNMOUNT_FAILED', 'The USB mount layout changed before unmounting.');
+    }
     // No lazy or forced fallback. Busy filesystems abort before any raw write.
     await runTool('/usr/bin/umount', ['--', mount.mountpoint]);
   }

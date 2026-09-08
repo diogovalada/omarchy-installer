@@ -45,6 +45,8 @@ export async function macBackingDisks(filename: string, stores: Map<string, stri
 
 /** ioreg contains CFData values which plutil cannot represent as JSON. */
 export function parseMacUsbRegistry(plist: string): Map<string, MacUsbMedia> {
+  // ioreg succeeds with no output when no service matches the requested class.
+  if (!plist.trim()) return new Map();
   const tree: unknown = Plist.parse(Buffer.from(plist, 'utf8')).data;
   const result = new Map<string, MacUsbMedia>();
   let count = 0;
@@ -53,7 +55,9 @@ export function parseMacUsbRegistry(plist: string): Map<string, MacUsbMedia> {
     if (Array.isArray(value)) { value.forEach(item => visit(item, serial, location, physical, logical, depth + 1)); return; }
     if (!value || typeof value !== 'object' || Buffer.isBuffer(value)) return;
     const node = value as Record<string, unknown>;
-    if (node.IOObjectClass === 'IOUSBHostDevice' || Object.hasOwn(node, 'USB Serial Number')) {
+    if (node.IOObjectClass === 'IOUSBHostDevice' ||
+        (Array.isArray(node.IOObjectInheritance) && node.IOObjectInheritance.includes('IOUSBHostDevice')) ||
+        Object.hasOwn(node, 'USB Serial Number')) {
       serial = typeof node['USB Serial Number'] === 'string' ? node['USB Serial Number'].trim() : '';
       const id = node.locationID ?? node.IORegistryEntryID;
       location = typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? String(id) : '';
@@ -82,5 +86,5 @@ export function parseMacUsbRegistry(plist: string): Map<string, MacUsbMedia> {
 }
 
 export async function macUsbMedia(): Promise<Map<string, MacUsbMedia>> {
-  return parseMacUsbRegistry(await runTool('/usr/sbin/ioreg', ['-a', '-r', '-c', 'IOUSBHostDevice', '-l']));
+  return parseMacUsbRegistry(await runTool('/usr/sbin/ioreg', ['-a', '-r', '-c', 'IOUSBHostDevice', '-l', '-i']));
 }

@@ -117,6 +117,9 @@ jobs:
         run: pnpm media:test
       - name: Check native dependency loading
         run: pnpm media:probe
+      - name: Check native POSIX discovery without writing media
+        working-directory: providers/media-etcher
+        run: node scripts/check-host-discovery.cjs
       - name: Check packaged writer and isolated inspector
         working-directory: providers/media-etcher
         run: node scripts/check-staged-physical-runtime.cjs
