@@ -70,6 +70,12 @@ installation from Linux, are planned next steps.
 
 Other planned improvements:
 
+- **Reclaim space after direct installation:** let users optionally remove the
+  original OS and its partitions, leaving the space unallocated or using it to
+  expand Omarchy's home storage.
+- **Bootloader options for direct installation:** let users show or hide the
+  OS selection menu, choose the default OS and set the countdown. Check what
+  Omarchy MX Mac currently supports.
 - **Resize non-native partitions:** investigate resizing ext4/Btrfs partitions
   from Windows or macOS, APFS partitions from Windows or Linux, and other
   combinations of host operating systems and filesystems.
