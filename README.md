@@ -3,6 +3,8 @@
 A desktop app for downloading Omarchy, creating an installation USB, and
 installing alongside an existing operating system.
 
+![Omarchy Installer start screen with download and installation options](docs/images/installer-start.jpg)
+
 This is an unofficial community project. Installation features are still
 experimental and have not completed physical hardware and boot testing.
 
