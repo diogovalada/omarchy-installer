@@ -51,6 +51,18 @@ physical device was written or unmounted during this review.
 
 - Windows: 69 media tests, 65 passed, four POSIX-only skips, no failures.
 - Native Linux under WSL: 69 media tests, 58 passed, 11 Windows-only skips, no failures.
+- Native Linux x64 CI: 58 media tests and all 25 native desktop tests passed.
+  Real discovery protected the runner's source/system disk; dependency loading,
+  packaged-writer and isolated-inspector checks passed in the same validation run
+  linked below.
+- Native macOS ARM64 CI: 69 media tests, 57 passed, 12 platform-specific skips,
+  no failures. All 25 native desktop tests passed, including receipt exports and
+  the new linked-parent refusal. Real discovery enumerated eight disks and
+  protected the source disk and four system disks; packaged-runtime checks passed.
+  Evidence: [review validation run](https://github.com/diogovalada/omarchy-installer/actions/runs/34241835966),
+  commit `0dd5434`.
+- The final test-fixture helper preserves ordinary Windows paths while resolving
+  POSIX temporary paths. Both receipt-export regressions passed locally on Windows.
 - Real Linux read-only discovery: six disks enumerated; the source filesystem
   resolved to an excluded disk; the prerequisite probe passed. No eligible USB
   was attached to this Linux environment.

@@ -209,11 +209,20 @@ impl Export {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn records_parent(temp: &tempfile::TempDir) -> PathBuf {
+        // POSIX temporary paths may traverse /var; retain ordinary Windows paths.
+        #[cfg(not(windows))]
+        let parent = temp.path().canonicalize().unwrap();
+        #[cfg(windows)]
+        let parent = temp.path().to_path_buf();
+        parent
+    }
+
     #[test]
     fn receipt_export_is_readable_and_never_replaces_existing_records() {
         let temp = tempfile::tempdir().unwrap();
-        // macOS's temporary directory may start with the /var symlink.
-        let parent = temp.path().canonicalize().unwrap();
+        let parent = records_parent(&temp);
         let id = uuid::Uuid::new_v4();
         let plan = json!({"operationId":id,"records":{"receipt":{"verified":true},"cleanup":{"complete":true}}});
         let mut export = Export::prepare(&parent, &Destination::InspectDirect).unwrap();
@@ -232,7 +241,7 @@ mod tests {
     #[test]
     fn abandoned_export_does_not_leave_a_pending_file() {
         let temp = tempfile::tempdir().unwrap();
-        let parent = temp.path().canonicalize().unwrap();
+        let parent = records_parent(&temp);
         let export = Export::prepare(&parent, &Destination::InspectDirect).unwrap();
         let path = export.directory.clone();
         drop(export);
