@@ -2,7 +2,7 @@
 
 Status: draft; no real-device feature is qualified yet
 
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-08
 
 The [platform behavior guide](platform-behavior.md) records startup/defaults,
 storage, encryption, first-boot and Recovery differences. The Windows menu and
@@ -29,12 +29,17 @@ Development.
 | Host | Download and verify | Create x86 USB | Try | Direct alongside | Replace host OS |
 | --- | --- | --- | --- | --- | --- |
 | Windows x64, UEFI | Development, native verification tested | Development, physical path wired; unqualified | Deferred beyond v1 | Development, local construction + GPT deployment; unqualified | Unavailable |
-| Intel Mac | Source implemented, host build unverified | Development source, shared Etcher SDK; unqualified | Deferred beyond v1 | Planned x86 path, not implemented | Unavailable |
-| Apple Silicon Mac | Source implemented, host build unverified | Development source, for another x86 machine; unqualified | Deferred beyond v1 | Development source, retained Asahi bridge; signed packaging required | Unavailable |
-| Linux host | Source implemented, host build unverified | Development source, shared Etcher SDK; unqualified | Deferred beyond v1 | Planned per-layout deployment, not implemented | Unavailable |
+| Intel Mac | Source implemented, host build unverified | Development, erase/write implemented; native host and hardware unverified | Deferred beyond v1 | Planned x86 path, not implemented | Unavailable |
+| Apple Silicon Mac | Source implemented, host build unverified | Development, erase/write for another x86 machine; native host and hardware unverified | Deferred beyond v1 | Development source, retained Asahi bridge; signed packaging required | Unavailable |
+| Linux host | Source implemented, host build unverified | Development, erase/write implemented; native Linux file-backed tests passed; hardware unqualified | Deferred beyond v1 | Planned per-layout deployment, not implemented | Unavailable |
 
 An x86 USB cannot install Omarchy on Apple Silicon. Apple Silicon requires an
 Asahi-aware path. USB media created there is for a compatible x86 machine.
+
+Keeping existing USB files remains Windows x64 only. Linux and macOS expose
+erase-and-write after review and administrator approval. Their implementation,
+prerequisites and software test evidence are recorded in the
+[cross-platform USB update](evidence/cross-platform-usb-2026-09-08.md).
 
 Windows and macOS share the storage selection, allocation and typed deletion UI.
 On Mac, development source exposes the native backend's detected-Omarchy
@@ -53,7 +58,7 @@ These are external projects, not bundled or endorsed merely by appearing here:
 | Omarchy distribution | <https://github.com/omacom/omarchy> | Upstream; do not fork distribution logic |
 | x86 installation image | <https://github.com/omacom/omarchy-iso> | Verified USB source and source for local installed-image construction |
 | Apple-Silicon installation | <https://github.com/maralcbr/omarchy-mx-mac> | Retain native backend behind shared Tauri frontend |
-| USB engine, all hosts | <https://github.com/balena-io-modules/etcher-sdk> | Pinned dependency with Windows file-backed adapter tests; physical and other-host integration unqualified |
+| USB engine, all hosts | <https://github.com/balena-io-modules/etcher-sdk> | Pinned dependency with Windows and Linux file-backed writer tests; macOS native execution and Linux/macOS hardware unqualified |
 | Try on macOS | <https://github.com/omacom/try-omarchy> | Deferred beyond v1 |
 | Try on Windows | <https://github.com/omacom/try-omarchy-windows> | Deferred beyond v1 |
 

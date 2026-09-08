@@ -10,7 +10,7 @@ const { validatePathSyntax } = require('../dist/safety.js');
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function fixture(t, size = 2 * 1024 * 1024 + 73) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-etcher-test-'));
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-etcher-test-')));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const bytes = Buffer.alloc(size);
   for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + (i >>> 8)) & 255;

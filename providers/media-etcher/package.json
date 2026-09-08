@@ -13,6 +13,6 @@
     "qualify:runtime": "npm run build && node scripts/stage-runtime.cjs",
     "stage:runtime": "npm run build && node scripts/stage-physical-runtime.cjs"
   },
-  "dependencies": { "etcher-sdk": "10.2.14" },
+  "dependencies": { "@balena/apple-plist": "0.0.3", "etcher-sdk": "10.2.14" },
   "devDependencies": { "@types/node": "22.13.10", "typescript": "5.9.3" }
 }

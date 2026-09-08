@@ -133,11 +133,7 @@ pub fn checked_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 pub fn locate(manifest: &RuntimeManifest) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    let parent = exe.parent().ok_or("Executable directory is unavailable")?;
-    let mut roots = vec![
-        parent.join("providers"),
-        parent.join("../Resources/providers"),
-    ];
+    let mut roots = packaged_roots(&exe, std::env::consts::OS)?;
     if cfg!(debug_assertions) {
         roots.push(PathBuf::from(env!("OMARCHY_PROVIDER_ROOT")));
     }
@@ -147,6 +143,24 @@ pub fn locate(manifest: &RuntimeManifest) -> Result<PathBuf, String> {
             checked_path(root, &manifest.media.executable).is_ok_and(|path| path.is_file())
         })
         .ok_or_else(|| "Packaged native provider runtime was not found".into())
+}
+
+fn packaged_roots(exe: &Path, platform: &str) -> Result<Vec<PathBuf>, String> {
+    let parent = exe.parent().ok_or("Executable directory is unavailable")?;
+    let mut roots = vec![parent.join("providers")];
+    if platform == "macos" {
+        roots.push(parent.join("../Resources/providers"));
+    } else if platform == "linux" {
+        // Tauri deb/rpm and AppDir layouts put resources in usr/lib/<package>,
+        // while the executable is in usr/bin. A portable directory can keep
+        // providers next to the executable. All candidates remain hash-checked.
+        roots.push(parent.join(format!("../lib/{}/providers", env!("CARGO_PKG_NAME"))));
+        roots.push(PathBuf::from(format!(
+            "/usr/lib/{}/providers",
+            env!("CARGO_PKG_NAME")
+        )));
+    }
+    Ok(roots)
 }
 
 fn open_regular(root: &Path, relative: &str) -> Result<File, String> {
@@ -235,6 +249,31 @@ pub fn verify_inspection(
 #[cfg(test)]
 mod inspection_tests {
     use super::*;
+
+    #[test]
+    fn packaged_resources_follow_each_host_layout() {
+        let linux = packaged_roots(
+            Path::new("/opt/AppDir/usr/bin/omarchy-setup-desktop"),
+            "linux",
+        )
+        .unwrap();
+        assert!(linux.contains(&PathBuf::from(
+            "/opt/AppDir/usr/bin/../lib/omarchy-setup-desktop/providers"
+        )));
+        assert!(linux.contains(&PathBuf::from("/usr/lib/omarchy-setup-desktop/providers")));
+        let mac = packaged_roots(
+            Path::new("/Applications/Omarchy Setup.app/Contents/MacOS/omarchy-setup-desktop"),
+            "macos",
+        )
+        .unwrap();
+        assert!(mac.contains(&PathBuf::from(
+            "/Applications/Omarchy Setup.app/Contents/MacOS/../Resources/providers"
+        )));
+        assert_eq!(
+            packaged_roots(Path::new("portable/app.exe"), "windows").unwrap(),
+            vec![PathBuf::from("portable/providers")]
+        );
+    }
 
     #[test]
     fn inspector_authenticates_its_closure_and_full_verification_still_checks_writer() {

@@ -29,6 +29,15 @@ test('POSIX device paths remain exact', () => {
   assert.equal(physicalOpenPath('/dev/rdisk2', 'darwin'), '/dev/rdisk2');
 });
 
+test('POSIX raw opens reject partitions, aliases and alternate disk paths', () => {
+  for (const raw of ['/dev/sda1', '/dev/sda/', '/dev/disk/by-id/usb-fixture', '/dev/../dev/sda', '/tmp/sda']) {
+    assert.throws(() => physicalOpenPath(raw, 'linux'), { code: 'INVALID_DEVICE_PATH' });
+  }
+  for (const raw of ['/dev/disk2', '/dev/rdisk2s1', '/dev/rdisk02', '/dev/rdisk2/', '/tmp/rdisk2']) {
+    assert.throws(() => physicalOpenPath(raw, 'darwin'), { code: 'INVALID_DEVICE_PATH' });
+  }
+});
+
 test('actual Windows fs.open preserves the constructed path to a nonexistent disk', { skip: process.platform !== 'win32' }, async () => {
   const raw = physicalOpenPath('\\\\.\\PhysicalDrive2147483647');
   // Read-only, nonexistent target: exercises the C++ fs.open path conversion.

@@ -22,6 +22,11 @@ adds execution of the actual USB pipeline against temporary files, native-volume
 helper scenarios, and CLI cancellation checks. This covers software behavior
 without claiming physical USB or boot qualification.
 
+The [September 8 cross-platform update](../../docs/evidence/cross-platform-usb-2026-09-08.md)
+adds native Linux file-backed writer execution, Linux storage ancestry and exact
+unmount handling, macOS plist/APFS discovery fixtures, and three-host CI.
+Linux/macOS physical USB writes and boots remain unqualified.
+
 ## Protocol 1
 
 stdin accepts one bounded, newline-terminated JSON object:
@@ -164,16 +169,23 @@ EOF. PowerShell/Get-Disk, native dependency support and elevation are prerequisi
 Unusual storage layouts or platforms where exclusive opens conflict with retained
 volume handles/re-enumeration fail explicitly and require later qualification.
 
-Linux uses SDK mountutils unmount and O_EXCL/O_DIRECT/O_SYNC on the raw block
-device. The SDK's Linux unmount routine includes lazy/forced fallbacks; an exclusive
-open must still succeed, and any remaining mountpoint is rejected. Its eject
-function is only an alias for unmount, so the receipt reports `unmounted`, never
-power-off or ejection. The UI must preserve this distinction.
+Linux resolves system, source and swap storage through sysfs partitions, LUKS/LVM,
+RAID members and loop backing files; Btrfs subvolumes protect every physical member.
+Unknown backing storage fails closed. Active holders on a disk or any partition
+prevent selection. Mounts are matched by exact major/minor device numbers, including
+aliases and bind mounts. Normal `/usr/bin/umount -- <mountpoint>` runs deepest first
+with no lazy/forced fallback. Remaining mounts fail before writes, including a check
+after O_EXCL/O_DIRECT/O_SYNC acquisition. The receipt reports `unmounted`, never
+power-off or ejection; use the operating system safely-remove action.
 
 macOS uses Disk Arbitration unmount, an O_EXLOCK descriptor with F_NOCACHE and
 synchronous writes. USB identity enrichment requires IOUSBHostDevice registry
-entries and a convertible ioreg plist. Missing serials, missing registry support,
-or disagreement between drivelist and handle-reported sector sizes fail explicitly.
+entries and an ioreg plist parsed with CFData support. IORegistry physical sector
+properties correct drivelist's logical-only geometry; the retained descriptor must
+still agree. APFS volumes/snapshots map to every physical store for system/source
+exclusion. USB disks backing APFS containers are refused as in use. Missing serials,
+unresolved virtual storage, missing registry support, or geometry disagreement fail
+explicitly. Both POSIX raw paths reject symlinks, partitions and alternate aliases.
 
 After successful readback/close, Windows and macOS request mountutils ejection
 only after fresh identity matching. `ejected` additionally requires the target to
@@ -211,3 +223,9 @@ using a license beside the executable (or the system Node package license on
 Linux). `OMARCHY_NODE_LICENSE` can name the license for the exact Node distribution
 when it lives elsewhere. The original file-only qualification record in
 README.md is historical evidence only and does not qualify this physical provider.
+
+The inspector includes the pinned `@balena/apple-plist` 0.0.3 and SAX dependency
+closure. `node scripts/check-staged-physical-runtime.cjs` stages and loads the native
+writer and an isolated inspector without enumerating or accessing disks. Linux
+desktop resources resolve from portable, AppImage and installed Tauri layouts;
+macOS uses app bundle Resources. Unix operation records live outside app resources.

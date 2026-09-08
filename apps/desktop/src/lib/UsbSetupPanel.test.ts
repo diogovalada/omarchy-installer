@@ -29,10 +29,25 @@ function showReview(mode:'erase'|'preserve') {
 }
 describe('USB review before administrator access',()=>{
   beforeEach(()=>{
-    vi.clearAllMocks();setSetup(state());setDownloads({snapshot:{status:'complete',image_path:'C:\\fixture.iso'}});
+    vi.clearAllMocks();setSetup(state());setDownloads({snapshot:{status:'complete',image_path:'C:\\fixture.iso',host_os:'windows',host_architecture:'x86_64'}});
     calls.reviewUsb.mockImplementation((_id,mode)=>showReview(mode));
     calls.dismissUsbReview.mockImplementation(()=>setSetup(state()));
   });
+  for (const [host_os,host_architecture] of [['linux','x86_64'],['macos','x86_64'],['macos','aarch64']]) {
+    it(`offers the verified USB erase flow on ${host_os}/${host_architecture}`,async()=>{
+      setDownloads({snapshot:{status:'complete',image_path:'/home/example/omarchy.iso',host_os,host_architecture}});
+      render(SetupPanel,{kind:'usb',close:vi.fn()});
+      await fireEvent.click(screen.getByRole('radio'));
+      expect(calls.inspectUsb).not.toHaveBeenCalled();
+      expect(screen.getByRole('button',{name:'Keep files and add installer'})).toBeDisabled();
+      expect(screen.getByText('Keeping existing files is currently available on Windows x64.')).toBeInTheDocument();
+      await fireEvent.click(screen.getByRole('button',{name:'Erase USB and create installer'}));
+      expect(calls.start).not.toHaveBeenCalled();
+      expect(screen.getByText('Your operating system will ask for administrator access next.')).toBeInTheDocument();
+      await fireEvent.click(screen.getByRole('button',{name:'Erase USB and create installer'}));
+      expect(calls.start).toHaveBeenCalledExactlyOnceWith('chosen-usb',undefined,undefined,undefined,'erase','review-token');
+    });
+  }
   it('reviews erase in the app and starts only after confirming the bound review',async()=>{
     render(SetupPanel,{kind:'usb',close:vi.fn()});
     await fireEvent.click(screen.getByRole('radio'));

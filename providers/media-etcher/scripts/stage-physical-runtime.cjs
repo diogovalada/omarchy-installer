@@ -17,6 +17,7 @@ const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'u
 const sdk = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', 'etcher-sdk', 'package.json'), 'utf8'));
 if (sdk.version !== '10.2.14') throw new Error('Installed SDK version differs from pinned version.');
 const nodeLicense = [process.env.OMARCHY_NODE_LICENSE, ...['LICENSE', 'LICENSE.txt', 'LICENSE.md'].map(name => path.join(path.dirname(process.execPath), name)),
+  path.join(path.dirname(process.execPath), '..', 'LICENSE'),
   ...(process.platform === 'linux' ? ['/usr/share/doc/nodejs/copyright'] : [])]
   .filter(Boolean).find(filename => fs.existsSync(filename) && fs.statSync(filename).isFile());
 if (!nodeLicense) throw new Error('Node distribution license is missing. Set OMARCHY_NODE_LICENSE to the license shipped with this exact Node runtime.');
@@ -57,11 +58,11 @@ fs.copyFileSync(path.join(root, 'PHYSICAL-PROVIDER.md'), path.join(output, 'PHYS
 const inspection = path.join(output, 'inspection');
 fs.mkdirSync(path.join(inspection, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(inspection, 'package.json'), JSON.stringify({ private: true, type: 'commonjs' }));
-for (const name of ['inspection-cli', 'physical-discovery', 'physical-contracts', 'safety', 'contracts']) {
+for (const name of ['inspection-cli', 'physical-discovery', 'physical-tools', 'physical-linux', 'physical-macos', 'physical-contracts', 'safety', 'contracts']) {
   fs.copyFileSync(path.join(root, 'dist', name + '.js'), path.join(inspection, 'dist', name + '.js'));
 }
 if (require(path.join(root, 'node_modules/drivelist/package.json')).version !== '12.0.2') throw new Error('Re-audit inspector dependencies for the new drivelist version.');
-for (const name of ['drivelist', 'bindings', 'file-uri-to-path']) {
+for (const name of ['drivelist', 'bindings', 'file-uri-to-path', '@balena/apple-plist', 'sax']) {
   fs.cpSync(path.join(root, 'node_modules', name), path.join(inspection, 'node_modules', name), {
     recursive: true, dereference: true, filter: filename => !buildOnly.test(filename),
   });

@@ -6,7 +6,11 @@ import { PhysicalWriteError } from './physical-contracts.js';
  * Discovery, consent and reidentification keep the original device identity.
  */
 export function physicalOpenPath(raw: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform !== 'win32') return raw;
+  if (platform !== 'win32') {
+    if ((platform === 'linux' && /^\/dev\/sd[a-z]+$/.test(raw)) ||
+        (platform === 'darwin' && /^\/dev\/rdisk(?:0|[1-9]\d*)$/.test(raw))) return raw;
+    throw new PhysicalWriteError('INVALID_DEVICE_PATH', 'Expected an exact whole USB device path for this platform.');
+  }
   const match = /^\\\\\.\\(PhysicalDrive(?:0|[1-9]\d*))$/i.exec(raw);
   if (!match || !Number.isSafeInteger(Number(match[1].slice('PhysicalDrive'.length)))) {
     throw new PhysicalWriteError('INVALID_DEVICE_PATH', 'Expected an exact Windows physical disk device path.');

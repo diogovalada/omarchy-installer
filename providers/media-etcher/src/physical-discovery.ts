@@ -1,26 +1,18 @@
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { access, readFile, realpath, readdir, stat } from 'node:fs/promises';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Drive } from 'drivelist';
 import { PhysicalWriteError, type DriveIdentity, type PhysicalDrive, type PhysicalProbe } from './physical-contracts.js';
 import { validatePathSyntax } from './safety.js';
+import { runTool } from './physical-tools.js';
+import { linuxBackingDisks, linuxHasHolders, linuxSwapPaths, linuxTargetMounts } from './physical-linux.js';
+import { macUsbMedia, macApfsStores, macBackingDisks, type MacUsbMedia } from './physical-macos.js';
+export { runTool } from './physical-tools.js';
 
 export function fail(code: string, message: string): never { throw new PhysicalWriteError(code, message); }
 export function supportedPlatform(): void {
   if (!['win32', 'linux', 'darwin'].includes(process.platform)) fail('UNSUPPORTED_PLATFORM', 'USB writing supports Windows, Linux and macOS only.');
   if (![22, 24].includes(Number(process.versions.node.split('.')[0]))) fail('UNSUPPORTED_RUNTIME', 'The packaged provider requires Node 22 or 24.');
-}
-
-/** Fixed OS tools only; input is always an argument or stdin, never shell source. */
-export function runTool(executable: string, args: string[], input?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(executable, args, { windowsHide: true, encoding: 'utf8', timeout: 30000,
-      maxBuffer: 32 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } },
-    (error, stdout, stderr) => error ? reject(new PhysicalWriteError('PLATFORM_PREREQUISITE',
-      `${path.basename(executable)} failed: ${stderr.trim() || error.message}`)) : resolve(stdout));
-    child.stdin?.end(input);
-  });
 }
 
 export function powershellPath(): string {
@@ -49,7 +41,7 @@ async function linuxHardwareId(drive: Drive): Promise<string> {
   try { await access(`${sys}/partition`); fail('NOT_WHOLE_DEVICE', 'Partitions cannot be written.'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (!sys.startsWith('/sys/devices/')) fail('IDENTITY_UNAVAILABLE', 'Device sysfs ancestry is unavailable.');
-  if ((await readdir(`${sys}/holders`)).length) fail('DEVICE_IN_USE', 'Device has active storage holders.');
+  if (await linuxHasHolders(sys)) fail('DEVICE_IN_USE', 'Device or its partitions have active storage holders.');
   let serial = '';
   let current = sys;
   while (current !== '/sys/devices') {
@@ -66,29 +58,6 @@ async function linuxHardwareId(drive: Drive): Promise<string> {
   return JSON.stringify({ serial, sys, dev });
 }
 
-async function macHardwareIds(): Promise<Map<string, string>> {
-  const plist = await runTool('/usr/sbin/ioreg', ['-a', '-r', '-c', 'IOUSBHostDevice', '-l']);
-  const tree: unknown = JSON.parse(await runTool('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], plist));
-  const result = new Map<string, string>();
-  function visit(value: unknown, serial = '', location = ''): void {
-    if (Array.isArray(value)) { value.forEach(item => visit(item, serial, location)); return; }
-    if (!value || typeof value !== 'object') return;
-    const node = value as Record<string, unknown>;
-    const candidate = node['USB Serial Number'];
-    if (typeof candidate === 'string' && candidate.trim()) {
-      serial = candidate.trim();
-      location = String(node.locationID ?? node.IORegistryEntryID ?? '');
-    }
-    const bsd = node['BSD Name'];
-    if (typeof bsd === 'string' && /^disk\d+$/.test(bsd) && serial && location) {
-      result.set(`/dev/${bsd}`, JSON.stringify({ serial, location, registryId: node.IORegistryEntryID }));
-    }
-    if (node.IORegistryEntryChildren) visit(node.IORegistryEntryChildren, serial, location);
-  }
-  visit(tree);
-  return result;
-}
-
 function wholeDevice(drive: Drive): boolean {
   if (process.platform === 'win32') return /^\\\\\.\\PhysicalDrive\d+$/i.test(drive.device) && drive.raw.toLowerCase() === drive.device.toLowerCase();
   if (process.platform === 'darwin') return /^\/dev\/disk\d+$/.test(drive.device) && drive.raw === drive.device.replace('/dev/disk', '/dev/rdisk');
@@ -96,10 +65,12 @@ function wholeDevice(drive: Drive): boolean {
   return /^\/dev\/sd[a-z]+$/.test(drive.device) && drive.raw === drive.device;
 }
 
-export function identityFields(value: DriveIdentity): Omit<DriveIdentity, 'fingerprint'> {
+export function identityFields(value: DriveIdentity): Omit<DriveIdentity, 'fingerprint' | 'description'> {
+  // Linux display descriptions include volume labels/mountpoints. They change
+  // on unmount and when the ISO replaces partitions; they are not hardware ID.
   return { device: value.device, raw: value.raw, devicePath: value.devicePath, hardwareId: value.hardwareId,
     size: value.size, blockSize: value.blockSize, logicalBlockSize: value.logicalBlockSize,
-    description: value.description, busType: value.busType };
+    busType: value.busType };
 }
 export function fingerprint(value: DriveIdentity): string {
   return createHash('sha256').update(JSON.stringify(identityFields(value))).digest('hex');
@@ -114,7 +85,58 @@ async function exclusionReasons(drives: Drive[], sourcePath?: string): Promise<M
   const reasons = new Map<Drive, string[]>(drives.map(d => [d, []]));
   const protectedPaths = process.platform === 'win32'
     ? [process.env.SystemRoot!, process.execPath]
-    : ['/', '/boot', '/boot/efi', '/usr', '/var', '/home', process.execPath];
+    : process.platform === 'darwin'
+      ? ['/', '/System/Volumes/Data', '/Users', '/private/var', process.execPath]
+      : ['/', '/boot', '/boot/efi', '/usr', '/var', '/home', process.execPath];
+  if (process.platform === 'linux') {
+    const paths = [...protectedPaths, ...await linuxSwapPaths(), ...(sourcePath ? [sourcePath] : [])];
+    const filesystems = new Map<number, string[]>();
+    for (const filename of paths) {
+      let metadata;
+      try { metadata = await stat(filename); }
+      catch (error) {
+        if (filename !== sourcePath && (error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        fail('EXCLUSION_UNAVAILABLE', 'Cannot identify a protected Linux filesystem.');
+      }
+      // Swap devices use rdev, not the device ID of devtmpfs. Do not cache them.
+      let backing = metadata.isBlockDevice() ? undefined : filesystems.get(metadata.dev);
+      if (!backing) {
+        backing = await linuxBackingDisks(filename);
+        if (!metadata.isBlockDevice()) filesystems.set(metadata.dev, backing);
+      }
+      if (backing.some(device => !drives.some(d => d.device === device))) {
+        fail('EXCLUSION_UNAVAILABLE', 'A protected Linux filesystem has an unenumerated backing disk.');
+      }
+      for (const drive of drives) {
+        if (backing.includes(drive.device)) reasons.get(drive)!.push(filename === sourcePath ? 'SOURCE_DEVICE' : 'SYSTEM_DEVICE');
+      }
+    }
+    return reasons;
+  }
+  if (process.platform === 'darwin') {
+    const stores = await macApfsStores();
+    // Synthesized APFS disks own the mountpoints; their physical USB stores
+    // must not become selectable merely because they have no direct mounts.
+    for (const drive of drives) {
+      if ([...stores.values()].some(disks => disks.includes(drive.device))) reasons.get(drive)!.push('DEVICE_IN_USE');
+    }
+    const filesystems = new Map<number, string[]>();
+    for (const filename of [...protectedPaths, ...(sourcePath ? [sourcePath] : [])]) {
+      let metadata;
+      try { metadata = await stat(filename); }
+      catch (error) {
+        if (filename !== sourcePath && (error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        fail('EXCLUSION_UNAVAILABLE', 'Cannot identify a protected macOS filesystem.');
+      }
+      let backing = filesystems.get(metadata.dev);
+      if (!backing) { backing = await macBackingDisks(filename, stores); filesystems.set(metadata.dev, backing); }
+      if (backing.some(device => !drives.some(d => d.device === device))) fail('EXCLUSION_UNAVAILABLE', 'A protected macOS filesystem has an unenumerated backing disk.');
+      for (const drive of drives) {
+        if (backing.includes(drive.device)) reasons.get(drive)!.push(filename === sourcePath ? 'SOURCE_DEVICE' : 'SYSTEM_DEVICE');
+      }
+    }
+    return reasons;
+  }
   const volumes = await Promise.all(drives.map(async drive => ({ drive, mounts: await Promise.all(drive.mountpoints.map(async m => {
     try { return { path: await realpath(m.path), dev: (await stat(m.path)).dev }; }
     catch { reasons.get(drive)!.push('MOUNT_IDENTITY_UNAVAILABLE'); return null; }
@@ -147,11 +169,11 @@ export async function inventory(sourcePath?: string): Promise<InventoryEntry[]> 
   const drives = await list();
   const exclusions = await exclusionReasons(drives, sourcePath);
   let windows: WindowsDisk[] = [];
-  let mac = new Map<string, string>();
+  let mac = new Map<string, MacUsbMedia>();
   let enrichmentError: string | undefined;
   try {
     if (process.platform === 'win32') windows = await windowsDisks();
-    if (process.platform === 'darwin') mac = await macHardwareIds();
+    if (process.platform === 'darwin') mac = await macUsbMedia();
   } catch (error) { enrichmentError = (error as Error).message; }
   return Promise.all(drives.map(async drive => {
     const reasons = exclusions.get(drive)!;
@@ -177,8 +199,21 @@ export async function inventory(sourcePath?: string): Promise<InventoryEntry[]> 
           if (native.BusType !== 'USB') reasons.push('NOT_USB');
           if (native.Size !== drive.size || native.LogicalSectorSize !== drive.logicalBlockSize || native.PhysicalSectorSize !== drive.blockSize) reasons.push('IDENTITY_DISAGREEMENT');
           hardwareId = windowsHardwareId(native);
-        } else if (process.platform === 'linux') hardwareId = await linuxHardwareId(drive);
-        else hardwareId = mac.get(drive.device) ?? '';
+        } else if (process.platform === 'linux') {
+          hardwareId = await linuxHardwareId(drive);
+          drive.mountpoints = (await linuxTargetMounts(drive.device)).map(m => ({ path: m.mountpoint, label: null }));
+        } else {
+          const media = mac.get(drive.device);
+          hardwareId = media?.hardwareId ?? '';
+          if (media) {
+            if ((media.size !== undefined && media.size !== drive.size) ||
+                (media.logicalBlockSize !== undefined && media.logicalBlockSize !== drive.logicalBlockSize)) reasons.push('IDENTITY_DISAGREEMENT');
+            if (media.physicalBlockSize !== undefined) {
+              if (!validSector(media.physicalBlockSize) || media.physicalBlockSize % drive.logicalBlockSize !== 0) reasons.push('UNSUPPORTED_SECTOR_SIZE');
+              else drive.blockSize = media.physicalBlockSize;
+            }
+          }
+        }
       } catch (error) { reasons.push((error as PhysicalWriteError).code ?? 'IDENTITY_UNAVAILABLE'); }
     }
     if (!hardwareId) reasons.push('IDENTITY_UNAVAILABLE');
@@ -217,10 +252,12 @@ export async function probePhysical(): Promise<PhysicalProbe> {
       await access(path.join(__dirname, '..', 'scripts', 'windows-volume-lock.ps1'));
       await windowsDisks();
     }
-    if (process.platform === 'darwin') await macHardwareIds();
+    if (process.platform === 'darwin') await macUsbMedia();
     if (process.platform === 'linux') {
       await access('/sys/class/block');
       await runTool('/usr/bin/lsblk', ['--version']);
+      await runTool('/usr/bin/findmnt', ['--version']);
+      await access('/usr/bin/umount');
     }
     require('drivelist');
   } catch (error) { reason = (error as Error).message; }

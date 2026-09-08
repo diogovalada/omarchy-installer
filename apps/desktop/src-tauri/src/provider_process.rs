@@ -11,6 +11,18 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 pub fn hide(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        // Native dependencies invoke fixed OS utilities by name. Never resolve
+        // them through a desktop user's PATH inside the privileged provider.
+        command
+            .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+            .env_remove("LD_PRELOAD")
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("DYLD_INSERT_LIBRARIES")
+            .env_remove("DYLD_LIBRARY_PATH")
+            .env_remove("DYLD_FRAMEWORK_PATH");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

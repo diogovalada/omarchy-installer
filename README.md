@@ -10,8 +10,8 @@ experimental and have not completed physical hardware and boot testing.
 
 - Downloads official releases with resume support, SHA-256 checks and OpenPGP
   signature verification.
-- Creates bootable USB drives with readback verification. Keeping existing files
-  is supported only on compatible USB layouts.
+- Creates bootable x86 USB drives with readback verification on Windows, Linux
+  and macOS. Keeping existing files requires Windows x64 and a compatible USB layout.
 - Provides a Windows installation flow with space allocation, encryption and a
   boot menu. Direct installation requires administrator access and a local
   Docker runtime.
@@ -29,6 +29,11 @@ the app asks for another folder. Protected temporary workspaces are removed
 after successful USB operations and verified record export. Unresolved operation
 and direct-install recovery files remain under `%ProgramData%\OmarchySetup\Operations`.
 Direct installation on Linux and Intel Macs is not implemented.
+
+Linux and macOS offer the erase-and-write USB method. On Apple Silicon, this
+creates media for another x86 computer. Operation records default to Documents
+on these hosts. See the [cross-platform USB implementation and test record](docs/evidence/cross-platform-usb-2026-09-08.md)
+for platform prerequisites, exclusions and remaining hardware checks.
 
 See the [support matrix](docs/support-matrix.md) for testing status and
 [platform behavior](docs/platform-behavior.md) for installation requirements.

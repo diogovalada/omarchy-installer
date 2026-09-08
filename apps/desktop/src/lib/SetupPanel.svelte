@@ -19,6 +19,7 @@
   $: active = setupActive(snapshot?.status) || $setup.pending;
   $: complete = snapshot?.status === 'complete';
   $: readyImage = $downloads.snapshot?.status === 'complete' && !!$downloads.snapshot.image_path;
+  $: preserveSupported = $downloads.snapshot?.host_os === 'windows' && $downloads.snapshot?.host_architecture === 'x86_64';
   $: preparationNeeded = kind === 'direct' && !!snapshot?.preparation && (snapshot.preparation.secureBoot === 'enabled' || !snapshot.preparation.runtimeReady);
   $: selectedChoice = snapshot?.choices.find(choice => choice.id === selected && choice.eligible);
   $: percent = snapshot?.totalBytes ? Math.min(100, snapshot.bytes / snapshot.totalBytes * 100) : 0;
@@ -31,6 +32,7 @@
   }
   const focusReview = (node:HTMLElement) => { node.focus(); };
   async function inspectUsb(choiceId:string,elevated=false) {
+    if (!preserveSupported) return;
     await setup.inspectUsb(choiceId,elevated);
     await tick();
     usbChoices?.querySelector<HTMLInputElement>('input:checked')?.focus();
@@ -154,7 +156,8 @@
             <h3>How should this USB be prepared?</h3>
             {#if selectedChoice.usb?.freeBytes != null}<p class="muted">{formatBytes(selectedChoice.usb.freeBytes)} free · {formatBytes(selectedChoice.usb.requiredBytes)} needed to keep files</p>{/if}
             <div class="usb-option">
-              <button bind:this={preserveButton} class="primary" disabled={!readyImage || !selectedChoice.usb?.eligible} onclick={()=>{void setup.reviewUsb(selected,'preserve');}}>Keep files and add installer</button>
+              <button bind:this={preserveButton} class="primary" disabled={!preserveSupported || !readyImage || !selectedChoice.usb?.eligible} onclick={()=>{void setup.reviewUsb(selected,'preserve');}}>Keep files and add installer</button>
+              {#if !preserveSupported}<p>Keeping existing files is currently available on Windows x64.</p>{:else}
               {#if selectedChoice.usb?.eligible}<p>Adds the installer alongside your files. You’ll review any boot changes next.</p>{/if}
               {#if selectedChoice.usb && !selectedChoice.usb.eligible}
                 <p role="status"><span class="error">Can’t keep files on this USB.</span> {usbIssueSummary(selectedChoice.usb)}</p>
@@ -162,6 +165,7 @@
               {/if}
               {#if !selectedChoice.usb}<p class="muted">Check this USB’s compatibility before keeping files.</p><button onclick={()=>{void inspectUsb(selected);}}>Check compatibility</button>{/if}
               {#if selectedChoice.usb?.needsAdministrator}<button onclick={()=>{void inspectUsb(selected,true);}}>Check compatibility with administrator access</button>{/if}
+              {/if}
             </div>
             <div class="usb-option">
               <button bind:this={eraseButton} class="erase" disabled={!readyImage} onclick={()=>{void setup.reviewUsb(selected,'erase');}}>Erase USB and create installer</button>

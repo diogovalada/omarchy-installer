@@ -7,7 +7,7 @@ const { createHash } = require('node:crypto');
 const { openStableSource, verifyPhysicalSource } = require('../dist/physical-source.js');
 
 async function fixture(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-source-'));
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'omarchy-source-')));
   const sourcePath = path.join(directory, 'source.iso');
   const bytes = Buffer.alloc(1024 * 1024 + 73, 0x5a);
   await fs.writeFile(sourcePath, bytes);

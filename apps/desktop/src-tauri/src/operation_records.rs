@@ -5,6 +5,8 @@ use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc};
+#[cfg(not(windows))]
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 pub struct Export {
@@ -14,6 +16,7 @@ pub struct Export {
     _guards: Vec<File>,
 }
 
+#[cfg(windows)]
 fn installer_directory() -> Result<PathBuf, String> {
     let executable = std::env::var_os("OMARCHY_PORTABLE_EXE")
         .map(PathBuf::from)
@@ -136,7 +139,12 @@ impl Export {
         ) {
             return Ok(None);
         }
+        #[cfg(windows)]
         let mut candidate = installer_directory();
+        // Installed Linux binaries and signed .app bundles are not receipt
+        // folders. Keep user-owned records outside application resources.
+        #[cfg(not(windows))]
+        let mut candidate = app.path().document_dir().map_err(|error| error.to_string());
         loop {
             let result = candidate.and_then(|parent| Self::prepare(&parent, destination));
             match result {

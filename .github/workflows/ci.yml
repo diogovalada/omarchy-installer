@@ -80,9 +80,13 @@ jobs:
         run: pnpm --filter ./apps/desktop run build
 
   native-download-and-media:
-    name: Windows native download and file-backed media
-    runs-on: windows-latest
+    name: Native download and file-backed USB (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -94,6 +98,11 @@ jobs:
           node-version: 22
       - name: Enable the repository-pinned pnpm version
         run: corepack enable
+      - name: Install Linux desktop development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: Build frontend assets
@@ -108,6 +117,9 @@ jobs:
         run: pnpm media:test
       - name: Check native dependency loading
         run: pnpm media:probe
+      - name: Check packaged writer and isolated inspector
+        working-directory: providers/media-etcher
+        run: node scripts/check-staged-physical-runtime.cjs
 
   dependency-policy:
     name: Dependency policy

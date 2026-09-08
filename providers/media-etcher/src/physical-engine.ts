@@ -13,6 +13,7 @@ import { validatePathSyntax } from './safety.js';
 import { physicalOpenPath } from './physical-path.js';
 import { resolveHandleGeometry, type HandleGeometry } from './physical-geometry.js';
 import { openStableSource, assertSourceUnchanged, verifyPhysicalSource } from './physical-source.js';
+import { linuxTargetMounts, unmountLinuxTarget } from './physical-linux.js';
 
 interface DirectIo {
   omarchyGeometryVersion?: number;
@@ -76,7 +77,7 @@ class HeldSdkDevice extends BlockDevice {
   async acquire(reidentifyHeld: () => Promise<InventoryEntry>): Promise<void> {
     if (process.platform === 'win32' && io.omarchyGeometryVersion !== 1) fail('PLATFORM_PREREQUISITE', 'The Windows native geometry extension is missing. Rebuild the provider.');
     if ((process.platform !== 'darwin' && !io.O_DIRECT) || !io.O_SYNC || (process.platform !== 'linux' && !io.O_EXLOCK)) fail('LOCKING_UNAVAILABLE', 'Native direct I/O/exclusive flags are missing.');
-    const flags = constants.O_RDWR | (process.platform === 'darwin' ? 0 : io.O_DIRECT) | io.O_SYNC |
+    const flags = constants.O_RDWR | (constants.O_NOFOLLOW ?? 0) | (process.platform === 'darwin' ? 0 : io.O_DIRECT) | io.O_SYNC |
       (process.platform === 'linux' ? constants.O_EXCL : io.O_EXLOCK);
     this.fileHandle = await open(physicalOpenPath(this.raw), flags);
     this.held = true;
@@ -99,6 +100,7 @@ class HeldSdkDevice extends BlockDevice {
         if (!(process.platform === 'linux' ? descriptor.isBlockDevice() : descriptor.isCharacterDevice()) ||
             named.isSymbolicLink() || descriptor.rdev !== named.rdev) fail('HANDLE_IDENTITY_CHANGED', 'The opened device no longer matches the discovered device node.');
       }
+      if (process.platform === 'linux' && (await linuxTargetMounts(this.device)).length) fail('UNMOUNT_FAILED', 'The USB was remounted before writing.');
     } catch (error) { await this.release(); throw error; }
   }
   enableWrites(): void { this.mayWrite = true; }
@@ -181,8 +183,7 @@ async function ejectTarget(target: DriveIdentity, sourcePath: string): Promise<P
       return { status: 'failed', message: 'The selected device safety state changed before ejection; use the operating system safely-remove action.' };
     }
     if (process.platform === 'linux') {
-      // Pinned mountutils Linux eject is only an alias for unmount_disk.
-      await call(cb => mountutils.unmountDisk(target.device, cb));
+      await unmountLinuxTarget(target.device);
       return { status: 'unmounted', message: 'Filesystems unmounted. This SDK has no Linux power-off/eject implementation; use the operating system safely-remove action.' };
     }
     await call(cb => mountutils.eject(target.device, cb));
@@ -214,6 +215,7 @@ export async function runPhysicalWrite(request: PhysicalWriteRequest, emit: (eve
     const selected = await reidentify(request.target, request.sourcePath);
     stage('unmounting');
     if (process.platform === 'win32') volumeLock = await lockWindowsVolumes(selected, criticalFailure);
+    else if (process.platform === 'linux') await unmountLinuxTarget(selected.drive.device);
     else await call(cb => mountutils.unmountDisk(selected.drive.device, cb));
     // The root source must live on another disk and remain mapped after unmount.
     stage('validating', undefined, 'Checking the USB drive after unmounting…');
