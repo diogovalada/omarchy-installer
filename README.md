@@ -8,6 +8,9 @@ installing alongside an existing operating system.
 This is an unofficial community project. Installation features are still
 experimental and have not completed physical hardware and boot testing.
 
+Download preview builds from [Releases](https://github.com/diogovalada/omarchy-installer/releases).
+Windows x64 and Linux x64 packages are available; macOS packages are pending.
+
 ## What it does
 
 - Downloads official releases with resume support, SHA-256 checks and OpenPGP

@@ -12,9 +12,13 @@ Missing packages or failed provider verification fail the job.
 | macOS Intel | macOS 15 Intel | DMG and APP ZIP |
 | macOS Apple Silicon | macOS 15 ARM64 | DMG and APP ZIP |
 
-Download packages from the completed workflow's **Artifacts** section. They are
-retained for 14 days. This workflow builds previews; it does not publish a GitHub
-Release or claim production signing or hardware qualification.
+The [first manual preview](https://github.com/diogovalada/omarchy-installer/releases/tag/v0.1.0-preview.1)
+provides Windows x64 and Linux x64 downloads, SHA-256 checksums and build/provider
+records. macOS packages are pending access to a macOS build machine.
+
+CI packages appear in the completed workflow's **Artifacts** section and are
+retained for 14 days. The workflow does not publish GitHub Releases or claim
+production signing or hardware qualification.
 
 Initial validation (2026-09-08): GitHub blocked [all four jobs before startup](https://github.com/diogovalada/omarchy-installer/actions/runs/34245346651)
 because of an account billing/spending-limit issue. No release artifacts have
@@ -23,11 +27,24 @@ the Tauri config, script syntax and Linux preview staging, including native SDK 
 rejection of mixed development/preview providers. Resolve GitHub Billing & plans,
 then rerun the workflow to complete package validation.
 
+Local release validation (2026-09-08): the Windows portable EXE passed extraction,
+provider hashes and a bundled SDK write/readback check. Both Linux packages were
+extracted and all 3,292 provider files matched their compiled manifest; each
+extracted runtime passed the SDK write/readback check. The AppImage passed a
+30-second headless launch check under Ubuntu 24.04 with Xvfb, software rendering
+and temporary desktop-folder settings. Physical Linux USB and boot testing remain
+pending.
+
 CI sets `OMARCHY_DISTRIBUTION=usb-preview`: it includes download and USB support,
 keeps No USB installation disabled, and omits the machine-local Docker image and
 direct-install providers. The default maintainer packaging profile still includes
 the pinned construction runtime. Preview staging requires a fresh checkout if
 full development providers have already been staged.
+
+Linux packaging uses `node scripts/build-linux-packages.mjs`. It bundles the GUI
+dependencies first, then adds the authenticated USB runtime before the final
+AppImage packing step. This prevents linuxdeploy from rewriting provider binaries
+or trying to resolve dependencies of SDK binaries for other platforms.
 
 Windows builds are unsigned. macOS builds use ad-hoc signing without notarization;
 the separately signed Apple direct-install bridge is not included. macOS 15+ and
