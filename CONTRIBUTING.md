@@ -8,7 +8,7 @@ release. Contributions must not imply upstream endorsement.
 
 Read:
 
-- `ROADMAP.md` for product scope and release gates;
+- `README.md` for product scope and planned improvements;
 - `docs/architecture.md` and `docs/threat-model.md` for trust boundaries;
 - `docs/support-matrix.md` before changing a capability claim;
 - the relevant files in `docs/adr/` before changing architecture;

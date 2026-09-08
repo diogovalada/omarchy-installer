@@ -74,8 +74,7 @@ Other planned improvements:
   from Windows or macOS, APFS partitions from Windows or Linux, and other
   combinations of host operating systems and filesystems.
 - **Integrate Try Omarchy:** let users try Omarchy in a virtual machine from
-  within the app before installing. This is also tracked in the
-  [project roadmap](ROADMAP.md).
+  within the app before installing.
 - **Reduce installer size:** prune unused SDK features and dependencies,
   exclude binaries for other architectures, and bundle only the USB provider
   components the app needs. Consider reimplementing the required parts of

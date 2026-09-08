@@ -93,8 +93,8 @@ Updated: 2026-09-06 (Europe/Lisbon)
 > permitted; no installation/elevation/reboot was performed. Mac signed packaging
 > needs a Mac. Read this report before historical state below.
 
-> **Current plan — read first:** [ROADMAP.md](ROADMAP.md) and
-> [Installation and USB strategy](docs/installation-plan.md) reflect the user's
+> **Current plan — read first:**
+> [Installation and USB strategy](docs/installation-plan.md) reflects the user's
 > September 5 acceptance of local x86 image construction from the official ISO,
 > followed by native deployment and first-boot finalization. No custom ISO or
 > hosted root image is planned; avoiding an ISO boot partition is a design goal,
@@ -159,7 +159,7 @@ handed off rather than independently reimplemented.
 
 ## 2. Goal recorded before the upstream change
 
-The September 2 version of [ROADMAP.md](ROADMAP.md), now revised on September 5,
+The September 2 project roadmap, subsequently revised on September 5,
 defined a community-incubated cross-platform onboarding product with replaceable
 platform backends and these historical user outcomes:
 
@@ -411,7 +411,7 @@ until the actual maintainers agree to support it.
 | Phase 9 | Reassess Linux scope against OmaFlash and OmSticker before implementation |
 | Phase 10 | Manage only resources and operations this project actually owns |
 
-The old Try repository links in `ROADMAP.md` and `docs/support-matrix.md` are now
+The old Try repository links in the original roadmap and `docs/support-matrix.md` are now
 stale. Do not mechanically update them until the broader roadmap revision is
 approved; their staleness is evidence that the current documents are a dated
 baseline, not the final plan.
@@ -502,14 +502,13 @@ established.**
 Read these in order:
 
 1. This `HANDOFF.md`.
-2. [ROADMAP.md](ROADMAP.md) — original plan, retained as a dated baseline.
-3. [README.md](README.md) — current public-facing simulation status.
-4. [docs/upstream-rfc.md](docs/upstream-rfc.md) — pre-change coordination draft;
+2. [README.md](README.md) — current public-facing status.
+3. [docs/upstream-rfc.md](docs/upstream-rfc.md) — pre-change coordination draft;
    do not post in its current form.
-5. [docs/architecture.md](docs/architecture.md).
-6. [docs/threat-model.md](docs/threat-model.md).
-7. [docs/support-matrix.md](docs/support-matrix.md).
-8. The ADRs under `docs/adr/`, especially provider architecture and privilege
+4. [docs/architecture.md](docs/architecture.md).
+5. [docs/threat-model.md](docs/threat-model.md).
+6. [docs/support-matrix.md](docs/support-matrix.md).
+7. The ADRs under `docs/adr/`, especially provider architecture and privilege
    separation.
 
 ## 8. Required first task for the successor agent
