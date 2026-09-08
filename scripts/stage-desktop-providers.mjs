@@ -72,5 +72,9 @@ for (const file of manifest.files) {
   const data = readFileSync(path);
   if (data.length !== file.length || digest(data) !== file.sha256) throw new Error(`Staged file changed: ${file.path}`);
 }
-writeFileSync(join(staging, 'provider-lock.json'), JSON.stringify(manifest, null, 2) + '\n');
+const manifestPath = join(staging, 'provider-lock.json');
+const manifestText = JSON.stringify(manifest, null, 2) + '\n';
+if (!existsSync(manifestPath) || readFileSync(manifestPath, 'utf8') !== manifestText) {
+  writeFileSync(manifestPath, manifestText);
+}
 console.log(`Staged ${manifest.files.length} authenticated provider files for ${process.platform}/${process.arch}.`);

@@ -27,6 +27,10 @@ const scratch = mkdtempSync(join(parent, 'build-'));
 const shellConfig = join(scratch, 'appimage-shell.json');
 preview.bundle.resources = [];
 writeFileSync(shellConfig, JSON.stringify(preview, null, 2) + '\n');
+// Tauri retains this intermediate directory when an earlier AppImage build
+// fails. Archive it so old resources cannot leak into the GUI-only package.
+const intermediate = join(tauri, 'target/release/bundle/appimage_deb');
+if (existsSync(intermediate)) renameSync(intermediate, join(scratch, 'previous-appimage-deb'));
 // Keep the DEB's application binary before Tauri adds another bundle marker.
 const application = join(tauri, 'target/release/omarchy-setup-desktop');
 copyFileSync(application, join(scratch, 'application-before-appimage'));
