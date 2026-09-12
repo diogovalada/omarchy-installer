@@ -56,12 +56,16 @@ the app. Implementation details are listed in the support matrix above.
 | --- | --- | --- |
 | Windows | ✅ Tested | ❌ In Development |
 | macOS — Intel (x86_64) | ⚠️ Needs Testing | ❌ In Development |
-| macOS — Apple Silicon (ARM64) | ❌ In Development | ❌ In Development |
+| macOS — Apple Silicon (ARM64) | ⚠️ Needs Testing | ❌ In Development |
 | Linux | ⚠️ Needs Testing | ❌ In Development |
 
 Windows USB testing covers erase-and-write preparation, full image readback and
 EFI boot-file verification on a physical USB drive. Booting and completing an
 installation, and the keep-existing-files method, remain untested.
+
+macOS USB creation is implemented for Intel and Apple Silicon. Verification of
+the packaged macOS app and physical USB testing remain pending. Apple Silicon
+hosts create installation media for another compatible x86 computer.
 
 ## Future work
 
