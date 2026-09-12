@@ -10,7 +10,11 @@ Updated: 2026-09-06 (Europe/Lisbon)
 > staged installation, local construction from published images, payload access
 > from BitLocker boot trust, and installer policy from UEFI/Secure Boot. It also
 > preserves the Libertix findings, upstream image proposal, corrections and
-> qualification gaps. This discussion does not select a replacement architecture.
+> qualification gaps. The follow-up distinguishes setup-time from recurring boot
+> costs and records a stable-menu/BitLocker-reseal candidate, firmware selection,
+> and prepared-payload/live-deployment combinations. Automatic BitLocker restoration
+> is not exclusive to deployment from Windows. These alternatives remain untested;
+> this discussion does not select a replacement architecture.
 
 > **Latest USB requirement:** offer erasing and preserving existing USB contents
 > as separate modes, with preservation available only on compatible layouts.

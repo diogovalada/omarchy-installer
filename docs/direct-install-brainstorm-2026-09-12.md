@@ -176,6 +176,16 @@ cross-reboot restoration and failure policy; neither full decryption nor an
 extra Windows boot has been established as universally necessary for every
 possible adapted route B design.
 
+In particular, **automatic restoration does not require Windows to write the
+Omarchy filesystem**. An adapted route B can return to Windows after installation,
+run its registered completion helper, verify that protection is active, and then
+continue to Omarchy. That adds a Windows visit during setup. Restoring protection
+before leaving Windows is another candidate only where the subsequent installation
+preserves the measured Windows boot state. Neither sequence is qualified for our
+staged installer. A scheduled task cannot restore protection while Windows is
+not running; leaving it until an optional future Windows visit would leave an
+unbounded suspension window.
+
 Sources: [Microsoft recovery and suspension](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/recovery-overview),
 [the detailed specification analysis](evidence/bitlocker-direct-boot-research-2026-09-06.md),
 and [implemented eligibility/preparation](evidence/windows-direct-readiness-2026-09-06.md).
@@ -213,6 +223,103 @@ Route B would need to integrate and qualify this same eventual menu behavior.
 Sources: [menu generator](../providers/image-builder-x86/boot_menu.py),
 [Limine v12.6.0 implementation](https://github.com/Limine-Bootloader/Limine/blob/v12.6.0/common/protos/efi_boot_entry.c),
 and [menu/BitLocker analysis](evidence/bitlocker-direct-boot-research-2026-09-06.md).
+
+## Can we combine the benefits more effectively?
+
+Follow-up recorded September 12: do not turn the costs of the current design into
+universal limitations. Separate **one-time setup costs**, **costs on later boots**,
+**hardware compatibility**, and **work borne by the project**. A smoother user
+experience may require more integration and release maintenance. No candidate
+below is an established replacement for the current architecture.
+
+### Alternative menu: establish a new trusted Windows boot route once
+
+The current menu preserves the existing Windows route by restarting. A different
+candidate is a stable menu that directly launches Windows Boot Manager in the
+same boot, with a controlled BitLocker transition during setup:
+
+1. While Windows is running, prepare the transition and temporarily suspend
+   protection when required; keep the volume encrypted.
+2. Complete the boot changes, then start Windows **through the final intended
+   menu and its direct Windows entry**, while protection is suspended.
+3. Have the Windows completion helper resume protection and verify the result.
+4. Qualify subsequent Windows starts through that same menu with protection
+   active. If successful, selecting Windows no longer needs the extra firmware
+   restart used by the current design.
+
+Microsoft documents that resuming protection reseals to changed measurements, and
+that `EnableKeyProtectors` refreshes TPM protectors against the current startup
+state. Those are documented mechanisms; their successful application to this
+Omarchy/Limine configuration is an **untested design inference**.
+Sources: [BitLocker FAQ](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/faq)
+and [EnableKeyProtectors](https://learn.microsoft.com/en-us/windows/win32/secprov/enablekeyprotectors-win32-encryptablevolume).
+
+The timing matters: resuming in the old Windows session, or returning directly to
+the original firmware Windows entry, does not establish trust in a newly inserted
+menu. This candidate trades a setup-time Windows boot for potentially removing
+a restart on every later Windows selection. It can accompany either installation
+route; the Windows filesystem does not have to contain the installation payload.
+
+Remaining costs and limits:
+
+- The menu and Windows boot sequence must produce measurements acceptable to
+  the actual protector policy. One successful start while suspended proves
+  nothing about the next protected start.
+- Menu/firmware updates and alternate Windows boot paths can change the relevant
+  measurements. Direct firmware fallback to Windows must be tested separately;
+  it cannot automatically inherit the promise for the new menu route.
+- Omarchy currently updates its Limine binaries. A separate, infrequently changed
+  front menu could isolate Windows from those updates, but adds another maintained
+  boot component. Its own updates still need a coordinated BitLocker lifecycle,
+  including updates initiated while the user is in Linux.
+- Preserve the user's protection requirements; weakening the TPM validation
+  profile or leaving protection suspended would not meet the intended result.
+- The existing [menu generator](../providers/image-builder-x86/boot_menu.py)
+  enforces restart-based Windows entries, and
+  [measured-boot inspection](../providers/direct-x86/NativeBootEvidence.cs)
+  accepts a direct Windows firmware boot. Supporting the candidate requires a
+  distinct eligibility/transition path and validation, not just a menu edit.
+
+### Compare combinations, not just routes A and B
+
+| Combination | Potential user benefit | Remaining price or uncertainty |
+| --- | --- | --- |
+| Current menu: restart into the original Windows entry | Preserves the measured Windows startup route in the defined compatible case; enables same-session restoration for route A. | Extra firmware restart on each Windows selection; hardware qualification remains pending. |
+| Stable menu plus setup-time BitLocker resealing | Automatic OS menu and potentially direct Windows startup thereafter, with automatic protection restoration. | Windows setup visit, a changed trusted boot route, coordinated menu updates and new qualification work. |
+| Firmware's own boot chooser | Can select each OS's original firmware entry directly without our menu performing an additional restart. | Firmware-specific interface, often a hotkey; cannot promise a consistent automatic chooser on every PC. Measured boot still needs qualification. |
+| Prepared system payload plus a small live Linux deployment stage | No client-side Docker/WSL/VM build; Linux can create fresh encryption and populate the native destination directly. Separate staging can keep payload access independent of Windows decryption. | Published-image maintenance, temporary boot/storage integration, installation reboot, safe same-disk writes and first-boot integration. BitLocker completion remains a separate choice. |
+| Keep Secure Boot enabled with a complete accepted boot chain | Could avoid the firmware setting change and its preparation visit on compatible PCs. | Requires support for the installed Omarchy boot chain and its updates, not just a signed temporary installer. This is separate work and does not itself prove BitLocker compatibility. |
+
+The prepared-payload/live-deployment combination was already present in the image
+source matrix. It is worth evaluating as a complete user journey, but is not a
+newly discovered third installation route. A conventional installer in the live
+stage also avoids a client-side VM and lets us build locally, at the cost of doing
+package installation there. Choosing a published payload trades that construction
+work for image-production and distribution responsibilities.
+
+Secure Boot is not a shortcut around qualification. Microsoft documents recurring
+BitLocker recovery for a particular PXE fallback sequence involving different
+signed boot authorities. This is not evidence that all chainloading fails; it
+does demonstrate why a signed menu alone is insufficient proof.
+Source: [Microsoft Secure Boot troubleshooting](https://support.microsoft.com/en-us/servicing/os/secure-boot/2026/03/secure-boot-troubleshooting-guide).
+
+### Next discriminating experiment
+
+Evaluate the stable-menu transition independently of installing Omarchy: in a
+disposable Windows/UEFI/TPM test system, establish the supported baseline, add the
+candidate menu, perform the controlled suspended boot through it, resume and
+verify protection, then test protected Windows boots. Cover Linux selection
+followed by a later Windows boot, cold starts/restarts, direct firmware fallback,
+menu updates and interruption of setup. Virtual tests can establish feasibility;
+representative physical firmware is still needed for a support claim.
+
+For either installation route, a completion flow must return to Windows when
+needed and verify restoration before declaring success. Do not count an installed
+Linux system plus an indefinitely pending Windows cleanup as completion.
+
+This experiment would answer whether the recurring restart is avoidable on our
+supported configurations before we reorganize image construction around it. It
+has not been run, and this design discussion does not authorize host boot changes.
 
 ## Omarchy encryption, compression and first-boot setup
 
@@ -346,6 +453,9 @@ and [staging investigation](staged-iso-first-plan.md).
 | An unencrypted staging partition solves BitLocker. | It can solve payload access; Windows boot trust and Omarchy's stock refusal remain separate. |
 | Any new OS menu necessarily changes Windows' own boot chain. | A menu can schedule the original Windows entry and restart; our design uses this with an extra automatic restart. |
 | Every such installation must reboot Windows once before restoring protection. | That is not inherent in the defined already-compatible case; changed Secure Boot/custom profiles need separate handling. |
+| Avoiding BitLocker recovery inherently requires a restart every time Windows is selected. | That is the current menu's tradeoff. A stable chainloading menu with a controlled setup-time reseal, or a firmware chooser, are separate candidates requiring qualification. |
+| Automatic BitLocker restoration requires installing the Omarchy filesystem from Windows. | A staged installer can return to Windows for automatic completion; that adds a setup visit, not a requirement for Windows-side filesystem deployment. |
+| Every drawback applies to the user on every boot. | Distinguish setup-only work, recurring startup costs, hardware limitations and project maintenance; combinations can shift costs between them. |
 | WSL 2 is required for all direct installation. | It is one possible environment for local construction while Windows runs. |
 | Libertix makes users build Linux in Docker. | Its developers build the small live installer with Docker; installation happens on hardware after reboot. |
 | A booted installer runs before Linux loads. | The ISO first loads a temporary Linux system that runs the installer. |
