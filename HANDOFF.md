@@ -4,6 +4,14 @@ Status: Windows completion pass implemented; automated validation resumed; machi
 
 Updated: 2026-09-06 (Europe/Lisbon)
 
+> **September 12 direct-install brainstorming:** read the
+> [consolidated design record](docs/direct-install-brainstorm-2026-09-12.md)
+> before revisiting the architecture. It separates Windows deployment from
+> staged installation, local construction from published images, payload access
+> from BitLocker boot trust, and installer policy from UEFI/Secure Boot. It also
+> preserves the Libertix findings, upstream image proposal, corrections and
+> qualification gaps. This discussion does not select a replacement architecture.
+
 > **Latest USB requirement:** offer erasing and preserving existing USB contents
 > as separate modes, with preservation available only on compatible layouts.
 > Current USB code is erase/raw-write only. The

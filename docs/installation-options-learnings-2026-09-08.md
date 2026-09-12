@@ -3,6 +3,11 @@
 2026-09-08. Condensed from the architecture discussion, including its corrections.
 These are findings and options, not a decision to replace the current design.
 
+Read the [September 12 consolidated brainstorm](direct-install-brainstorm-2026-09-12.md)
+for the two installation routes, independent image-source choices, Libertix,
+BitLocker/boot distinctions, corrections and remaining evidence. This earlier
+note retains the detailed runtime and image-construction learnings.
+
 ## Current approach and performance
 
 - The discussed build chain is Windows → Docker → QEMU → official Omarchy

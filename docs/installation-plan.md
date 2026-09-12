@@ -13,6 +13,11 @@ The [September 8 retained learnings](installation-options-learnings-2026-09-08.m
 summarize virtualization, prebuilt-image and encryption tradeoffs from subsequent
 discussion; they do not select a replacement architecture.
 
+The [September 12 consolidated brainstorm](direct-install-brainstorm-2026-09-12.md)
+is the entry point for both direct-install routes, image-source variants,
+Libertix findings, BitLocker/boot distinctions and unresolved evidence. Read its
+corrections before revisiting the architecture; no new route has been selected.
+
 Status: both setup options are wired for development. The shared Etcher physical
 USB provider, native elevation/staging helper, Windows local construction and
 GPT deployment, and Apple native bridge/client are implemented. The user explicitly

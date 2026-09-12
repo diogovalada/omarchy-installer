@@ -2,6 +2,10 @@
 
 Decision: 2026-09-06, after reviewing the staged-ISO restrictions.
 
+The [September 12 consolidated brainstorm](direct-install-brainstorm-2026-09-12.md)
+revisits both routes and preserves the later corrections and open questions.
+It records alternatives without replacing this working preference.
+
 The user's current preference is to return to local system construction followed
 by native Windows deployment as the leading no-USB approach. It appears easier
 to coordinate from Windows than an internal installer partition and a second
