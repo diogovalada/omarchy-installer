@@ -49,6 +49,8 @@ jobs:
           cache-dependency-path: providers/media-etcher/package-lock.json
       - name: Enable the repository-pinned pnpm version
         run: corepack enable
+      - name: Verify release version and tag
+        run: node scripts/release-version.mjs --check
       - name: Select pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Cache Rust dependencies

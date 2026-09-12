@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Omarchy Installer",
-  "version": "0.1.0",
+  "version": "0.1.0-preview.2",
   "identifier": "community.omarchy.setup",
   "build": {
     "beforeDevCommand": "node ../../scripts/stage-desktop-providers.mjs && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "node ../../scripts/stage-desktop-providers.mjs && pnpm build",
+    "beforeBuildCommand": "node ../../scripts/release-version.mjs --check && node ../../scripts/stage-desktop-providers.mjs && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -27,6 +27,8 @@
   },
   "bundle": {
     "active": false,
-    "resources": { "../.native-providers/bundle/": "providers/" }
+    "resources": {
+      "../.native-providers/bundle/": "providers/"
+    }
   }
 }

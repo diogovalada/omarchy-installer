@@ -1,7 +1,7 @@
 {
   "name": "@omarchy-setup/desktop",
   "private": true,
-  "version": "0.1.0-dev",
+  "version": "0.1.0-preview.2",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -5,6 +5,9 @@ extend-exclude = [
     "**/*.snap",
     "**/dist/**",
     "**/target/**",
+    # Upstream source and verbatim third-party license notices are not our prose.
+    "providers/direct-apple/upstream/**",
+    "**/GRUB-COPYRIGHT.txt",
 ]
 
 [default]
@@ -15,3 +18,17 @@ Asahi = "Asahi"
 OmaCom = "OmaCom"
 Omarchy = "Omarchy"
 UDisks = "UDisks"
+# Existing documentation also uses these valid British spellings.
+labelled = "labelled"
+totalled = "totalled"
+marshalled = "marshalled"
+
+[default.extend-identifiers]
+# PowerShell's case-insensitive inequality operator and a fixture color.
+ine = "ine"
+c0caf5 = "c0caf5"
+# Windows SDDL alias, MSVC option, NSIS instruction and a recorded commit ID.
+BA = "BA"
+Fo = "Fo"
+StrCpy = "StrCpy"
+4bf09ba1 = "4bf09ba1"

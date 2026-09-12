@@ -1,6 +1,6 @@
 [package]
 name = "omarchy-setup-desktop"
-version = "0.1.0"
+version = "0.1.0-preview.2"
 description = "Omarchy Installer community preview desktop shell"
 authors = ["Omarchy Installer contributors"]
 license = "MIT"

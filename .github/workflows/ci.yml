@@ -18,7 +18,33 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  changes:
+    name: Changes and release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code_changed: ${{ steps.changes.outputs.code_changed }}
+    steps:
+      - name: Check out repository and comparison history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Detect documentation-only changes
+        id: changes
+        run: node scripts/ci-changes.mjs
+      - name: Verify release metadata and CI helpers
+        run: |
+          node scripts/release-version.mjs --check
+          node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs
+
   rust:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -46,6 +72,8 @@ jobs:
         run: cargo test --workspace --all-targets --all-features --locked
 
   frontend:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Frontend
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -80,6 +108,8 @@ jobs:
         run: pnpm --filter ./apps/desktop run build
 
   native-download-and-media:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Native download and file-backed USB (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -136,6 +166,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Portable verifier tests failed.' }
 
   dependency-policy:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true'
     name: Dependency policy
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -166,3 +198,26 @@ jobs:
 
       - name: Check spelling
         uses: crate-ci/typos@d43b6c087ac471e2ea7b8af622ff15f05c0c365b # v1.50.1
+
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, rust, frontend, native-download-and-media, dependency-policy, spelling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require successful checks or intentional skips
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node - <<'NODE'
+          const checks = JSON.parse(process.env.CHECK_RESULTS);
+          const full = checks.changes.outputs.code_changed === 'true';
+          for (const [name, check] of Object.entries(checks)) {
+            const required = full || ['changes', 'spelling'].includes(name);
+            if (check.result !== 'success' && (required || check.result !== 'skipped')) {
+              throw new Error(`${name}: ${check.result}`);
+            }
+          }
+          console.log(full ? 'Full CI passed.' : 'Documentation checks passed; heavy jobs intentionally skipped.');
+          NODE

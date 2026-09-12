@@ -163,7 +163,7 @@ impl Sanitizer {
     }
 
     fn redact_patterns(&mut self, mut output: String) -> String {
-        // Recovery keys and credential-like labelled values precede generic
+        // Recovery keys and credential-like labeled values precede generic
         // number/network handling so the strongest marker wins.
         output = self.replace_all(output, r"(?i)\b\d{6}(?:-\d{6}){7}\b", RedactionKind::Secret);
         output = self.replace_all(

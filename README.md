@@ -106,6 +106,11 @@ CI builds preview packages for Windows, Linux, and macOS (Intel and Apple Silico
 See [release builds](docs/release-builds.md) for downloads, package formats and
 signing status.
 
+The next application version is recorded in [VERSION](VERSION), with release
+notes in [CHANGELOG.md](CHANGELOG.md). Use the documented
+[version preparation command](docs/release-builds.md#preparing-a-version) to keep
+desktop metadata consistent. Documentation-only CI runs lightweight checks.
+
 Use Rust 1.93, Node.js 22 or 24, pnpm 10.2.1, and the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 Clone with submodules, or run `git submodule update --init --recursive`.
