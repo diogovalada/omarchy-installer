@@ -57,9 +57,10 @@ export async function prepareRelease(input, output, version, commit) {
     const thisNotice = checksums.get('THIRD_PARTY_NOTICES.md');
     if (noticeHash) assert.equal(thisNotice, noticeHash, 'Platforms disagree on third-party notices');
     noticeHash = thisNotice;
-    for (const name of expected) {
-      const destination = name.startsWith('Omarchy-Installer-') || name === 'THIRD_PARTY_NOTICES.md' ? name : `${platform}-${name}`;
-      plan.push({ source: join(directory, name), destination, hash: checksums.get(name) });
+    // Build records, notices and checksum manifests stay in Actions artifacts.
+    // The public release contains only the verified runnable packages.
+    for (const name of packageNames(version, platform)) {
+      plan.push({ source: join(directory, name), destination: name, hash: checksums.get(name) });
     }
   }
   const hashes = new Map();
@@ -70,8 +71,7 @@ export async function prepareRelease(input, output, version, commit) {
     assert.equal(await digest(path), item.hash);
     hashes.set(item.destination, item.hash);
   }
-  writeFileSync(join(output, 'SHA256SUMS'), [...hashes].sort(([a], [b]) => a.localeCompare(b)).map(([name, hash]) => `${hash}  ${name}\n`).join(''));
-  return [...hashes.keys(), 'SHA256SUMS'];
+  return [...hashes.keys()];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -83,8 +83,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
   const entry = changelog.split(`## [${version}]`)[1].split('\n## ')[0];
   assert.match(entry, /^ - \d{4}-\d{2}-\d{2}/, 'Date the changelog before publishing');
-  const labels = ['Windows x64 — portable EXE', 'Linux x64 — AppImage', 'Mac Intel — APP ZIP', 'Mac Apple Silicon — APP ZIP'];
-  const downloads = platforms.map((platform, i) => `- [${labels[i]}](https://github.com/diogovalada/omarchy-installer/releases/download/v${version}/${packageNames(version, platform)[0]})`).join('\n');
-  writeFileSync(join(root, 'artifacts/release-notes.md'), `**Experimental preview — hardware and boot testing remain incomplete.**\n\nUnofficial Omarchy Installer community preview.\n\n${downloads}\n\n${entry.slice(entry.indexOf('\n')).trim()}\n\nDownloads include Windows portable EXE, Linux AppImage, and macOS Intel/Apple Silicon APP ZIP. Extract the Mac ZIP and open the app; copying it to Applications is optional.\n\nThe preview supports download and USB preparation. Direct installation remains disabled. Apple Silicon creates USB media for an x86 computer. macOS packages are ad-hoc signed and not notarized; Windows packages are unsigned. Hardware qualification remains limited as described in the README.\n\nCommit: ${process.env.GITHUB_SHA}\n\nSee SHA256SUMS, per-platform build records and THIRD_PARTY_NOTICES.md.\n`);
+  writeFileSync(join(root, 'artifacts/release-notes.md'), `Experimental preview. Download the file for your system below.\n\n[Instructions and known limitations](https://github.com/diogovalada/omarchy-installer/blob/v${version}/README.md).\n`);
   console.log(`Verified ${assets.length} release assets for v${version}.`);
 }

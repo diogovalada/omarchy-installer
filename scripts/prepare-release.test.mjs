@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { digest, packageNames, platforms, prepareRelease } from './prepare-release.mjs';
 
@@ -33,15 +33,21 @@ function fixture(t, { omit, wrongCommit } = {}) {
   }
   return { input, output, first: join(input, `Omarchy-Installer-windows-x64-${commit}`) };
 }
-test('all platforms produce distinct metadata and a valid combined checksum file', async t => {
+test('only verified runnable packages are published; metadata stays in build artifacts', async t => {
   const { input, output } = fixture(t);
   const names = await prepareRelease(input, output, version, commit);
-  assert.equal(names.length, 19);
-  for (const platform of platforms) assert.ok(names.includes(`${platform}-build.json`));
-  for (const line of readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n')) {
-    const [expected, name] = line.split('  ');
-    assert.equal(await digest(join(output, name)), expected);
+  const expected = platforms.flatMap(platform => packageNames(version, platform));
+  assert.deepEqual(names.sort(), expected.sort());
+  assert.deepEqual(readdirSync(output).sort(), expected.sort());
+  for (const name of names) {
+    assert.equal(await digest(join(output, name)), hash('fixture package bytes'));
   }
+});
+test('unpublished metadata still has to pass verification', async t => {
+  const { input, output, first } = fixture(t);
+  appendFileSync(join(first, 'THIRD_PARTY_NOTICES.md'), 'tampered');
+  await assert.rejects(prepareRelease(input, output, version, commit), /checksum mismatch/);
+  assert.deepEqual(readdirSync(output), []);
 });
 test('tampered packages stop preparation before copying assets', async t => {
   const { input, output, first } = fixture(t);

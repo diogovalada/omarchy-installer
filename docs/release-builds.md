@@ -120,8 +120,13 @@ repository sidebar. This visibility setting does not imply hardware qualificatio
 
 Published release artifacts are not overwritten. If an upload fails and leaves a draft,
 inspect that draft before retrying; the workflow deliberately refuses to replace
-an existing release automatically. Platform metadata filenames are prefixed to
-avoid collisions, and a combined SHA256SUMS covers all public release assets.
+an existing release automatically. Public releases contain only the four portable
+packages and a short link to usage instructions. CI still verifies all platform
+checksums, build records and notices before publishing. Those supporting files
+remain in the Actions artifacts for their configured retention period; license
+notices also remain bundled inside the applications. GitHub displays each public
+asset's SHA-256 digest. Published application bytes and tags are not changed when
+cleaning up release notes or removing redundant standalone metadata attachments.
 
 Documentation edits need no application version bump. Published previews receive
 unique versions; intermediate builds are distinguished by the full commit in
