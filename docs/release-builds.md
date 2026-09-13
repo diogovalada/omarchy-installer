@@ -3,7 +3,8 @@
 [Release builds](../.github/workflows/release-builds.yml) runs on code pushes to
 `main`, `v*` tags, and manual dispatch. Each platform uploads its own Actions
 artifact with release-mode packages, SHA-256 checksums and build/provider records.
-Missing packages or failed provider verification fail the job.
+Missing packages or failed provider verification fail the job. Version tags also
+run full CI and publish a GitHub Release after both validation and packaging pass.
 
 | Platform | Runner | Packages |
 | --- | --- | --- |
@@ -14,11 +15,11 @@ Missing packages or failed provider verification fail the job.
 
 The [first manual preview](https://github.com/diogovalada/omarchy-installer/releases/tag/v0.1.0-preview.1)
 provides Windows x64 and Linux x64 downloads, SHA-256 checksums and build/provider
-records. macOS packages are pending access to a macOS build machine.
+records. That historical release did not include macOS packages.
 
 CI packages appear in the completed workflow's **Artifacts** section and are
-retained for 14 days. The workflow does not publish GitHub Releases or claim
-production signing or hardware qualification.
+retained for 14 days. Main-branch builds upload artifacts only. Version-tag builds
+publish downloads; neither path establishes production signing or hardware qualification.
 
 Initial validation (2026-09-08): GitHub blocked [all four jobs before startup](https://github.com/diogovalada/omarchy-installer/actions/runs/34245346651)
 because of an account billing/spending-limit issue. No release artifacts have
@@ -29,8 +30,11 @@ rejection of mixed development/preview providers.
 Follow-up (2026-09-12): [native CI ran successfully again](https://github.com/diogovalada/omarchy-installer/actions/runs/34696651980)
 on Windows, Linux and macOS. That run's failures were spelling and dependency
 policy checks; the earlier billing block no longer prevented CI execution.
-The packaging workflow still needs a successful run. Its old failure is not
-evidence of a current billing block or a macOS compilation defect.
+The [September 12 packaging run](https://github.com/diogovalada/omarchy-installer/actions/runs/34709711534)
+subsequently passed for all four platforms. Its packages were uploaded as Actions
+artifacts. The September 13 publishing change adds the missing GitHub Release
+step; the [dependency-policy review](evidence/dependency-policy-2026-09-13.md)
+records the separate CI corrections.
 
 Local release validation (2026-09-08): the Windows portable EXE passed extraction,
 provider hashes and a bundled SDK write/readback check. Both Linux packages were
@@ -98,14 +102,22 @@ Add the matching entry to [CHANGELOG.md](../CHANGELOG.md), then run:
 
 ```sh
 pnpm release:check
-node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs
+node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts/prepare-release.test.mjs
 ```
 
 CI and application packaging check version consistency. For a release, date the
 changelog entry, complete validation, commit the version changes and create the
 matching v-prefixed tag (for example v0.1.0-preview.2). Tag builds must match
-VERSION exactly. Publishing downloads remains a deliberate release step; the
-packaging workflow only uploads build artifacts.
+VERSION exactly. Pushing that version tag requests publication. The packaging
+workflow invokes full CI for the tagged source, waits for that and all four
+platform packages, verifies every input checksum and build commit/version, and
+uploads a draft release. It publishes the draft only after every upload succeeds.
+Main pushes continue to produce Actions artifacts without publishing a release.
+
+Published releases are not overwritten. If an upload fails and leaves a draft,
+inspect that draft before retrying; the workflow deliberately refuses to replace
+an existing release automatically. Platform metadata filenames are prefixed to
+avoid collisions, and a combined SHA256SUMS covers all public release assets.
 
 Documentation edits need no application version bump. Published previews receive
 unique versions; intermediate builds are distinguished by the full commit in

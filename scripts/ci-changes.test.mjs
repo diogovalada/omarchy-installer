@@ -4,7 +4,7 @@ import { changedFiles, docsOnly } from './ci-changes.mjs';
 
 test('only prose changes skip heavy jobs', () => {
   assert.equal(docsOnly(['README.md', 'docs/design.md', 'HANDOFF.md', 'LICENSE']), true);
-  for (const path of ['docs/images/installer-start.jpg', 'docs/fixture.json', 'Cargo.lock', '.github/README.md', 'scripts/build.mjs']) {
+  for (const path of ['docs/images/installer-start.jpg', 'docs/fixture.json', 'Cargo.lock', '.github/README.md', 'scripts/build.mjs', 'THIRD_PARTY_NOTICES.md']) {
     assert.equal(docsOnly(['README.md', path]), false, path);
   }
   assert.equal(docsOnly([]), false);
@@ -31,6 +31,7 @@ test('pull requests compare against their merge base', () => {
 test('manual runs, new branches and unavailable history request the full suite', () => {
   const noGit = () => { throw new Error('missing history'); };
   assert.equal(changedFiles('workflow_dispatch', {}, noGit), null);
+  assert.equal(changedFiles('push', { ref: 'refs/tags/v0.1.0-preview.2' }, noGit), null);
   assert.equal(changedFiles('push', { before: '0'.repeat(40), after: 'b'.repeat(40) }, noGit), null);
   assert.equal(changedFiles('push', { before: 'a'.repeat(40), after: 'b'.repeat(40) }, noGit), null);
 });

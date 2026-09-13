@@ -53,6 +53,9 @@ function verifyProviders(directory) {
   const node = join(directory, manifest.media.executable);
   execFileSync(node, [join(root, 'scripts/verify-staged-media.cjs'), dirname(node)], { stdio: 'inherit' });
 }
+function verifyNotices(file) {
+  assert.equal(sha256(readFileSync(file)), sha256(readFileSync(join(root, 'THIRD_PARTY_NOTICES.md'))), 'Packaged third-party notices must match the source');
+}
 if (process.platform === 'win32') {
   const portableParent = join(root, 'artifacts/windows-portable');
   const portable = one(portableParent, name => existsSync(join(portableParent, name, 'portable-record.json')));
@@ -62,12 +65,15 @@ if (process.platform === 'win32') {
   assert.equal(record.launcher.extractionAndHashesVerified, true);
   assert.equal(record.launcher.stagedMediaFileWriteVerified, true);
   assert.equal(record.providerManifestSha256, sha256(manifestBytes));
+  assert.equal(record.files.find(file => file.path === 'THIRD_PARTY_NOTICES.md')?.sha256,
+    sha256(readFileSync(join(root, 'THIRD_PARTY_NOTICES.md'))));
   assert.equal(sha256(readFileSync(record.launcher.path)), record.launcher.sha256);
   collect(record.launcher.path, `${stem}-portable.exe`);
   collect(recordPath, 'portable-record.json');
 } else if (process.platform === 'darwin') {
   const app = join(bundle, 'macos', `${config.productName}.app`);
   verifyProviders(join(app, 'Contents/Resources/providers'));
+  verifyNotices(join(app, 'Contents/Resources/THIRD_PARTY_NOTICES.md'));
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', app], { stdio: 'inherit' });
   execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, join(output, `${stem}.app.zip`)]);
   collect(one(join(bundle, 'dmg'), name => name.endsWith('.dmg')), `${stem}.dmg`);
@@ -75,10 +81,12 @@ if (process.platform === 'win32') {
   const appimage = join(bundle, 'appimage');
   const appdir = one(appimage, name => name.endsWith('.AppDir'));
   verifyProviders(join(appdir, 'usr/lib', config.productName, 'providers'));
+  verifyNotices(join(appdir, 'usr/lib', config.productName, 'THIRD_PARTY_NOTICES.md'));
   collect(one(appimage, name => name.endsWith('.AppImage')), `${stem}.AppImage`);
   collect(one(join(bundle, 'deb'), name => name.endsWith('.deb')), `${stem}.deb`);
 }
 collect(manifestPath, 'provider-lock.json');
+collect(join(root, 'THIRD_PARTY_NOTICES.md'), 'THIRD_PARTY_NOTICES.md');
 writeFileSync(join(output, 'build.json'), JSON.stringify({ version: config.version, platform,
   commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
   profile: 'release', distribution: 'usb-preview', model: 'gpt-6-astra',

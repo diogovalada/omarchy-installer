@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -40,7 +41,7 @@ jobs:
       - name: Verify release metadata and CI helpers
         run: |
           node scripts/release-version.mjs --check
-          node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs
+          node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts/prepare-release.test.mjs
 
   rust:
     needs: changes

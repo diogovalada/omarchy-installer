@@ -45,6 +45,7 @@ const appdir = join(output, appdirs[0]);
 const providers = join(appdir, 'usr/lib', config.productName, 'providers');
 assert.ok(!existsSync(providers), 'The GUI packaging step must not process providers.');
 cpSync(join(root, 'apps/desktop/.native-providers/bundle'), providers, { recursive: true, errorOnExist: true, force: false });
+copyFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), join(dirname(providers), 'THIRD_PARTY_NOTICES.md'));
 const manifest = JSON.parse(readFileSync(join(root, 'apps/desktop/.native-providers/provider-lock.json')));
 assert.equal(manifest.platform, 'linux');
 for (const record of manifest.files) {

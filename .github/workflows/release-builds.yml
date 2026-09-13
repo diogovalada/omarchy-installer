@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
+    paths: ['**', '!docs/**', '!**/*.md', '!LICENSE', 'THIRD_PARTY_NOTICES.md']
   workflow_dispatch:
 
 permissions:
@@ -20,6 +20,10 @@ env:
   OMARCHY_DISTRIBUTION: usb-preview
 
 jobs:
+  validate-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/ci.yml
+
   package:
     name: Package ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
@@ -101,3 +105,41 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+  publish:
+    name: Publish validated version
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, validate-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Download this run's platform packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'Omarchy-Installer-*' --dir artifacts/release-input
+      - name: Verify and assemble release assets
+        run: node scripts/prepare-release.mjs
+      - name: Upload a draft and publish only after all assets arrive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(cat VERSION)
+          tag="v$version"
+          prerelease=()
+          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$tag" artifacts/publish/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --target "$GITHUB_SHA" --draft "${prerelease[@]}" \
+            --title "Omarchy Installer $version" --notes-file artifacts/release-notes.md
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false

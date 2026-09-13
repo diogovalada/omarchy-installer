@@ -28,6 +28,7 @@
   "bundle": {
     "active": false,
     "resources": {
+      "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../.native-providers/bundle/": "providers/"
     }
   }

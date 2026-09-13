@@ -9,7 +9,7 @@ This is an unofficial community project. Installation features are still
 experimental and have not completed physical hardware and boot testing.
 
 Download preview builds from [Releases](https://github.com/diogovalada/omarchy-installer/releases).
-Windows x64 and Linux x64 packages are available; macOS packages are pending.
+The release page lists the available Windows, Linux and macOS packages.
 
 ## What it does
 
@@ -64,7 +64,7 @@ EFI boot-file verification on a physical USB drive. Booting and completing an
 installation, and the keep-existing-files method, remain untested.
 
 macOS USB creation is implemented for Intel and Apple Silicon. Verification of
-the packaged macOS app and physical USB testing remain pending. Apple Silicon
+the macOS packages passed in CI; physical USB testing remains pending. Apple Silicon
 hosts create installation media for another compatible x86 computer.
 
 ## Future work
@@ -103,6 +103,7 @@ fresh, unique key.
 ## Development
 
 CI builds preview packages for Windows, Linux, and macOS (Intel and Apple Silicon).
+Version tags publish a GitHub Release after full CI and all platform builds pass.
 See [release builds](docs/release-builds.md) for downloads, package formats and
 signing status.
 

@@ -3,7 +3,7 @@
 Versions here belong to Omarchy Installer, independently of the Omarchy image it
 downloads. Published versions and their artifacts are immutable.
 
-## [0.1.0-preview.2] - Unreleased
+## [0.1.0-preview.2] - 2026-09-13
 
 - Run lightweight checks for documentation-only changes; keep a final CI result
   for pull requests and run the full suite for code changes or manual checks.
@@ -11,6 +11,10 @@ downloads. Published versions and their artifacts are immutable.
   that disagree with the packaged version.
 - Clarify Apple Silicon USB creation status and preserve the direct-install
   alternatives, BitLocker considerations and boot-menu research.
+- Publish verified packages for Windows, Linux, Intel Mac and Apple Silicon Mac
+  from version tags after full CI passes.
+- Declare local dependency versions and document the reviewed certificate-data
+  license and public-key-only RSA advisory exception. Include the license notice.
 
 ## [0.1.0-preview.1] - 2026-09-08
 

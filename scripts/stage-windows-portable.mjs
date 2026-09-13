@@ -54,6 +54,7 @@ function put(relative, bytes) {
   files.push({ path: relative, sizeBytes: bytes.length, sha256: hash(bytes) });
 }
 put('Omarchy Installer.exe', application);
+put('THIRD_PARTY_NOTICES.md', readFileSync(join(root, 'THIRD_PARTY_NOTICES.md')));
 const seen = new Set();
 const bundle = join(root, 'apps/desktop/.native-providers/bundle');
 for (const file of manifest.files) {

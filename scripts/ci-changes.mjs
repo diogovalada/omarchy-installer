@@ -7,12 +7,13 @@ import { pathToFileURL } from 'node:url';
 // assets under docs can be build inputs, so only prose is exempted.
 export function docsOnly(paths) {
   return paths.length > 0 && paths.every(path =>
-    !path.startsWith('.github/') &&
+    !path.startsWith('.github/') && path !== 'THIRD_PARTY_NOTICES.md' &&
     (path === 'LICENSE' || /\.(md|rst|adoc)$/i.test(path) ||
       (path.startsWith('docs/') && path.endsWith('.txt'))));
 }
 
 export function changedFiles(eventName, event, git) {
+  if (event.ref?.startsWith('refs/tags/')) return null;
   let base;
   let head;
   if (eventName === 'pull_request') {

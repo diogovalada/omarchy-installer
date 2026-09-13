@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-omarchy-media-writer = { path = "../../crates/media-writer" }
+omarchy-media-writer = { version = "0.1.0", path = "../../crates/media-writer" }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -4,7 +4,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+# Reviewed public-key-only integration; revisit before adding private-key use.
+# Scope and evidence: docs/evidence/dependency-policy-2026-09-13.md.
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "pgp is used only to verify downloaded signatures with public keys. No production RSA signing or private-key decryption. See the dependency-policy review." },
+]
 
 [licenses]
 version = 2
@@ -19,7 +23,9 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
-exceptions = []
+exceptions = [
+    { name = "webpki-roots", version = "=1.0.9", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
