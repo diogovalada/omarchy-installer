@@ -97,7 +97,7 @@ jobs:
         run: node scripts/build-linux-packages.mjs
       - name: Build macOS packages
         if: runner.os == 'macOS'
-        run: pnpm --dir apps/desktop exec tauri build --config src-tauri/tauri.release-preview.conf.json --bundles app,dmg
+        run: pnpm --dir apps/desktop exec tauri build --config src-tauri/tauri.release-preview.conf.json --bundles app
       - name: Verify and collect release packages
         run: node scripts/collect-release-artifacts.mjs
       - name: Upload release packages and checksums
@@ -140,9 +140,9 @@ jobs:
           set -euo pipefail
           version=$(cat VERSION)
           tag="v$version"
-          prerelease=()
-          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          title="Omarchy Installer $version"
+          if [[ "$version" == *-* ]]; then title="$title — Experimental preview"; fi
           gh release create "$tag" artifacts/publish/* --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --target "$GITHUB_SHA" --draft "${prerelease[@]}" \
-            --title "Omarchy Installer $version" --notes-file artifacts/release-notes.md
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+            --verify-tag --target "$GITHUB_SHA" --draft \
+            --title "$title" --notes-file artifacts/release-notes.md
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest

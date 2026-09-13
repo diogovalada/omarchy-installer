@@ -15,9 +15,9 @@ export async function digest(file) {
 export function packageNames(version, platform) {
   const stem = `Omarchy-Installer-${version}-${platform}`;
   if (platform === 'windows-x64') return [`${stem}-portable.exe`];
-  if (platform === 'linux-x64') return [`${stem}.AppImage`, `${stem}.deb`];
+  if (platform === 'linux-x64') return [`${stem}.AppImage`];
   assert.ok(platforms.includes(platform));
-  return [`${stem}.app.zip`, `${stem}.dmg`];
+  return [`${stem}.app.zip`];
 }
 
 export async function prepareRelease(input, output, version, commit) {
@@ -83,6 +83,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
   const entry = changelog.split(`## [${version}]`)[1].split('\n## ')[0];
   assert.match(entry, /^ - \d{4}-\d{2}-\d{2}/, 'Date the changelog before publishing');
-  writeFileSync(join(root, 'artifacts/release-notes.md'), `Unofficial Omarchy Installer community preview.\n\n${entry.slice(entry.indexOf('\n')).trim()}\n\nDownloads include Windows portable EXE, Linux AppImage/DEB, and macOS Intel/Apple Silicon DMG/APP ZIP.\n\nThe preview supports download and USB preparation. Direct installation remains disabled. Apple Silicon creates USB media for an x86 computer. macOS packages are ad-hoc signed and not notarized; Windows packages are unsigned. Hardware qualification remains limited as described in the README.\n\nCommit: ${process.env.GITHUB_SHA}\n\nSee SHA256SUMS, per-platform build records and THIRD_PARTY_NOTICES.md.\n`);
+  const labels = ['Windows x64 — portable EXE', 'Linux x64 — AppImage', 'Mac Intel — APP ZIP', 'Mac Apple Silicon — APP ZIP'];
+  const downloads = platforms.map((platform, i) => `- [${labels[i]}](https://github.com/diogovalada/omarchy-installer/releases/download/v${version}/${packageNames(version, platform)[0]})`).join('\n');
+  writeFileSync(join(root, 'artifacts/release-notes.md'), `**Experimental preview — hardware and boot testing remain incomplete.**\n\nUnofficial Omarchy Installer community preview.\n\n${downloads}\n\n${entry.slice(entry.indexOf('\n')).trim()}\n\nDownloads include Windows portable EXE, Linux AppImage, and macOS Intel/Apple Silicon APP ZIP. Extract the Mac ZIP and open the app; copying it to Applications is optional.\n\nThe preview supports download and USB preparation. Direct installation remains disabled. Apple Silicon creates USB media for an x86 computer. macOS packages are ad-hoc signed and not notarized; Windows packages are unsigned. Hardware qualification remains limited as described in the README.\n\nCommit: ${process.env.GITHUB_SHA}\n\nSee SHA256SUMS, per-platform build records and THIRD_PARTY_NOTICES.md.\n`);
   console.log(`Verified ${assets.length} release assets for v${version}.`);
 }

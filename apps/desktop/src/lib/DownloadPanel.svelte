@@ -31,8 +31,12 @@
     <div class="progress-label"><span class:verified={complete} role="status" aria-live="polite">{#if complete}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
     {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={complete}></progress>{/if}
     {#if $downloads.error || (snapshot?.error && snapshot.status !== 'cancelled')}<p class="error" role="alert">{$downloads.error ?? snapshot?.error}</p>{/if}
+    {#if snapshot?.replacement_available && !active}
+      <p class="replacement-note">This file couldn't be verified. Download a fresh copy? The existing file will be replaced only after the new copy passes verification.</p>
+    {/if}
     <div class="controls">
       {#if transfer}<button class="secondary" disabled={$downloads.pending || snapshot?.cancel_requested} onclick={() => { void downloads.cancel(); }}>{snapshot?.status === 'downloading' ? 'Pause' : 'Cancel'}</button>
+      {:else if snapshot?.replacement_available}<button class="primary" disabled={!downloads.native || active || locked} onclick={() => { void downloads.replace(); }}><Download size={16}/>Download replacement</button><button disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Choose another folder</button><button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.start(); }}>Verify again</button>
       {:else if !complete}<button class="primary" disabled={!downloads.native || active || locked} onclick={() => { if (release) void downloads.start(); else void downloads.resolve(); }}><Download size={16}/>{release ? (snapshot?.existing_image ? 'Verify' : snapshot?.status === 'cancelled' || snapshot?.status === 'failed' ? 'Resume' : 'Download') : (snapshot?.status === 'failed' || $downloads.error ? 'Retry' : 'Download')}</button>{/if}
       {#if release}<details><summary>Details</summary><div class="detail-content"><p>{release.file_name}</p>{#if complete}<p>File size, SHA-256 and signature verified.</p>{:else}<p>File size, SHA-256 and signature are checked before use.</p>{/if}{#if snapshot?.image_locked}<p>The ISO is kept read-only so installation can reuse this verification. Close the app to move or edit the file.</p>{/if}<p>SHA-256 <code>{release.sha256}</code></p><p>Signing key <code>{release.signer_fingerprint}</code></p>{#if snapshot?.image_path}<p>Saved to <code>{snapshot.image_path}</code></p>{/if}<button class="text-button" disabled={active || locked} onclick={() => { void downloads.resolve(); }}>Check for updates</button></div></details>{/if}
     </div>
@@ -41,6 +45,7 @@
 </section>
 
 <style>
+  .replacement-note{font-size:11px;line-height:1.7;color:var(--text-muted);margin:0 0 18px}
   .download-panel{border:1px solid var(--border);border-radius:4px;background:var(--surface);overflow:hidden}
   .image-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px}.image-summary h1{font-size:12px}.image-summary span{display:flex;align-items:center;gap:9px;color:var(--success)}.compact .release{border-top:1px solid var(--border)}
   .release{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px;border-bottom:1px solid var(--border)}

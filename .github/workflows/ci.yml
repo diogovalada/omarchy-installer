@@ -41,7 +41,7 @@ jobs:
       - name: Verify release metadata and CI helpers
         run: |
           node scripts/release-version.mjs --check
-          node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts/prepare-release.test.mjs
+          node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts/prepare-release.test.mjs scripts/linux-portable-launcher.test.mjs
 
   rust:
     needs: changes

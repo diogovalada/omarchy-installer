@@ -36,7 +36,7 @@ function fixture(t, { omit, wrongCommit } = {}) {
 test('all platforms produce distinct metadata and a valid combined checksum file', async t => {
   const { input, output } = fixture(t);
   const names = await prepareRelease(input, output, version, commit);
-  assert.equal(names.length, 22);
+  assert.equal(names.length, 19);
   for (const platform of platforms) assert.ok(names.includes(`${platform}-build.json`));
   for (const line of readFileSync(join(output, 'SHA256SUMS'), 'utf8').trim().split('\n')) {
     const [expected, name] = line.split('  ');

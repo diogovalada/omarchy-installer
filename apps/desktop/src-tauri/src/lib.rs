@@ -50,6 +50,7 @@ pub fn run() {
             downloads::download_status,
             downloads::resolve_download,
             downloads::start_download,
+            downloads::replace_download,
             downloads::cancel_download,
             downloads::choose_download_directory,
             setup::setup_status,

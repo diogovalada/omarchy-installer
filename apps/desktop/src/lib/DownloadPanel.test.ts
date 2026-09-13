@@ -9,7 +9,7 @@ vi.mock('./downloads', async importOriginal => {
   const actual = await importOriginal<typeof import('./downloads')>();
   const { writable } = await import('svelte/store');
   const state = writable({ snapshot: null, pending: false, error: null });
-  return { ...actual, downloads: { ...state, native: true, refresh: vi.fn().mockResolvedValue(undefined), resolve: vi.fn(), start: vi.fn(), cancel: vi.fn(), chooseDirectory: vi.fn() } };
+  return { ...actual, downloads: { ...state, native: true, refresh: vi.fn().mockResolvedValue(undefined), resolve: vi.fn(), start: vi.fn(), replace: vi.fn(), cancel: vi.fn(), chooseDirectory: vi.fn() } };
 });
 
 const controller = downloads as typeof downloads & { set: (value: { snapshot: DownloadSnapshot; pending: boolean; error: string | null }) => void };
@@ -88,5 +88,25 @@ describe('single-screen native download flow', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Signature verification failed');
     expect(screen.queryByText('Verified')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Refresh USB drives' })).not.toBeInTheDocument();
+  });
+  it('replaces only after an explicit choice and explains when the old file is replaced', async () => {
+    await setState(state('failed', {existing_image:true, replacement_available:true, error:'ISO checksum mismatch'}));
+    render(DownloadPanel);
+    expect(downloads.replace).not.toHaveBeenCalled();
+    expect(screen.getByText(/existing file will be replaced only after/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', {name:'Download replacement'}));
+    expect(downloads.replace).toHaveBeenCalledOnce();
+    await fireEvent.click(screen.getByRole('button', {name:'Choose another folder'}));
+    expect(downloads.chooseDirectory).toHaveBeenCalledOnce();
+    await fireEvent.click(screen.getByRole('button', {name:'Verify again'}));
+    expect(downloads.start).toHaveBeenCalledOnce();
+  });
+  it('does not offer replacement for ordinary failures or cancelled verification', async () => {
+    await setState(state('failed', {existing_image:true, error:'Access denied'}));
+    render(DownloadPanel);
+    expect(screen.queryByRole('button', {name:'Download replacement'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name:'Verify'})).toBeEnabled();
+    await setState(state('cancelled', {existing_image:true}));
+    expect(screen.queryByRole('button', {name:'Download replacement'})).not.toBeInTheDocument();
   });
 });

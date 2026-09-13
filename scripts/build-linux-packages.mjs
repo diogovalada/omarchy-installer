@@ -7,6 +7,7 @@ import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, re
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { installPortableLauncher } from './linux-portable-launcher.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.arch, 'x64');
@@ -19,7 +20,7 @@ const env = { ...process.env, APPIMAGE_EXTRACT_AND_RUN: '1', NO_STRIP: '1' };
 function run(command, args, extraEnv = {}) {
   execFileSync(command, args, { cwd: root, env: { ...env, ...extraEnv }, stdio: 'inherit' });
 }
-run('pnpm', ['--dir', 'apps/desktop', 'exec', 'tauri', 'build', '--config', 'src-tauri/tauri.release-preview.conf.json', '--bundles', 'deb']);
+run('pnpm', ['--dir', 'apps/desktop', 'exec', 'tauri', 'build', '--config', 'src-tauri/tauri.release-preview.conf.json', '--no-bundle']);
 
 const parent = join(root, 'artifacts/linux-packaging');
 mkdirSync(parent, { recursive: true });
@@ -31,7 +32,7 @@ writeFileSync(shellConfig, JSON.stringify(preview, null, 2) + '\n');
 // fails. Archive it so old resources cannot leak into the GUI-only package.
 const intermediate = join(tauri, 'target/release/bundle/appimage_deb');
 if (existsSync(intermediate)) renameSync(intermediate, join(scratch, 'previous-appimage-deb'));
-// Keep the DEB's application binary before Tauri adds another bundle marker.
+// Keep the unbundled application binary before Tauri adds its bundle marker.
 const application = join(tauri, 'target/release/omarchy-setup-desktop');
 copyFileSync(application, join(scratch, 'application-before-appimage'));
 run('pnpm', ['--dir', 'apps/desktop', 'exec', 'tauri', 'bundle', '--verbose', '--config', shellConfig, '--bundles', 'appimage']);
@@ -59,6 +60,7 @@ for (const record of manifest.files) {
 const node = join(providers, manifest.media.executable);
 run(node, [join(root, 'scripts/verify-staged-media.cjs'), dirname(node)]);
 const image = join(output, images[0]);
+installPortableLauncher(appdir);
 renameSync(image, join(scratch, 'gui-only.AppImage'));
 const plugin = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'tauri/linuxdeploy-plugin-appimage.AppImage');
 assert.ok(lstatSync(plugin).isFile(), 'The Tauri AppImage output plugin is required.');

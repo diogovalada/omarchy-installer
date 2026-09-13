@@ -3,6 +3,19 @@
 Versions here belong to Omarchy Installer, independently of the Omarchy image it
 downloads. Published versions and their artifacts are immutable.
 
+## [0.1.0-preview.4] - 2026-09-13
+
+- Offer Download replacement or Choose another folder when an existing ISO has
+  incorrect bytes. Keep the original until the replacement is verified; refuse
+  replacement if the original changes. Access errors and cancellation do not
+  authorize replacing a file.
+- Simplify downloads to portable Windows EXE, macOS APP ZIP and Linux AppImage.
+  macOS no longer includes a DMG, and Linux no longer includes a DEB.
+- Automatically relaunch Linux AppImages in extraction mode for USB helper access.
+  Hosts without FUSE can use the explicit extraction flag.
+- Feature published previews in GitHub's Releases sidebar while retaining the
+  Experimental preview title and hardware-testing limitations.
+
 ## [0.1.0-preview.3] - 2026-09-13
 
 - Add Intel Mac and Apple Silicon Mac downloads alongside Windows and Linux.

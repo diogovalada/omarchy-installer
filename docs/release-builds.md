@@ -9,9 +9,9 @@ run full CI and publish a GitHub Release after both validation and packaging pas
 | Platform | Runner | Packages |
 | --- | --- | --- |
 | Windows x64 | Windows 2022 | Portable EXE |
-| Linux x64 | Ubuntu 24.04 | AppImage and DEB |
-| macOS Intel | macOS 15 Intel | DMG and APP ZIP |
-| macOS Apple Silicon | macOS 15 ARM64 | DMG and APP ZIP |
+| Linux x64 | Ubuntu 24.04 | Portable AppImage |
+| macOS Intel | macOS 15 Intel | Portable APP ZIP |
+| macOS Apple Silicon | macOS 15 ARM64 | Portable APP ZIP |
 
 The [first manual preview](https://github.com/diogovalada/omarchy-installer/releases/tag/v0.1.0-preview.1)
 provides Windows x64 and Linux x64 downloads, SHA-256 checksums and build/provider
@@ -58,7 +58,8 @@ or trying to resolve dependencies of SDK binaries for other platforms.
 Windows builds are unsigned. macOS builds use ad-hoc signing without notarization;
 the separately signed Apple direct-install bridge is not included. macOS 15+ and
 Ubuntu 24.04 or compatible newer Linux are the current package baselines. AppImage
-USB use requires `--appimage-extract-and-run`; see the root README.
+launching automatically switches to extraction mode for USB use. On hosts without
+FUSE, use `--appimage-extract-and-run` explicitly; see the root README.
 
 The workflow checks frontend types/tests, USB tests and native dependency loading.
 It verifies provider hashes and runs an ordinary-file SDK write from packaged
@@ -89,10 +90,10 @@ The release-packaging workflow separately skips documentation-only main pushes.
 the next preview, run from the repository root:
 
 ```sh
-pnpm release:version 0.1.0-preview.4
+pnpm release:version 0.1.0-preview.5
 ```
 
-Use the next unused version; preview.3 is currently prepared. This synchronizes
+Use the next unused version; preview.4 is currently prepared. This synchronizes
 VERSION, the desktop package.json, Tauri configuration, desktop Cargo.toml and
 its Cargo.lock package record. Internal libraries and provider dependencies keep
 their independent versions. The command refuses an already tagged version and
@@ -107,14 +108,17 @@ node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts
 
 CI and application packaging check version consistency. For a release, date the
 changelog entry, complete validation, commit the version changes and create the
-matching v-prefixed tag (for example v0.1.0-preview.3). Tag builds must match
+matching v-prefixed tag (for example v0.1.0-preview.4). Tag builds must match
 VERSION exactly. Pushing that version tag requests publication. The packaging
 workflow invokes full CI for the tagged source, waits for that and all four
 platform packages, verifies every input checksum and build commit/version, and
 uploads a draft release. It publishes the draft only after every upload succeeds.
 Main pushes continue to produce Actions artifacts without publishing a release.
+Preview versions keep **Experimental preview** in the title and notes but use
+GitHub's normal release flag and Latest designation so downloads appear in the
+repository sidebar. This visibility setting does not imply hardware qualification.
 
-Published releases are not overwritten. If an upload fails and leaves a draft,
+Published release artifacts are not overwritten. If an upload fails and leaves a draft,
 inspect that draft before retrying; the workflow deliberately refuses to replace
 an existing release automatically. Platform metadata filenames are prefixed to
 avoid collisions, and a combined SHA256SUMS covers all public release assets.

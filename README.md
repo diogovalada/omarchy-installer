@@ -9,7 +9,9 @@ This is an unofficial community project. Installation features are still
 experimental and have not completed physical hardware and boot testing.
 
 Download preview builds from [Releases](https://github.com/diogovalada/omarchy-installer/releases).
-The release page lists the available Windows, Linux and macOS packages.
+Each platform has one portable download: Windows EXE, macOS APP ZIP (Intel or
+Apple Silicon), and Linux AppImage. On Mac, extract the ZIP and open the app;
+copying it to Applications is optional.
 
 ## What it does
 
@@ -39,8 +41,16 @@ Linux and macOS offer the erase-and-write USB method. On Apple Silicon, this
 creates media for another x86 computer. Operation records default to Documents
 on these hosts. See the [cross-platform USB implementation and test record](docs/evidence/cross-platform-usb-2026-09-08.md)
 for platform prerequisites, exclusions and remaining hardware checks.
-Linux AppImages must use `--appimage-extract-and-run` for USB preparation; a
-runtime mounted through FUSE is refused. Installed packages can run normally.
+On Linux, make the AppImage executable and open it. It automatically relaunches
+in extraction mode so the USB helper can read its bundled files. If FUSE is
+unavailable, launch with `--appimage-extract-and-run`. Older previews require
+that flag explicitly for USB preparation.
+
+If an existing ISO has the wrong size or checksum, choose **Download replacement**
+or **Choose another folder**. Replacement keeps the old file until a verified new
+copy is ready, then replaces it atomically. Cancellation, failed downloads and
+changes to the existing file prevent replacement. Older version filenames are
+left untouched; they are not automatically deleted.
 
 See the [support matrix](docs/support-matrix.md) for testing status and
 [platform behavior](docs/platform-behavior.md) for installation requirements.

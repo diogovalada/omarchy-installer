@@ -76,14 +76,12 @@ if (process.platform === 'win32') {
   verifyNotices(join(app, 'Contents/Resources/THIRD_PARTY_NOTICES.md'));
   execFileSync('/usr/bin/codesign', ['--verify', '--strict', app], { stdio: 'inherit' });
   execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, join(output, `${stem}.app.zip`)]);
-  collect(one(join(bundle, 'dmg'), name => name.endsWith('.dmg')), `${stem}.dmg`);
 } else {
   const appimage = join(bundle, 'appimage');
   const appdir = one(appimage, name => name.endsWith('.AppDir'));
   verifyProviders(join(appdir, 'usr/lib', config.productName, 'providers'));
   verifyNotices(join(appdir, 'usr/lib', config.productName, 'THIRD_PARTY_NOTICES.md'));
   collect(one(appimage, name => name.endsWith('.AppImage')), `${stem}.AppImage`);
-  collect(one(join(bundle, 'deb'), name => name.endsWith('.deb')), `${stem}.deb`);
 }
 collect(manifestPath, 'provider-lock.json');
 collect(join(root, 'THIRD_PARTY_NOTICES.md'), 'THIRD_PARTY_NOTICES.md');
@@ -99,11 +97,13 @@ Installation without USB is in development. Apple Silicon hosts create USBs
 for x86 computers; the USB does not install Omarchy on Apple Silicon.
 
 Windows: run the portable EXE; WebView2 must be available.
-Linux: install the DEB, or make the AppImage executable and use
+Linux: make the AppImage executable and open it. It automatically uses extraction
+mode so the USB helper can access its bundled files. If FUSE is unavailable, use
   ./Omarchy-Installer-${config.version}-linux-x64.AppImage --appimage-extract-and-run
-for USB operations. Ubuntu 24.04 or a compatible newer system is required;
+Ubuntu 24.04 or a compatible newer system is required;
 pkexec, util-linux, libusb and udev must be available.
-macOS: use the DMG or extract the APP ZIP. macOS 15+ is required. These preview
+macOS: extract the APP ZIP and open the app; moving it to Applications is optional.
+macOS 15+ is required. These preview
 builds use ad-hoc signing, are not notarized, and may be blocked by Gatekeeper.
 
 See the repository README for the tested paths and remaining hardware checks.
