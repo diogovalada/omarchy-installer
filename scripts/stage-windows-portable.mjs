@@ -54,7 +54,6 @@ function put(relative, bytes) {
   files.push({ path: relative, sizeBytes: bytes.length, sha256: hash(bytes) });
 }
 put('Omarchy Installer.exe', application);
-put('THIRD_PARTY_NOTICES.md', readFileSync(join(root, 'THIRD_PARTY_NOTICES.md')));
 const seen = new Set();
 const bundle = join(root, 'apps/desktop/.native-providers/bundle');
 for (const file of manifest.files) {
@@ -79,7 +78,7 @@ put('LICENSE-Omarchy.txt', readFileSync(join(root, 'apps/desktop/src/assets/omar
 put('OFL-JetBrainsMono.txt', readFileSync(join(root, 'apps/desktop/src/assets/omarchy/OFL-JetBrainsMono.txt')));
 put('README.txt', Buffer.from(`Omarchy Installer — portable community preview
 
-The distribution is one executable. Open Omarchy-Installer-0.1.0-x64-portable.exe.
+The distribution is one executable. Open the downloaded portable executable.
 It extracts the payload once into a cache under LocalAppData/OmarchySetup/p.
 Later launches verify and reuse the exact bundled contents. Missing or changed
 files cause a fresh extraction. Different payloads use separate cache versions.

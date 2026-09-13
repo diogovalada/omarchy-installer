@@ -55,6 +55,9 @@ jobs:
         run: corepack enable
       - name: Verify release version and tag
         run: node scripts/release-version.mjs --check
+      - name: Test Windows portable staging
+        if: runner.os == 'Windows'
+        run: node --test scripts/stage-windows-portable.test.mjs
       - name: Select pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Cache Rust dependencies

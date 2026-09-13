@@ -89,10 +89,10 @@ The release-packaging workflow separately skips documentation-only main pushes.
 the next preview, run from the repository root:
 
 ```sh
-pnpm release:version 0.1.0-preview.3
+pnpm release:version 0.1.0-preview.4
 ```
 
-Use the next unused version; preview.2 is currently prepared. This synchronizes
+Use the next unused version; preview.3 is currently prepared. This synchronizes
 VERSION, the desktop package.json, Tauri configuration, desktop Cargo.toml and
 its Cargo.lock package record. Internal libraries and provider dependencies keep
 their independent versions. The command refuses an already tagged version and
@@ -107,7 +107,7 @@ node --test scripts/ci-changes.test.mjs scripts/release-version.test.mjs scripts
 
 CI and application packaging check version consistency. For a release, date the
 changelog entry, complete validation, commit the version changes and create the
-matching v-prefixed tag (for example v0.1.0-preview.2). Tag builds must match
+matching v-prefixed tag (for example v0.1.0-preview.3). Tag builds must match
 VERSION exactly. Pushing that version tag requests publication. The packaging
 workflow invokes full CI for the tagged source, waits for that and all four
 platform packages, verifies every input checksum and build commit/version, and
