@@ -1,5 +1,9 @@
 # Etcher SDK media providers
 
+For the September 18–19 packaging and engine-replacement discussion, see
+[USB engine and packaging options](../../docs/usb-engine-options-2026-09-19.md).
+Etcher remains the current provider; the alternatives are not yet qualified.
+
 The bounded physical USB implementation added on 2026-09-06 is documented in
 [PHYSICAL-PROVIDER.md](PHYSICAL-PROVIDER.md). Its CLI is
 `dist/physical-cli.js`, and its separate TypeScript API is

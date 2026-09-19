@@ -99,10 +99,11 @@ Other planned improvements:
 - **Integrate Try Omarchy:** let users try Omarchy in a virtual machine from
   within the app before installing.
 - **Reduce installer size:** prune unused SDK features and dependencies,
-  exclude binaries for other architectures, and bundle only the USB provider
-  components the app needs. Consider reimplementing the required parts of
-  Etcher SDK in Rust to avoid shipping a separate Node.js runtime and its
-  JavaScript dependencies for USB creation.
+  exclude binaries for other architectures, and bundle JavaScript into fewer
+  files. Compare native libraries and existing engines with retaining Etcher
+  or implementing a focused Rust writer. See the
+  [USB engine and packaging options](docs/usb-engine-options-2026-09-19.md)
+  for candidates, size estimates, maintenance tradeoffs and remaining checks.
 
 Useful upstream support would be official prebuilt system images with Omarchy
 already installed, so direct installation would not require us to build and
