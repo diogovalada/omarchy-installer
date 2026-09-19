@@ -44,7 +44,7 @@ The adapter uses pinned `etcher-sdk` 10.2.14 through `File`, `BlockDevice`, and
 `pipeSourceToDestinations`, with SDK verification enabled. Native dependencies
 include `@ronomon/direct-io`, `mountutils`, and `drivelist`.
 
-Our code already owns substantial behaviour around the SDK: authenticated source
+Our code already owns substantial behavior around the SDK: authenticated source
 handling, target exclusions and reidentification, Windows volume locking, handle
 geometry checks, bounded final-sector padding, cancellation through a child-process
 boundary, flushing, and an additional full SHA-256 readback. We override the SDK's
@@ -59,7 +59,7 @@ as the write loop.
 Local references: [physical engine](../providers/media-etcher/src/physical-engine.ts),
 [discovery](../providers/media-etcher/src/physical-discovery.ts),
 [runtime staging](../providers/media-etcher/scripts/stage-physical-runtime.cjs), and
-[provider behaviour/test record](../providers/media-etcher/PHYSICAL-PROVIDER.md).
+[provider behavior/test record](../providers/media-etcher/PHYSICAL-PROVIDER.md).
 
 ## Packaging measurements and estimates
 
@@ -131,7 +131,7 @@ must not be presented as measurements of this testing executable.
 
 | Approach | Advantages | Costs and unresolved questions |
 | --- | --- | --- |
-| **Keep Etcher/Node; trim runtime dependencies and platform binaries** | Smallest architectural change; keeps upstream SDK behaviour and updates. | Node remains. Audit transitive/dynamic imports and preserve required notices, metadata and native addons; validate each host build. |
+| **Keep Etcher/Node; trim runtime dependencies and platform binaries** | Smallest architectural change; keeps upstream SDK behavior and updates. | Node remains. Audit transitive/dynamic imports and preserve required notices, metadata and native addons; validate each host build. |
 | **Bundle required JavaScript into fewer files** | Reduces filesystem/extraction/hash overhead; can combine with pruning. | Native addons and runtime assets still need packaging. CommonJS/dynamic imports and addon path discovery complicate bundling; size savings are not proportional to file-count savings. |
 | **Prepare/load the USB provider on demand** | Show the interface without first preparing all USB dependencies. | Moves some waiting to the USB flow; does not by itself shrink the download. Discovery also currently needs the provider. Integrity checks must still complete before execution. |
 | **Use an existing native Rust/C/C++ library** | Potentially removes Node while retaining upstream ownership of an engine; no need to recreate every operation. | Need to assess API, coverage, safeguards, dependencies, release history and hardware evidence. A published library is not automatically an equivalent replacement. |
@@ -155,7 +155,7 @@ the alternatives below has been qualified in this app.
 | Candidate | Form and useful scope | Limits / follow-up |
 | --- | --- | --- |
 | **[Etcher SDK](https://github.com/balena-io-modules/etcher-sdk)** | Current Node SDK, cross-platform image pipeline and native dependencies. | Keep as the baseline; trimming/bundling are options, not a decision to abandon it. |
-| **[FlashKraft Core](https://github.com/sorinirimies/flashkraft/tree/main/crates/flashkraft-core)** | Published MIT Rust library, separate from GUI/TUI; discovery, write pipeline, verification, progress and cancellation. Source includes Windows/Linux/macOS branches. | Especially relevant to direct library reuse. Review actual behaviour on each OS and privilege assumptions; platform branches/docs alone do not establish safe equivalent support. |
+| **[FlashKraft Core](https://github.com/sorinirimies/flashkraft/tree/main/crates/flashkraft-core)** | Published MIT Rust library, separate from GUI/TUI; discovery, write pipeline, verification, progress and cancellation. Source includes Windows/Linux/macOS branches. | Especially relevant to direct library reuse. Review actual behavior on each OS and privilege assumptions; platform branches/docs alone do not establish safe equivalent support. |
 | **[imi-core](https://docs.rs/imi-core/latest/imi_core/)** | Rust library with a complete phased write/verify pipeline, exclusive locking, cancellation and GUI callbacks. | Linux only; possible Linux provider or reference rather than one replacement for all hosts. |
 | **[Argos](https://github.com/jp-guimaraes/argos)** / [argos-core](https://docs.rs/argos-core/latest/argos_core/) | Rust core with write/verify logic and separate platform crates; explicitly structured for reuse. | Linux/macOS hosts; Windows-as-host is explicitly out of scope. Its Windows installer-media support must not be mistaken for Windows host support. Young project; assess release/qualification evidence. |
 | **[AgenticBlockTransfer / abt](https://github.com/nervosys/AgenticBlockTransfer)** | Rust library and optional CLI/UI features; advertises cross-platform device enumeration, writing and verification. | Additional candidate found in the later search, not reviewed for adoption. Broad feature claims need source/test validation; repository is AGPL-3.0. |
@@ -188,9 +188,9 @@ Other building blocks found are useful to distinguish from a complete engine:
 ### Raspberry Pi branding and general imaging
 
 Raspberry Pi Imager primarily prepares boot media for Raspberry Pi computers and
-offers Pi-specific image catalogues and customisation. Its underlying image
+offers Pi-specific image catalogues and customization. Its underlying image
 writer can accept custom source images. Our proposed use would write the Omarchy
-image for its intended PC without Pi customisation; no Raspberry Pi hardware is
+image for its intended PC without Pi customization; no Raspberry Pi hardware is
 required. This is a reuse proposal, not a claim that our ISO/provider integration
 has already been tested. See [custom-image documentation](https://www.raspberrypi.com/documentation/computers/getting-started.html#install-using-imager).
 
@@ -201,8 +201,8 @@ has already been tested. See [custom-image documentation](https://www.raspberryp
 | Upstream SDK/library dependency | Adapter, version updates, packaging, compatibility/regression tests and our additional protections. Upstream fixes arrive only when we adopt a release containing them. |
 | Upstream executable/CLI | Process/protocol integration, version pinning, packaging, privileges, progress/cancellation and testing. Upstream retains its engine implementation. |
 | Copied/extracted engine or private patches | All of the above plus tracking and merging upstream changes. A thin wrapper may keep this manageable; copying source does not make it an automatically updating dependency. |
-| Browser/WASM native bridge | Bridge APIs and native behaviour in addition to compatible upstream JS/WASM components; OS fixes may need manual adaptation. |
-| Own Rust engine | Our implementation and its OS/hardware behaviour, while avoiding Node/native-addon runtime compatibility work. |
+| Browser/WASM native bridge | Bridge APIs and native behavior in addition to compatible upstream JS/WASM components; OS fixes may need manual adaptation. |
+| Own Rust engine | Our implementation and its OS/hardware behavior, while avoiding Node/native-addon runtime compatibility work. |
 
 Neither native code nor an upstream dependency guarantees future OS compatibility.
 Preserve the practical benefit of other maintainers' fixes where possible. A
@@ -215,7 +215,7 @@ private fork. No upstream messages or proposals have been sent in this work.
    evaluate native library reuse (especially `flashkraft-core`) before assuming
    a private Rust rewrite or browser bridge is necessary. Raspberry Pi's CLI and
    USBImager's small native layer remain separate candidates.
-2. Compare required behaviour, not advertised feature count: target/system/source
+2. Compare required behavior, not advertised feature count: target/system/source
    disk exclusions; stable source/device identity; sector alignment and bounded
    writes; retained volume/device locks; flushing/readback; cancellation and
    error reporting; progress; ejection; privilege separation.
