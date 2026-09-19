@@ -5,9 +5,19 @@ inspections. This is the consolidated entry point for the alternatives,
 corrections, reasoning and open questions. It does not select a new architecture
 or establish that a physical installation has succeeded.
 
-The existing working preference remains local construction followed by native
-Windows deployment. Staged installation and published system images remain
-credible alternatives. Revisit this record before changing that preference.
+Updated 2026-09-16 with the same-disk PR progress, official Windows boot behavior,
+TPM measurement details, fallback limits and the latest boot-menu discussion.
+
+The [September 17 implementation](../providers/staged-iso/README.md) adds staging,
+one-time boot handoff and reviewed cleanup behind the closed release gate.
+
+The September 16 follow-up selects **staged official-ISO installation** for the
+future enabled route. Keep no-USB installation disabled until an official ISO
+contains the required same-disk support and the staged flow is qualified. Retain
+the local construction/native deployment code for possible later support, but
+do not expose it as a fallback. Earlier comparisons below describe that retained
+implementation, not the latest product selection.
+See [the implementation record](evidence/bitlocker-followup-2026-09-16.md).
 
 ## Scope and intended result
 
@@ -135,6 +145,38 @@ Sources: [configurator](https://github.com/omacom/omarchy-iso/blob/quattro/confi
 [historical protected-install rationale](https://github.com/omacom/omarchy-iso/blob/8b3dcc68b23dc00cf2d3e75cfe9e7afeff5501e4/plans/protected-partition-install.md),
 and [our released-ISO findings](staged-iso-first-plan.md#first-feasibility-gates).
 
+### Same-disk protection: upstream work recorded September 16
+
+The whole-disk exclusion protects the live source from destructive installation;
+the BitLocker refusal is a separate policy. Protecting only the source partition
+is feasible, but it requires guarding every destructive path, not just hiding a
+partition from the selection UI. Whole-disk erasure, partition-table replacement
+and an unrestricted partition editor can all destroy the source indirectly.
+Installation must also preserve the live mount and reject new extents overlapping
+retained partitions. Cleanup must remove only partitions created by this attempt.
+
+[Our upstream PR #187](https://github.com/omacom/omarchy-iso/pull/187) implements a
+bounded free-space path for interactive UEFI installation from a directly mounted
+partition on a GPT disk. It preserves existing partitions, checks source/table
+state and new device geometry, and blocks destructive alternatives on that disk.
+Deferred provisioning and same-disk loopback/device-mapper setups are outside its
+supported scope. BitLocker policy is unchanged; staging is not removed afterward.
+
+At the review recorded here, the PR was a draft. Shell/Python checks and disposable
+disk-image tests covered preservation, overlap rejection and rollback, including
+512-byte and 4096-byte sectors. A fresh independent gpt-6-astra review found no
+actionable issues. A complete same-disk ISO installation and reboot, encryption/
+bootloader integration and physical-device testing remained outstanding. These
+tests use GPT **partition-table disk images**, not generative-AI images, and do
+not establish a working USB-free product.
+
+Historical clarification: [PR #78](https://github.com/omacom/omarchy-iso/pull/78)
+proposed reverting the source-disk protection from
+[PR #73](https://github.com/omacom/omarchy-iso/pull/73), but was not merged. Upstream
+instead corrected the parent-disk lookup by adding `-d` to `lsblk -no PKNAME`,
+retaining the source-disk exclusion. It was not replaced by partition-level
+protection at that time.
+
 ## BitLocker: file access, boot trust and installer policy
 
 These are three distinct questions:
@@ -223,6 +265,116 @@ Route B would need to integrate and qualify this same eventual menu behavior.
 Sources: [menu generator](../providers/image-builder-x86/boot_menu.py),
 [Limine v12.6.0 implementation](https://github.com/Limine-Bootloader/Limine/blob/v12.6.0/common/protos/efi_boot_entry.c),
 and [menu/BitLocker analysis](evidence/bitlocker-direct-boot-research-2026-09-06.md).
+
+### Keep Windows Boot Manager in either design
+
+Our menu selects the operating system; Windows Boot Manager remains part of the
+Windows startup chain and launches the Windows OS loader. Direct chainloading
+and restart-through-firmware both retain it. One visible OS menu does not require
+deleting the Microsoft loader or presenting two menus. Preserve Microsoft's EFI
+files, Windows firmware entry, BCD and recovery partition.
+
+Windows recovery depends on that boot infrastructure, but its repair tools live
+in the separate Windows Recovery Environment. Boot Manager is not itself a
+complete Windows repair or installation environment.
+Sources: [Windows boot phases](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/windows-boot-issues-troubleshooting)
+and [Windows recovery features](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-re-troubleshooting-features?view=windows-11).
+
+### Which measurements affect BitLocker?
+
+PCRs are TPM registers containing cumulative cryptographic measurements. Adding
+measured code or changing its execution order can change their values. Distinguish
+everything firmware measures from the **subset selected by the actual BitLocker
+protector**; a changed PCR outside that subset does not by itself cause recovery.
+
+| PCR | Relevant measured state |
+| --- | --- |
+| 0 | Core firmware code. |
+| 2 | Extended firmware code, including option ROMs. |
+| 4 | Boot manager / EFI boot application code. An additional menu normally changes this. |
+| 5 | GPT partition table. Not part of the default native-UEFI profiles below. |
+| 7 | Secure Boot state/policy and authorities used to authorize EFI images; more than an on/off flag. |
+| 11 | BitLocker access control. |
+
+Microsoft documents native-UEFI defaults of **7, 11** when Secure Boot binding is
+usable, otherwise **0, 2, 4, 11**. Administrator policy can override them. Secure
+Boot being enabled alone does not prove PCR 7 binding is used: additional signing
+authorities can affect PCR 7 and whether Windows can bind to it. Therefore direct
+chainloading is neither universally incompatible nor universally compatible.
+With the Secure Boot-off/default-profile setup discussed here, PCR 4 is relevant.
+
+Inspect the actual protector profile and measured-boot log, rather than infer
+compatibility from Secure Boot status or loader filenames. Seeing a route once
+does not automatically authorize it: protection must be established/resumed
+against the intended state and tested on a subsequent protected boot.
+Sources: [Microsoft PCR profiles](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/configure#configure-tpm-platform-validation-profile-for-native-uefi-firmware-configurations),
+[PCR accumulation](https://learn.microsoft.com/en-us/windows/security/hardware-security/tpm/switch-pcr-banks-on-tpm-2-0-devices),
+[Secure Boot binding](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/oem-bitlocker)
+and [measured-boot log inspection](https://learn.microsoft.com/en-us/troubleshoot/windows-client/windows-security/decode-measured-boot-logs-to-track-pcr-changes).
+
+### What official Omarchy does, and what that implies for our menu
+
+Source inspection on September 16 found that the official dual-boot guide uses
+Limine and tells users to run `limine-scan` to add Windows. That scanner's entry
+generation uses an EFI file path to launch Windows Boot Manager directly:
+`firmware -> Limine -> Windows Boot Manager -> Windows`, without a restart.
+Limine also supports `efi_boot_entry`; direct launching is the documented Omarchy
+setup, not the only behavior the bootloader is capable of supporting.
+
+The official guide requires turning off BitLocker and waiting for decryption.
+Thus this documented flow does not establish compatibility with active BitLocker.
+Its explanation that BitLocker encrypts an entire physical disk should not be
+repeated as a technical fact: Windows BitLocker operates on volumes; Windows and
+Linux can occupy separately encrypted partitions on one disk.
+Sources: [official dual-boot guide](https://github.com/omacom/omarchy/blob/quattro/manual/50-dual-boot-install.md),
+[scanner entry generation](https://gitlab.com/Zesko/limine-entry-tool/-/blob/master/src/main/java/org/limine/entry/tool/Main.java),
+[Limine protocols](https://github.com/Limine-Bootloader/Limine/blob/trunk/CONFIG.md)
+and [Microsoft BitLocker FAQ](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/faq).
+
+The latest discussion favors considering **direct launching alone**, accepting a
+Windows completion boot when required, rather than automatically shipping two
+Windows choices. This is a proposed simplification, not an implemented or qualified
+change. The source still uses the restart entry and its existing eligibility rules.
+
+| Installation sequence with a direct Windows menu entry | Protection timing |
+| --- | --- |
+| Decrypt Windows, run the official installer, boot Windows through the new Limine menu, enable BitLocker. | The new route has executed before protection is established. Verify later protected boots. Users could bypass Limine through firmware, so the intended route must be checked. |
+| Suspend protection, write a prepared Omarchy system and menu from Windows, resume in that same session. | Windows still has its old startup measurements. Writing bootloader files does not measure their future execution; the next direct boot may request recovery. |
+| Suspend protection, deploy from Windows, restart into Windows through the final menu, run the completion helper, resume and verify. | Candidate controlled transition: one setup-time Windows return, with no recurring restart when selecting Windows. Not yet qualified. |
+
+The distinction is **when the final boot route executes**, not whether the Linux
+filesystem was built locally or downloaded. Full decryption and suspension remain
+different operations. Our native deployment can potentially use suspension; the
+stock installer's BitLocker refusal still applies to a suspended Windows volume.
+The completion flow must control suspension/resumption timing and interruption
+recovery, then verify a protected boot; it cannot rely on an eventual optional
+Windows visit. Resuming refreshes TPM protectors against the current startup
+state, not an arbitrary new path that has only been written to disk.
+Source: [EnableKeyProtectors](https://learn.microsoft.com/en-us/windows/win32/secprov/enablekeyprotectors-win32-encryptablevolume#remarks).
+
+### Two Windows entries are possible, but not a keyless recovery guarantee
+
+A menu could offer direct launching and restart-through-firmware. If the direct
+attempt only reaches a recovery prompt and the original trusted route/state is
+unchanged, restarting through that original route should restore normal unlock.
+The failed boot's transient measurements do not carry into the fresh boot;
+merely displaying the recovery prompt does not permanently require a key.
+This is a conditional inference from the measurement/reset behavior, not tested
+fallback behavior on our supported machines.
+
+A restart does not undo persistent changes to Secure Boot, Windows boot files,
+firmware or protector configuration. Both entries can therefore request recovery.
+If protection is resealed to the new direct route, the old firmware route is not
+automatically still trusted. Successfully recovering Windows with a key can also
+refresh the accepted measurements under the default policy. Do not assume two
+entries mean two independently accepted BitLocker baselines.
+
+Qualify any fallback with protection active and retain access to the recovery
+key before changing/testing the route. Future menu/firmware updates also need a
+protection lifecycle; a successful initial setup is not a permanent guarantee.
+Sources: [reset and boot-route analysis](evidence/bitlocker-direct-boot-research-2026-09-06.md),
+[recovery triggers](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/recovery-overview)
+and [post-recovery behavior](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/recovery-process#post-recovery-tasks).
 
 ## Can we combine the benefits more effectively?
 

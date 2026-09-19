@@ -10,7 +10,7 @@ const bundle = join(staging, 'bundle');
 const distribution = process.env.OMARCHY_DISTRIBUTION ?? 'development-full';
 if (!['development-full', 'usb-preview'].includes(distribution)) throw new Error('Unknown distribution profile.');
 const usbPreview = distribution === 'usb-preview';
-if (usbPreview && ['direct-x86', 'image-builder-x86'].some(name => existsSync(join(bundle, name)))) {
+if (usbPreview && ['direct-x86/Invoke-DirectX86.ps1', 'image-builder-x86'].some(name => existsSync(join(bundle, name)))) {
   throw new Error('USB preview packaging requires a clean provider staging directory; use a fresh checkout.');
 }
 mkdirSync(bundle, { recursive: true });
@@ -48,10 +48,13 @@ const manifest = { schema: 1, platform: process.platform, architecture: process.
   media_inspection: { executable: `${mediaName}/${runtime.executable}`, entrypoint: `${mediaName}/${runtime.inspection_entrypoint}` },
   direct_x86: null, apple: null, files: records };
 
-for (const providerName of (usbPreview ? ['usb-preserve'] : ['direct-x86', 'image-builder-x86', 'usb-preserve'])) {
+for (const providerName of (usbPreview ? ['usb-preserve', 'windows-bitlocker', 'staged-iso', 'direct-x86'] : ['direct-x86', 'image-builder-x86', 'usb-preserve', 'windows-bitlocker', 'staged-iso'])) {
+  if (['windows-bitlocker', 'staged-iso'].includes(providerName) && process.platform !== 'win32') continue;
+  if (usbPreview && providerName === 'direct-x86' && process.platform !== 'win32') continue;
   const source = join(root, 'providers', providerName);
   if (!existsSync(source)) continue;
   for (const path of files(source)) {
+    if (usbPreview && providerName === 'direct-x86' && !['NativeDisk.cs', 'NativeSource.cs', 'StoragePlan.ps1', 'BitLocker.ps1'].includes(relative(source, path))) continue;
     if (providerName === 'usb-preserve' && !relative(source, path).startsWith('boot' + sep)) continue;
     if (!/\.(ps1|py|json|lock|gpg|asc|sh|cs|EFI|xz|txt|dsc|template|cfg)$/.test(path) && !['Dockerfile', 'NOTICE', 'runtime.tar'].includes(path.split(sep).at(-1))) continue;
     const local = relative(source, path).split(sep).join('/');

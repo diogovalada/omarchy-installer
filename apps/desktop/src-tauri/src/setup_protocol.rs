@@ -74,9 +74,17 @@ pub enum DirectTarget {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Destination {
+    StagedIso {
+        action: StagedAction,
+        selection: Option<StagedSelection>,
+        operation_id: Option<String>,
+    },
     InspectDirect,
     PrepareFirmware,
     PrepareRuntime,
+    PrepareBitLocker {
+        reminder_only: bool,
+    },
     Usb {
         identity: Value,
     },
@@ -94,6 +102,25 @@ pub enum Destination {
         allocation_bytes: u64,
         boot_menu: BootMenu,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagedAction {
+    Inspect,
+    Stage,
+    Status,
+    Arm,
+    Cleanup,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StagedSelection {
+    pub disk_number: u32,
+    pub disk_unique_id: String,
+    pub target: DirectTarget,
+    pub linux_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

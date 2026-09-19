@@ -6,6 +6,7 @@ export interface Release { version: string; file_name: string; length: number; s
 export interface DownloadSnapshot {
   status: DownloadStatus; release: Release | null; received_bytes: number; total_bytes: number;
   image_locked?: boolean;
+  verification_skipped?: boolean;
   replacement_available?: boolean;
   existing_image: boolean; cancel_requested: boolean; image_path: string | null; error: string | null; destination_directory: string; host_os: string; host_architecture: string;
 }

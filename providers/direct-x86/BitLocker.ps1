@@ -34,7 +34,7 @@ function Get-OsProtectorBlockers($Details) {
         }
     }
 }
-function Get-BitLockerSnapshot {
+function Get-BitLockerSnapshot([switch]$ForStaging) {
     try {
         $instances = @(Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -ErrorAction Stop)
         $partitions = @(Get-Partition -ErrorAction Stop)
@@ -54,7 +54,7 @@ function Get-BitLockerSnapshot {
             if ($conversion -eq 1 -and $locked -eq 0) {
                 $keys = @((Invoke-BitLockerQuery $v 'GetKeyProtectors' @{KeyProtectorType=[uint32]0}).VolumeKeyProtectorID | ForEach-Object { ([guid]::Parse($_)).ToString() } | Sort-Object)
                 if ($keys.Count -eq 0) { $problems.Add('An encrypted volume must have existing persistent key protectors.') }
-                $details=@(Get-KeyProtectorDetails $v $keys)
+                if (-not $ForStaging) { $details=@(Get-KeyProtectorDetails $v $keys) }
             }
         } catch { $problems.Add($_.Exception.Message) }
         $matches = @($partitions | Where-Object { @($_.AccessPaths) -contains [string]$v.DeviceID })
@@ -66,8 +66,8 @@ function Get-BitLockerSnapshot {
         $isOs = [string]$v.DriveLetter -ieq $systemDrive
         $isBoot = $matches.Count -eq 1 -and ($matches[0].IsBoot -or $matches[0].IsSystem)
         if (@($v.PSObject.Properties | ForEach-Object { $_.Name }) -contains 'VolumeType') { $isOs = $isOs -or [int]$v.VolumeType -eq 0 }
-        if ($isOs -and $conversion -eq 1) { foreach ($issue in @(Get-OsProtectorBlockers $details)) { $problems.Add($issue) } }
-        if ($isBoot -and -not $isOs -and $conversion -eq 1 -and $protection -eq 1) { $problems.Add('An encrypted boot volume was not identified as an OS volume; bounded suspension is unsupported for this layout.') }
+        if (-not $ForStaging -and $isOs -and $conversion -eq 1) { foreach ($issue in @(Get-OsProtectorBlockers $details)) { $problems.Add($issue) } }
+        if (-not $ForStaging -and $isBoot -and -not $isOs -and $conversion -eq 1 -and $protection -eq 1) { $problems.Add('An encrypted boot volume was not identified as an OS volume; bounded suspension is unsupported for this layout.') }
         $volumes += [ordered]@{volumeId=[string]$v.DeviceID;persistentVolumeId=[string]$v.PersistentVolumeID;driveLetter=[string]$v.DriveLetter;diskNumber=$diskNumber;diskUniqueId=$diskUniqueId;partitionNumber=$partitionNumber;partitionGuid=$partitionGuid;isOsVolume=[bool]$isOs;isBootVolume=[bool]$isBoot;conversionStatus=$conversion;protectionStatus=$protection;lockStatus=$locked;keyProtectorIds=$keys;keyProtectors=$details;supported=($problems.Count -eq 0);blockers=@($problems.ToArray())}
     }
     $known = @($volumes | Where-Object { $_.isOsVolume }).Count -ge 1
@@ -116,7 +116,7 @@ function Write-DurableJson([string]$Path, $Value) {
     try {
         $file = New-Object IO.FileStream($temporary,[IO.FileMode]::CreateNew,[Security.AccessControl.FileSystemRights]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough,(New-RecoveryFileSecurity))
         try { $file.Write($bytes,0,$bytes.Length); $file.Flush($true) } finally { $file.Dispose() }
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary,$Path,$null) } else { [IO.File]::Move($temporary,$Path) }
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary,$Path,[NullString]::Value) } else { [IO.File]::Move($temporary,$Path) }
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 function New-RecoveryFileSecurity {

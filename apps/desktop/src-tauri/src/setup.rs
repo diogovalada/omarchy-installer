@@ -60,6 +60,10 @@ pub struct Snapshot {
     preparation: Option<Value>,
     recovery: Option<Value>,
     usb_review: Option<UsbReview>,
+    bit_locker: Option<Value>,
+    staged_iso: Option<Value>,
+    staged_testing: bool,
+    staged_recovery: Option<Value>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,6 +120,10 @@ impl Default for Setup {
                     preparation: None,
                     recovery: None,
                     usb_review: None,
+                    bit_locker: None,
+                    staged_iso: None,
+                    staged_testing: crate::direct_install_policy::STAGED_ISO_TESTING,
+                    staged_recovery: None,
                 },
                 destinations: vec![],
                 usb_review: None,
@@ -147,6 +155,37 @@ fn reasons(value: &Value) -> Vec<String> {
         .map(|items| items.iter().map(label).collect())
         .unwrap_or_default()
 }
+#[cfg(any(windows, test))]
+fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
+    use std::io::Read;
+    // Display-only data. A forged index cannot authorize any helper operation.
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(1_048_577)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > 1_048_576 {
+        return None;
+    }
+    let summary: Value = serde_json::from_slice(&bytes).ok()?;
+    let operations = summary["operations"].as_array()?;
+    let errors = summary["recordErrors"].as_array()?;
+    if operations.len() > 256 || errors.len() > 256 {
+        return None;
+    }
+    for operation in operations {
+        uuid::Uuid::parse_str(operation["operationId"].as_str()?).ok()?;
+        operation["status"].as_str()?;
+        operation["diskNumber"].as_u64()?;
+        operation["temporaryBytes"].as_u64()?;
+    }
+    for error in errors {
+        uuid::Uuid::parse_str(error["operationId"].as_str()?).ok()?;
+        error["message"].as_str()?;
+    }
+    Some(summary)
+}
 impl Setup {
     pub(crate) fn active_operation(&self) -> bool {
         self.inner
@@ -155,12 +194,25 @@ impl Setup {
             .unwrap_or(true)
     }
     fn snapshot(&self) -> Result<Snapshot, String> {
-        Ok(self
+        let snapshot = self
             .inner
             .lock()
             .map_err(|_| "Setup state is unavailable")?
             .snapshot
-            .clone())
+            .clone();
+        #[cfg(windows)]
+        {
+            let mut snapshot = snapshot;
+            snapshot.staged_recovery =
+                crate::provider_process::program_data()
+                    .ok()
+                    .and_then(|root| {
+                        read_staging_summary(&root.join("OmarchyStagedInstaller/summary.json"))
+                    });
+            Ok(snapshot)
+        }
+        #[cfg(not(windows))]
+        Ok(snapshot)
     }
     fn update(&self, app: &tauri::AppHandle, change: impl FnOnce(&mut Inner)) {
         if let Ok(mut inner) = self.inner.lock() {
@@ -633,6 +685,7 @@ pub fn prepare_setup(
         "runtime" => Destination::PrepareRuntime,
         _ => return Err("Unknown preparation action".into()),
     };
+    crate::direct_install_policy::check_destination(&destination)?;
     let source = source(&downloads)?;
     setup.begin("direct", "running")?;
     let service = setup.inner().clone();
@@ -650,6 +703,133 @@ pub fn prepare_setup(
             }),
             Err(error) => service.fail(&app, error),
         }
+    });
+    setup.snapshot()
+}
+
+#[tauri::command]
+pub fn staged_iso(
+    action: crate::setup_protocol::StagedAction,
+    selection: Option<crate::setup_protocol::StagedSelection>,
+    operation_id: Option<String>,
+    app: tauri::AppHandle,
+    setup: State<'_, Setup>,
+    downloads: State<'_, Downloads>,
+) -> Result<Snapshot, String> {
+    use crate::setup_protocol::StagedAction;
+    if !cfg!(all(windows, target_arch = "x86_64")) {
+        return Err("Staged installation requires Windows x64".into());
+    }
+    if app
+        .state::<crate::apple_setup::AppleSetupService>()
+        .active_operation()
+    {
+        return Err("Another installation is active".into());
+    }
+    let destination = Destination::StagedIso {
+        action: action.clone(),
+        selection,
+        operation_id,
+    };
+    crate::direct_install_policy::check_destination(&destination)?;
+    let source = if matches!(action, StagedAction::Stage | StagedAction::Inspect) {
+        source(&downloads)?
+    } else {
+        // Existing staging records are self-contained. Cleanup must still work
+        // after the downloaded ISO was removed or a newer release appeared.
+        SourceImage {
+            path: std::env::current_exe().map_err(|e| e.to_string())?,
+            file_name: String::new(),
+            length: 0,
+            sha256: String::new(),
+            signature: vec![],
+        }
+    };
+    setup.begin("direct", "running")?;
+    setup.update(&app, |inner| {
+        inner.snapshot.kind = None;
+        inner.snapshot.stage = "staged-installer".into();
+        if matches!(action, StagedAction::Inspect) {
+            inner.snapshot.staged_iso = None;
+            inner.snapshot.bit_locker = None;
+        }
+    });
+    let service = setup.inner().clone();
+    std::thread::spawn(move || {
+        match run_elevated(
+            &service,
+            &app,
+            OperationRequest {
+                protocol: 1,
+                source,
+                destination,
+            },
+        ) {
+            Ok(result) => service.update(&app, |inner| {
+                inner.snapshot.status = "complete".into();
+                inner.snapshot.stage = "complete".into();
+                inner.snapshot.message = result["message"]
+                    .as_str()
+                    .unwrap_or("Temporary installer updated.")
+                    .into();
+                inner.snapshot.staged_iso = Some(result);
+                inner.snapshot.cancel_available = false;
+                inner.writer = None;
+            }),
+            Err(error) => service.fail(&app, error),
+        }
+    });
+    setup.snapshot()
+}
+
+#[tauri::command]
+pub fn prepare_bitlocker(
+    reminder_only: bool,
+    app: tauri::AppHandle,
+    setup: State<'_, Setup>,
+    downloads: State<'_, Downloads>,
+) -> Result<Snapshot, String> {
+    if !cfg!(all(windows, target_arch = "x86_64")) {
+        return Err("Windows encryption preparation requires Windows x64".into());
+    }
+    if app
+        .state::<crate::apple_setup::AppleSetupService>()
+        .active_operation()
+    {
+        return Err("Another installation is active".into());
+    }
+    let source = source(&downloads)?;
+    let mut previous = setup.snapshot()?;
+    previous.usb_review = None;
+    previous.bit_locker = None;
+    setup.begin(previous.kind.as_deref().unwrap_or("direct"), "running")?;
+    setup.update(&app, |inner| {
+        inner.snapshot.kind = previous.kind.clone();
+        inner.snapshot.stage = "windows-encryption".into();
+        inner.snapshot.bit_locker = None;
+    });
+    let service = setup.inner().clone();
+    std::thread::spawn(move || {
+        let result = run_elevated(
+            &service,
+            &app,
+            OperationRequest {
+                protocol: 1,
+                source,
+                destination: Destination::PrepareBitLocker { reminder_only },
+            },
+        );
+        service.update(&app, |inner| {
+            inner.snapshot = previous;
+            inner.writer = None;
+            match result {
+                Ok(result) => {
+                    inner.snapshot.bit_locker = Some(result);
+                    inner.snapshot.error = None;
+                }
+                Err(error) => inner.snapshot.error = Some(error),
+            }
+        });
     });
     setup.snapshot()
 }
@@ -1103,6 +1283,10 @@ fn run_elevated(
                 let (dialog_kind, button) = match operation {
                     "usb_preserve" => (MessageDialogKind::Info, "Keep files and add installer"),
                     "usb" => (MessageDialogKind::Warning, "Erase USB and create installer"),
+                    "bitlocker_reminder" => (MessageDialogKind::Info, "Set restoration reminder"),
+                    "staged_write" => (MessageDialogKind::Warning, "Prepare installer partitions"),
+                    "staged_arm" => (MessageDialogKind::Info, "Select next startup"),
+                    "staged_cleanup" => (MessageDialogKind::Warning, "Remove temporary installer"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
                 let approved = if operation == "source_lease" {
@@ -1144,9 +1328,18 @@ fn run_elevated(
                         .cancel
                         .load(Ordering::Relaxed)
                 } else {
+                    let window = app
+                        .get_webview_window("main")
+                        .ok_or("The installer window is unavailable for confirmation")?;
+                    // UAC may have moved focus away while the helper started.
+                    // Keep the confirmation owned by the restored app window,
+                    // rather than creating an independent dialog behind it.
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                     app.dialog()
                         .message(summary)
                         .title("Confirm Omarchy setup")
+                        .parent(&window)
                         .kind(dialog_kind)
                         .buttons(MessageDialogButtons::OkCancelCustom(
                             button.into(),
@@ -1244,6 +1437,19 @@ fn run_elevated(
 #[cfg(test)]
 mod usb_review_tests {
     use super::*;
+    #[test]
+    fn passive_staging_discovery_handles_absent_and_malformed_summaries() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("summary.json");
+        assert!(read_staging_summary(&path).is_none());
+        std::fs::write(&path, b"broken").unwrap();
+        assert!(read_staging_summary(&path).is_none());
+        let summary = json!({"operations":[{"operationId":uuid::Uuid::new_v4().to_string(),"status":"copying","diskNumber":0,"temporaryBytes":8589934592_u64}],"recordErrors":[]});
+        std::fs::write(&path, serde_json::to_vec(&summary).unwrap()).unwrap();
+        assert_eq!(read_staging_summary(&path), Some(summary));
+        std::fs::write(&path, vec![b' '; 1_048_577]).unwrap();
+        assert!(read_staging_summary(&path).is_none());
+    }
     fn request() -> OperationRequest {
         OperationRequest {
             protocol: 1,

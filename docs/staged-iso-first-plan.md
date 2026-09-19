@@ -2,6 +2,50 @@
 
 Decision date: 2026-09-06.
 
+Local testing executables reuse an existing ISO with the expected release
+filename and size immediately after release lookup, without re-reading it on
+every app restart. The UI says **Verification skipped · testing**, and the
+unverified file cannot supply a verified lease to the elevated helper. Actual
+disk writes still authenticate it. Fresh downloads and normal published builds
+retain verification. This shortcut is compiled with `staged-iso-testing` only.
+
+**September 19 update — late BitLocker suspension:** disk inspection and space
+selection remain available while protection is active. The final staging review
+lists affected protected volumes. After ISO checks, just before allocation and
+writing, the provider suspends those volumes without decrypting them. OS volume
+suspension uses DisableCount=0; data volumes omit that OS-only argument. A durable
+sign-in reminder is registered before each app-owned suspension. Resumption is
+an explicit user action after Windows starts through the final boot path; no
+automatic restoration or ownership of a pre-existing suspension is introduced.
+Normal published builds remain disabled; testing builds can exercise our side
+while upstream same-disk/suspended-BitLocker ISO support is pending.
+
+
+**September 17 implementation:** the Windows provider and desktop integration now
+implement allocation/shrink, verified file extraction, temporary EFI boot entry,
+one-time startup selection, persistent records and reviewed owned-partition
+cleanup. Normal releases remain disabled and not boot-qualified. Explicit local
+testing builds (`staged-iso-testing`, packaged with `-StagedIsoTesting`) enable
+real preparation, startup selection and cleanup while retaining source
+authentication and disk protections. They warn that the official ISO may not
+boot or permit same-disk installation, and are rejected by release collection.
+The home screen has no permanent checker: a read-only summary shows existing
+temporary installers, with reviewed removal and cleanup-before-retry actions.
+The official release
+allowlist is empty. See [current implementation details and qualification gates](../providers/staged-iso/README.md).
+Historical descriptions below of an unimplemented route are superseded by this
+update; the runtime/physical qualification requirements remain outstanding.
+
+**September 16 decision:** the user selected this route again, with no patched
+ISO distribution: keep no-USB installation disabled until an official ISO ships
+the required same-disk support from PR #187 and the staged flow is qualified.
+Retain the prepared-filesystem implementation for possible later support, but
+disable it in the consumer desktop protocol. The historical sequencing below is
+superseded by this decision. The independent
+[BitLocker preparation and follow-up](evidence/bitlocker-followup-2026-09-16.md)
+records app-owned suspension and asks before resuming protection. Legacy manual
+reminder records remain readable; the early decryption action is disabled.
+
 **Superseded sequencing:** later in the September 6 discussion, the user favored
 direct local construction/deployment again. Read the
 [current decision and BitLocker findings](direct-install-priority-2026-09-06.md).
@@ -65,8 +109,10 @@ Source inspection of the actual pinned 4.0.2 ISO found two material constraints:
 Further work:
 
 - Prove the exact UEFI boot route and ArchISO source discovery from the staging
-  filesystem. Decide between verified extraction and an ISO-file boot path;
-  copying an ISO file alone does not establish bootability. Do not assume a FAT
+  filesystem. The inspected PR #187 supports a directly mounted GPT source
+  partition, not a loopback ISO-file source. Prepare verified extraction onto
+  that dedicated partition and inspect the released implementation before
+  relying on it; copying an ISO file alone does not establish bootability. Do not assume a FAT
   volume can hold the complete ISO as one file, or that raw-writing a hybrid ISO
   inside a partition is equivalent to writing a whole USB disk.
 - Account for staging and destination as separate regions. The source cannot

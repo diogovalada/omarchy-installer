@@ -110,3 +110,13 @@ describe('single-screen native download flow', () => {
     expect(screen.queryByRole('button', {name:'Download replacement'})).not.toBeInTheDocument();
   });
 });
+it('labels testing reuse honestly in both full and compact views',async()=>{
+  await setState(state('complete',{image_path:'C:/fixture.iso',verification_skipped:true}));
+  const view=render(DownloadPanel);
+  expect(screen.getByRole('status')).toHaveTextContent('Verification skipped · testing');
+  expect(screen.queryByText('Verified',{exact:true})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Verify'})).not.toBeInTheDocument();
+  await view.rerender({compact:true});
+  expect(screen.getByRole('heading')).toHaveAccessibleName('Omarchy 3.4.1 · Verification skipped · testing');
+  expect(screen.getByRole('status')).not.toHaveTextContent('Verified');
+});

@@ -61,6 +61,10 @@ if (process.platform === 'win32') {
   const portable = one(portableParent, name => existsSync(join(portableParent, name, 'portable-record.json')));
   const recordPath = join(portable, 'portable-record.json');
   const record = JSON.parse(readFileSync(recordPath));
+  assert.equal(record.testingBuild, false, 'Testing executables must not be published as normal releases.');
+  const sourceExe = join(root, 'apps/desktop/src-tauri/target/release/omarchy-setup-desktop.exe');
+  assert.equal(sha256(readFileSync(sourceExe)), record.sourceApplicationSha256);
+  assert.equal(JSON.parse(execFileSync(sourceExe, ['--build-info'], { encoding: 'utf8' })).stagedIsoTesting, false);
   assert.equal(record.profile, 'release');
   assert.equal(record.launcher.extractionAndHashesVerified, true);
   assert.equal(record.launcher.stagedMediaFileWriteVerified, true);

@@ -8,7 +8,11 @@ export interface UsbInspection { eligible:boolean; reasons:string[]; freeBytes:n
 export interface SetupChoice { id: string; label: string; detail: string; sizeBytes: number; eligible: boolean; reasons: string[]; allocation:AllocationChoice|null; deletion:DeletionChoice|null; usb?:UsbInspection|null }
 export interface UsbReview { token:string; choiceId:string; mode:'erase'|'preserve'; label:string; detail:string; sizeBytes:number; fileName:string; replacesBootloader:boolean }
 export interface SetupSnapshot {
+  stagedTesting?:boolean;
+  stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
+  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;operationId?:string;status?:string;message?:string}|null;
   usbReview?:UsbReview|null;
+  bitLocker?:{message:string;reminderRegistered:boolean}|null;
   kind: 'usb' | 'direct' | null; status: string; stage: string; message: string;
   choices: SetupChoice[]; requirements: string[]; bytes: number; totalBytes: number;
   cancelAvailable: boolean; cancelRequested: boolean; error: string | null;
@@ -16,6 +20,10 @@ export interface SetupSnapshot {
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
+export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string }
+export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;label:string;maximumLinuxBytes:number;target:Record<string,unknown>;encryption?:StagedEncryption[] }
+export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
+export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
 let epoch = 0; let reading = false;
@@ -38,6 +46,8 @@ export const setup = { subscribe:state.subscribe, refresh,
   inspect:(kind:'usb'|'direct') => command('inspect_setup', {kind}),
   inspectUsb:(choiceId:string,elevated=false) => command('inspect_usb_choice',{choiceId,elevated}),
   prepare:(action:'firmware'|'runtime') => command('prepare_setup', {action}),
+  prepareBitLocker:(reminderOnly:boolean) => command('prepare_bitlocker', {reminderOnly}),
+  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null) => command('staged_iso',{action,selection,operationId}),
   reviewUsb:(choiceId:string,mode:'erase'|'preserve') => command('review_usb_setup',{choiceId,mode}),
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),

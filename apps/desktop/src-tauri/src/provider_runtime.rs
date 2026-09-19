@@ -375,6 +375,44 @@ fn operation_files<'a>(
     manifest: &'a RuntimeManifest,
     operation: &Destination,
 ) -> Result<Vec<&'a RuntimeFile>, String> {
+    if matches!(operation, Destination::StagedIso { .. }) {
+        let required = [
+            "staged-iso/Invoke-StagedIso.ps1",
+            "staged-iso/Staging.ps1",
+            "staged-iso/NativeStaged.cs",
+            "staged-iso/qualified-releases.json",
+            "windows-bitlocker/BitLockerSetup.ps1",
+            "direct-x86/NativeDisk.cs",
+            "direct-x86/NativeSource.cs",
+            "direct-x86/StoragePlan.ps1",
+            "direct-x86/BitLocker.ps1",
+            "usb-preserve/boot/BOOTX64.EFI",
+        ];
+        let mut files = Vec::new();
+        for path in required {
+            files.push(
+                manifest
+                    .files
+                    .iter()
+                    .find(|file| file.path == path)
+                    .ok_or_else(|| {
+                        format!("Staged installer dependency is not packaged: {path}")
+                    })?,
+            );
+        }
+        return Ok(files);
+    }
+    if matches!(operation, Destination::PrepareBitLocker { .. }) {
+        let files: Vec<_> = manifest
+            .files
+            .iter()
+            .filter(|file| file.path == "windows-bitlocker/BitLockerSetup.ps1")
+            .collect();
+        if files.len() != 1 {
+            return Err("Windows encryption preparation is not packaged".into());
+        }
+        return Ok(files);
+    }
     let direct = matches!(
         operation,
         Destination::InspectDirect
@@ -522,6 +560,14 @@ mod staging_tests {
             "image-builder-x86/runtime.tar",
             "image-builder-x86/product_builder.py",
             "usb-preserve/boot/BOOTX64.EFI",
+            "windows-bitlocker/BitLockerSetup.ps1",
+            "staged-iso/Invoke-StagedIso.ps1",
+            "staged-iso/Staging.ps1",
+            "staged-iso/NativeStaged.cs",
+            "staged-iso/qualified-releases.json",
+            "direct-x86/NativeSource.cs",
+            "direct-x86/StoragePlan.ps1",
+            "direct-x86/BitLocker.ps1",
         ];
         let files = paths
             .iter()
@@ -554,6 +600,54 @@ mod staging_tests {
     }
 
     #[test]
+    fn staged_installer_has_no_builder_or_docker_dependency() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manifest = fixture(directory.path());
+        manifest.direct_x86 = None;
+        let destination = Destination::StagedIso {
+            action: crate::setup_protocol::StagedAction::Cleanup,
+            selection: None,
+            operation_id: None,
+        };
+        let files = operation_files(&manifest, &destination).unwrap();
+        assert_eq!(files.len(), 10);
+        assert!(files
+            .iter()
+            .all(|file| !file.path.starts_with("image-builder-x86/")
+                && !file.path.ends_with("Invoke-DirectX86.ps1")));
+        manifest
+            .files
+            .retain(|file| file.path != "staged-iso/qualified-releases.json");
+        assert!(operation_files(&manifest, &destination).is_err());
+    }
+
+    #[test]
+    fn encryption_preparation_stages_only_its_authenticated_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manifest = fixture(directory.path());
+        manifest.direct_x86 = None; // Also available in the USB-only distribution.
+        let files = operation_files(
+            &manifest,
+            &Destination::PrepareBitLocker {
+                reminder_only: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "windows-bitlocker/BitLockerSetup.ps1");
+        manifest
+            .files
+            .retain(|file| !file.path.starts_with("windows-bitlocker/"));
+        assert!(operation_files(
+            &manifest,
+            &Destination::PrepareBitLocker {
+                reminder_only: true
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
     fn disk_check_skips_unneeded_payloads_and_reports_verified_bytes() {
         let source = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();
@@ -572,8 +666,8 @@ mod staging_tests {
             |bytes, total| updates.push((bytes, total)),
         )
         .unwrap();
-        assert_eq!(updates.first(), Some(&(0, 24)));
-        assert_eq!(updates.last(), Some(&(24, 24)));
+        assert_eq!(updates.first(), Some(&(0, 36)));
+        assert_eq!(updates.last(), Some(&(36, 36)));
         assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
         assert!(!output.path().join("media").exists());
         assert!(!output.path().join("usb-preserve").exists());

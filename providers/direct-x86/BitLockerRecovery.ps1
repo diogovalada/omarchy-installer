@@ -31,7 +31,7 @@ function Write-RecoveryState([string]$Path,$Value) {
     try {
         $file=New-Object IO.FileStream($temporary,[IO.FileMode]::CreateNew,[Security.AccessControl.FileSystemRights]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough,$acl)
         try { $file.Write($bytes,0,$bytes.Length); $file.Flush($true) } finally { $file.Dispose() }
-        [IO.File]::Replace($temporary,$Path,$null)
+        [IO.File]::Replace($temporary,$Path,[NullString]::Value)
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 function Recovery-Query($Volume,[string]$Method) {

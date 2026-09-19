@@ -23,7 +23,8 @@ for (const file of bundle.files) {
 }
 if (!seen.has('omarchy installer.exe')) throw new Error('Required application is absent.');
 if (bundle.distribution === 'usb-preview') {
-  if ([...seen].some(name => /^providers\/(direct-x86|image-builder-x86)\//.test(name))) throw new Error('USB preview contains a direct-install provider.');
+  const sharedDiskFiles = new Set(['nativedisk.cs', 'nativesource.cs', 'storageplan.ps1', 'bitlocker.ps1'].map(name => `providers/direct-x86/${name}`));
+  if ([...seen].some(name => /^providers\/(direct-x86|image-builder-x86)\//.test(name) && !sharedDiskFiles.has(name))) throw new Error('USB preview contains a direct-install provider.');
 } else if (bundle.distribution === 'development-full' || bundle.distribution === undefined) {
   if (!seen.has('providers/image-builder-x86/runtime.tar')) throw new Error('Required construction runtime is absent.');
 } else throw new Error('Unknown distribution profile.');

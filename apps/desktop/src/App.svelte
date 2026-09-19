@@ -5,6 +5,7 @@
   import DownloadPanel from './lib/DownloadPanel.svelte';
   import SetupPanel from './lib/SetupPanel.svelte';
   import AppleSetupPanel from './lib/AppleSetupPanel.svelte';
+  import StagedInstaller from './lib/StagedInstaller.svelte';
   import { appleSetup } from './lib/appleSetup';
   import { downloads } from './lib/downloads';
   import { setup, setupActive } from './lib/setup';
@@ -18,6 +19,8 @@
     (previous==='usb' ? usbButton : directButton)?.focus();
   }
   $: appleHost = $downloads.snapshot?.host_os === 'macos' && $downloads.snapshot?.host_architecture === 'aarch64';
+  $: testingDirect = downloads.native && $setup.snapshot?.stagedTesting === true && $downloads.snapshot?.host_os === 'windows' && $downloads.snapshot?.host_architecture === 'x86_64';
+  $: sourceReady = $downloads.snapshot?.status === 'complete' && !!$downloads.snapshot.image_path;
   $: if (!option && setupActive($setup.snapshot?.status)) option=$setup.snapshot?.kind ?? null;
   onMount(() => {
     void setup.refresh();
@@ -30,14 +33,17 @@
   <div class="setup-content">
     <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
     <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
-    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
+    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       <section class="next-actions" aria-label="Installation options">
         <button bind:this={usbButton} aria-describedby="usb-option-description" disabled={setupActive($setup.snapshot?.status) || $setup.pending} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>
-        <button bind:this={directButton} aria-describedby="direct-option-description" disabled><HardDriveDownload size={21}/><span>Install without USB</span></button>
+        <button bind:this={directButton} aria-describedby="direct-option-description" disabled={!testingDirect || setupActive($setup.snapshot?.status) || $setup.pending} onclick={(event) => { if (!event.currentTarget.disabled) option='direct'; }}><HardDriveDownload size={21}/><span>Install without USB</span></button>
         <p id="usb-option-description">Make an installer for an x86-64 PC.</p>
-        <p id="direct-option-description">In development</p>
+        <p id="direct-option-description">{testingDirect ? 'Experimental testing — real disk changes' : 'Awaiting official ISO support'}</p>
       </section>
       <p class="availability">{$downloads.snapshot?.status === 'complete' && $downloads.snapshot.image_path ? 'Your image is ready. Choose how to install Omarchy.' : 'Choose an option to check image and disk requirements.'}</p>
+    {/if}
+    {#if downloads.native && $downloads.snapshot?.host_os==='windows' && $downloads.snapshot?.host_architecture==='x86_64' && option!=='direct'}
+      <StagedInstaller recoveryOnly {sourceReady} prepareAgain={()=>{option='direct';}}/>
     {/if}
     <footer>{#if !downloads.native}Browser preview · downloads require the desktop app{:else if $downloads.error && !$downloads.snapshot}Desktop connection unavailable{:else}v0.1.0 · {$downloads.snapshot?.host_os ?? 'Connecting…'}{/if}</footer>
   </div>

@@ -162,6 +162,66 @@ pub fn direct_command(
     Ok(command)
 }
 
+pub fn staged_command(root: &Path, action: &str, request: &Path) -> Result<Command, String> {
+    if !["inspect", "plan", "stage", "status", "arm", "cleanup"].contains(&action) {
+        return Err("Unknown staged installation action".into());
+    }
+    let mut command = Command::new(system_powershell()?);
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(provider_runtime::checked_path(
+            root,
+            "staged-iso/Invoke-StagedIso.ps1",
+        )?)
+        .args(["-Action", action, "-RequestPath"])
+        .arg(request)
+        .current_dir(root);
+    if crate::direct_install_policy::STAGED_ISO_TESTING {
+        command.arg("-TestingBuild");
+    }
+    hide(&mut command);
+    Ok(command)
+}
+
+pub fn bitlocker_command(
+    root: &Path,
+    action: &str,
+    request: &Path,
+    desktop_pid: u32,
+) -> Result<Command, String> {
+    if !["inspect", "remind"].contains(&action) {
+        return Err("Unknown Windows encryption operation".into());
+    }
+    let mut command = Command::new(system_powershell()?);
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(provider_runtime::checked_path(
+            root,
+            "windows-bitlocker/BitLockerSetup.ps1",
+        )?)
+        .args(["-Action", action, "-RequestPath"])
+        .arg(request)
+        .arg("-DesktopProcessId")
+        .arg(desktop_pid.to_string())
+        .current_dir(root);
+    hide(&mut command);
+    Ok(command)
+}
+
 // Child code and native modules have already been copied and checked inside a
 // protected operation directory before this is used for privileged execution.
 pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result<(), String> {
@@ -181,6 +241,14 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
         let windows = system.parent().ok_or("Windows directory is unavailable")?;
         command
             .env("SystemRoot", windows)
+            .env(
+                "SystemDrive",
+                windows
+                    .components()
+                    .next()
+                    .ok_or("Windows drive is unavailable")?
+                    .as_os_str(),
+            )
             .env("windir", windows)
             .env("ComSpec", system.join("cmd.exe"));
         // Docker is invoked by its installed system path, not a user PATH entry.
@@ -188,6 +256,8 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
         let docker = program_files.join("Docker/Docker/resources/bin");
         command
             .env("ProgramFiles", &program_files)
+            .env("ProgramData", program_data()?)
+            .env("ALLUSERSPROFILE", program_data()?)
             .env("ProgramW6432", &program_files)
             .env("OS", "Windows_NT")
             .env(
@@ -233,6 +303,47 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
     }
     hide(command);
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn clean_powershell_environment_resolves_program_data() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut command = Command::new(system_powershell().unwrap());
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Environment]::GetFolderPath('CommonApplicationData')",
+        ]);
+        privileged_environment(&mut command, workspace.path()).unwrap();
+        let result = command.output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout)
+                .trim()
+                .to_lowercase(),
+            program_data().unwrap().to_string_lossy().to_lowercase()
+        );
+    }
+
+    #[test]
+    fn testing_switch_is_set_only_by_compiled_mode() {
+        let workspace = tempfile::tempdir().unwrap();
+        let command = staged_command(
+            workspace.path(),
+            "stage",
+            &workspace.path().join("request.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            command.get_args().any(|arg| arg == "-TestingBuild"),
+            crate::direct_install_policy::STAGED_ISO_TESTING
+        );
+    }
 }
 
 fn drain_diagnostics(mut pipe: impl Read) -> String {

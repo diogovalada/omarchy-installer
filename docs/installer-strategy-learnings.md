@@ -2,6 +2,15 @@
 
 Recorded: 2026-09-05 (Europe/Lisbon).
 
+For the subsequent discussion through September 16, see the
+[consolidated direct-install notes](direct-install-brainstorm-2026-09-12.md),
+including the same-disk upstream PR and Windows boot/BitLocker tradeoffs.
+
+For the September 18–19 discussion of Etcher/Node size, portable startup, native
+libraries and alternative USB engines, see the
+[USB engine and packaging options](usb-engine-options-2026-09-19.md).
+That record preserves alternatives and corrections; no replacement is selected.
+
 September 6 follow-up: [direct-install priority and staging findings](direct-install-priority-2026-09-06.md)
 records the latest preference for native deployment with deferred first-boot
 owner setup, stock same-disk/BitLocker restrictions, and the shared boot-recovery

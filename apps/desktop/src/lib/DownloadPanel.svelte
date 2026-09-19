@@ -13,13 +13,15 @@
   $: percent = snapshot?.total_bytes ? Math.min(100, snapshot.received_bytes / snapshot.total_bytes * 100) : 0;
   $: transfer = !!snapshot && ['preparing', 'downloading', 'verifying', 'saving'].includes(snapshot.status);
   $: indeterminate = !!snapshot && ['resolving', 'preparing', 'saving'].includes(snapshot.status);
-  $: statusText = complete ? 'Verified' : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: snapshot?.existing_image ? 'Verification cancelled' : 'Download paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
+  $: verificationSkipped = complete && snapshot?.verification_skipped === true;
+  $: readyLabel = verificationSkipped ? 'Verification skipped · testing' : 'Verified';
+  $: statusText = complete ? readyLabel : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: snapshot?.existing_image ? 'Verification cancelled' : 'Download paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
 
 <section class="download-panel" class:compact={compact && complete} aria-label="Omarchy image download">
   {#if compact && complete}
-    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · Verified`}><span role="status"><Check size={17}/>Omarchy {release?.version} · Verified</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
+    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · ${readyLabel}`}><span role="status" class:testing={verificationSkipped}>{#if !verificationSkipped}<Check size={17}/>{/if}Omarchy {release?.version} · {readyLabel}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
   {/if}
   {#if !compact || !complete || expanded}
   <div class="release">
@@ -28,8 +30,8 @@
   </div>
   <div class="download-body">
     <div class="destination"><FolderOpen size={17}/><div><span class="sr-only">Save to </span><span title={snapshot?.destination_directory}>{snapshot?.destination_directory ?? 'Downloads/Omarchy'}</span></div><button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Change</button></div>
-    <div class="progress-label"><span class:verified={complete} role="status" aria-live="polite">{#if complete}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
-    {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={complete}></progress>{/if}
+    <div class="progress-label"><span class:verified={complete && !verificationSkipped} role="status" aria-live="polite">{#if complete && !verificationSkipped}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
+    {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={complete && !verificationSkipped}></progress>{/if}
     {#if $downloads.error || (snapshot?.error && snapshot.status !== 'cancelled')}<p class="error" role="alert">{$downloads.error ?? snapshot?.error}</p>{/if}
     {#if snapshot?.replacement_available && !active}
       <p class="replacement-note">This file couldn't be verified. Download a fresh copy? The existing file will be replaced only after the new copy passes verification.</p>
@@ -45,6 +47,7 @@
 </section>
 
 <style>
+  .image-summary span.testing{color:var(--text-muted)}
   .replacement-note{font-size:11px;line-height:1.7;color:var(--text-muted);margin:0 0 18px}
   .download-panel{border:1px solid var(--border);border-radius:4px;background:var(--surface);overflow:hidden}
   .image-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px}.image-summary h1{font-size:12px}.image-summary span{display:flex;align-items:center;gap:9px;color:var(--success)}.compact .release{border-top:1px solid var(--border)}

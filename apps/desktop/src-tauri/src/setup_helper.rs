@@ -2,7 +2,7 @@ use crate::elevation;
 use crate::provider_process;
 use crate::provider_runtime;
 use crate::setup_protocol::{
-    read_frame, write_frame, Destination, DirectTarget, OperationRequest, SourceImage,
+    read_frame, write_frame, Destination, DirectTarget, OperationRequest, SourceImage, StagedAction,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -120,6 +120,7 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     });
     match execute(
         request,
+        parent,
         records_directory.as_deref(),
         source_verification
             .as_ref()
@@ -595,12 +596,14 @@ fn revalidate_usb(
 
 fn execute(
     request: OperationRequest,
+    desktop_pid: u32,
     records_directory: Option<&Path>,
     source_verification: Option<(&Value, u32)>,
     output: &Emitter,
     cancel: Arc<AtomicBool>,
     confirmations: &mpsc::Receiver<Value>,
 ) -> Result<Value, String> {
+    crate::direct_install_policy::check_destination(&request.destination)?;
     let manifest = provider_runtime::manifest()?;
     let runtime_source = provider_runtime::locate(&manifest)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -739,6 +742,231 @@ fn execute(
                 &json!({"operationId":id,"destination":request.destination,"receipt":receipt}),
             )?;
             return Ok(json!({"receipt":receipt,"receiptPath":receipt_path}));
+        }
+        if let Destination::StagedIso {
+            action,
+            selection,
+            operation_id,
+        } = &request.destination
+        {
+            let run = |name: &str, input: &Value| -> Result<Value, String> {
+                let path =
+                    write_request(&workspace, &format!("staged-{name}-request.json"), input)?;
+                let mut command = provider_process::staged_command(&runtime, name, &path)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                provider_process::run(command, None, Arc::clone(&cancel), None, false, |value| {
+                    provider_event(output, value)
+                })
+            };
+            if *action == StagedAction::Inspect {
+                if selection.is_some() || operation_id.is_some() {
+                    return Err("Inspection does not accept a destination".into());
+                }
+                return run(
+                    "inspect",
+                    &json!({"sourceSha256":request.source.sha256,"sourceLength":request.source.length}),
+                );
+            }
+            if *action == StagedAction::Stage {
+                if operation_id.is_some() {
+                    return Err("A new staging request cannot reuse an operation".into());
+                }
+                let choice = selection
+                    .as_ref()
+                    .ok_or("Review a staging allocation first")?;
+                if choice.disk_number > 4095
+                    || choice.disk_unique_id.is_empty()
+                    || choice.linux_bytes < 40 * 1024 * 1024 * 1024
+                    || choice.linux_bytes % 1048576 != 0
+                {
+                    return Err("Invalid staged installation allocation".into());
+                }
+                let source = prepare_source(
+                    &request.source,
+                    &workspace,
+                    output,
+                    &cancel,
+                    source_verification.map(|(binding, parent)| (binding, parent, confirmations)),
+                )?;
+                let mut input = json!({"sourceIsoPath":source.path,"sourceSha256":request.source.sha256,"sourceLength":request.source.length,
+                    "diskNumber":choice.disk_number,"diskUniqueId":choice.disk_unique_id,"linuxBytes":choice.linux_bytes});
+                match &choice.target {
+                    DirectTarget::Free { start_offset_bytes } => {
+                        input["targetKind"] = json!("free");
+                        input["startOffsetBytes"] = json!(start_offset_bytes);
+                    }
+                    DirectTarget::Shrink {
+                        partition_number,
+                        partition_guid,
+                    } => {
+                        input["targetKind"] = json!("shrink");
+                        input["shrinkPartitionNumber"] = json!(partition_number);
+                        input["shrinkPartitionGuid"] = json!(partition_guid);
+                    }
+                    DirectTarget::Delete { .. } => {
+                        return Err("Staging never deletes existing partitions".into())
+                    }
+                }
+                let planned = run("plan", &input)?;
+                let plan = &planned["plan"];
+                if plan["diskNumber"] != choice.disk_number
+                    || plan["diskUniqueId"] != choice.disk_unique_id
+                    || plan["linuxBytes"] != choice.linux_bytes
+                    || plan["sourceSha256"] != request.source.sha256
+                {
+                    return Err("The staging plan changed the requested allocation or ISO".into());
+                }
+                let shrink = if plan["shrink"].is_null() {
+                    "Use existing unallocated space.".to_owned()
+                } else {
+                    format!(
+                        "Shrink Windows partition {} from {:.2} to {:.2} GiB.",
+                        plan["shrink"]["partitionNumber"],
+                        plan["shrink"]["beforeSizeBytes"].as_u64().unwrap_or(0) as f64
+                            / 1073741824.0,
+                        plan["shrink"]["afterSizeBytes"].as_u64().unwrap_or(0) as f64
+                            / 1073741824.0
+                    )
+                };
+                let volumes = plan["bitLocker"]
+                    .as_array()
+                    .ok_or("Missing encryption review")?;
+                let active: Vec<&str> = volumes
+                    .iter()
+                    .filter(|volume| volume["protectionStatus"] == 1)
+                    .map(|volume| {
+                        volume["driveLetter"]
+                            .as_str()
+                            .filter(|letter| !letter.is_empty())
+                            .or_else(|| volume["volumeId"].as_str())
+                            .unwrap_or("unnamed volume")
+                    })
+                    .collect();
+                let encryption = if active.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\nSuspend BitLocker protection on {} without decrypting. Protection stays suspended until you resume it. At your next Windows sign-in, a reminder will ask you to resume after booting through your final boot menu; it will not resume automatically.", active.join(", "))
+                };
+                let summary = format!("Prepare the official installer on Disk {}?\n\n{}\nLeave {:.2} GiB unallocated for Linux and create two temporary installer partitions. Windows Boot Manager and the boot order are preserved.{}\n\nThis copies installer files and a temporary EFI loader; it does not install Linux. After staging, separately choose the next startup. In the official installer, select this disk and its free space, preserving Windows and the installer partitions.", choice.disk_number, shrink, choice.linux_bytes as f64 / 1073741824.0, encryption);
+                confirm(
+                    output,
+                    confirmations,
+                    &cancel,
+                    &format!(
+                        "{}{}",
+                        if crate::direct_install_policy::STAGED_ISO_TESTING {
+                            "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n"
+                        } else {
+                            ""
+                        },
+                        summary
+                    ),
+                    &json!({"kind":"staged_write","inspection":planned}),
+                )?;
+                cancelled(&cancel)?;
+                stage(
+                    output,
+                    "staging",
+                    "Preparing the installer partitions and verifying copied files…",
+                    false,
+                );
+                return run(
+                    "stage",
+                    &json!({"planPath":planned["planPath"],"planSha256":planned["planSha256"],"desktopProcessId":desktop_pid}),
+                );
+            }
+            if selection.is_some() {
+                return Err("An existing staged operation does not accept a new allocation".into());
+            }
+            if *action == StagedAction::Status {
+                if operation_id.is_some() {
+                    return Err("Status does not accept an operation ID".into());
+                }
+                return run("status", &json!({}));
+            }
+            let id = operation_id
+                .as_deref()
+                .ok_or("Choose a recorded staging operation")?;
+            uuid::Uuid::parse_str(id).map_err(|_| "Invalid staging operation ID")?;
+            let records = run("status", &json!({}))?;
+            let record = records["operations"]
+                .as_array()
+                .and_then(|items| items.iter().find(|record| record["operationId"] == id))
+                .ok_or("Recorded staging operation not found")?;
+            let (name, kind, summary) = if *action == StagedAction::Arm {
+                ("arm", "staged_arm", "Select the official installer for the next startup only? Restart Windows when ready. This does not restart now or change the normal firmware boot order.")
+            } else {
+                ("cleanup", "staged_cleanup", "Remove this temporary installer and all files on its two recorded partitions? Continue only after booting the installed Omarchy independently, or if you are abandoning this installation. Linux completion is not inferred. Windows and installed Linux partitions are preserved; reclaimed space stays unallocated.")
+            };
+            confirm(
+                output,
+                confirmations,
+                &cancel,
+                summary,
+                &json!({"kind":kind,"operation":record}),
+            )?;
+            cancelled(&cancel)?;
+            stage(
+                output,
+                "staged-maintenance",
+                "Updating the recorded installer…",
+                false,
+            );
+            return run(name, &json!({"operationId":id}));
+        }
+        if let Destination::PrepareBitLocker { reminder_only } = &request.destination {
+            if !reminder_only {
+                return Err("BitLocker suspension requires confirmed installer preparation".into());
+            }
+            let info_path = write_request(&workspace, "encryption-info.json", &json!({}))?;
+            let mut command =
+                provider_process::bitlocker_command(&runtime, "inspect", &info_path, desktop_pid)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            let info =
+                provider_process::run(command, None, Arc::clone(&cancel), None, false, |_| {})?;
+            let hash = info["sha256"]
+                .as_str()
+                .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+                .ok_or("Invalid Windows encryption inspection")?;
+            let facts = &info["facts"];
+            if facts["locked"] != 0 || facts["protection"].as_u64().is_none() {
+                return Err("Windows encryption status is unavailable".into());
+            }
+            if facts["protection"] != 0
+                || ![Some(0), Some(3), Some(5)].contains(&facts["conversion"].as_u64())
+            {
+                return Err("A manual reminder is available only when Windows is decrypted or being decrypted.".into());
+            }
+            let message = "You are requesting a reminder to restore Windows encryption. No encryption settings will change now. Closing the reminder defers it until your next Windows sign-in.";
+            confirm(
+                output,
+                confirmations,
+                &cancel,
+                message,
+                &json!({"kind":"bitlocker_reminder","inspection":info}),
+            )?;
+            let path = write_request(
+                &workspace,
+                "encryption-request.json",
+                &json!({"expectedSha256":hash}),
+            )?;
+            let mut command =
+                provider_process::bitlocker_command(&runtime, "remind", &path, desktop_pid)?;
+            provider_process::privileged_environment(&mut command, &workspace)?;
+            stage(
+                output,
+                "windows-encryption",
+                "Preparing the Windows encryption follow-up…",
+                false,
+            );
+            return provider_process::run(
+                command,
+                None,
+                Arc::clone(&cancel),
+                None,
+                false,
+                |value| provider_event(output, value),
+            );
         }
         if matches!(request.destination, Destination::PrepareFirmware) {
             let info_path = write_request(&workspace, "firmware-info.json", &json!({}))?;
@@ -966,6 +1194,8 @@ fn execute(
             | Destination::UsbPreserve { .. }
             | Destination::InspectDirect
             | Destination::PrepareFirmware
+            | Destination::PrepareBitLocker { .. }
+            | Destination::StagedIso { .. }
             | Destination::PrepareRuntime => return Err("Unexpected preparation state".into()),
             Destination::Usb { identity } => {
                 // The original source disk remains excluded throughout writing.
@@ -1342,6 +1572,7 @@ fn execute(
             Destination::InspectDirect
                 | Destination::InspectUsb { .. }
                 | Destination::PrepareRuntime
+                | Destination::PrepareBitLocker { .. }
         )
         && cleanup["complete"] == true
     {

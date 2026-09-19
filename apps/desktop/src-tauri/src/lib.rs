@@ -1,6 +1,7 @@
 //! Unprivileged desktop commands and a narrow, separately elevated helper.
 
 mod apple_setup;
+mod direct_install_policy;
 mod downloads;
 mod elevation;
 #[cfg(windows)]
@@ -57,6 +58,8 @@ pub fn run() {
             setup::inspect_setup,
             setup::inspect_usb_choice,
             setup::prepare_setup,
+            setup::prepare_bitlocker,
+            setup::staged_iso,
             setup::review_usb_setup,
             setup::dismiss_usb_review,
             setup::start_setup,

@@ -31,8 +31,10 @@ if (manifest.schema !== 1 || manifest.platform !== 'win32' || manifest.architect
 const distribution = process.env.OMARCHY_DISTRIBUTION ?? 'development-full';
 if (!['development-full', 'usb-preview'].includes(distribution)) throw new Error('Unknown distribution profile.');
 const usbPreview = distribution === 'usb-preview';
+const testingBuild = process.env.OMARCHY_STAGED_ISO_TESTING === '1';
 if (usbPreview) {
-  if (manifest.direct_x86 !== null || manifest.apple !== null || manifest.files.some(file => /^(direct-x86|image-builder-x86)\//.test(file.path))) throw new Error('USB preview contains a direct-install provider.');
+  const sharedDiskFiles = new Set(['NativeDisk.cs', 'NativeSource.cs', 'StoragePlan.ps1', 'BitLocker.ps1'].map(name => `direct-x86/${name}`));
+  if (manifest.direct_x86 !== null || manifest.apple !== null || manifest.files.some(file => /^(direct-x86|image-builder-x86)\//.test(file.path) && !sharedDiskFiles.has(file.path))) throw new Error('USB preview contains a direct-install provider.');
 } else if (!manifest.files.some(file => file.path === 'image-builder-x86/runtime.tar')) throw new Error('The full development package must include the construction runtime.');
 const outputParent = join(root, 'artifacts/windows-portable');
 mkdirSync(outputParent, { recursive: true });
@@ -89,6 +91,7 @@ recreates it. Interrupted or damaged generations are set aside within the cache.
 Launch through the portable executable so the cache is checked before use.
 
 Requires Windows x64 and Microsoft Edge WebView2 Runtime.
+${testingBuild ? 'EXPERIMENTAL TESTING BUILD: real no-USB disk operations are enabled. Official ISO boot and same-disk installation remain unqualified.' : ''}
 ${usbPreview ? 'Download and USB creation are included. Installation without USB is in development.' : 'Direct Omarchy installation also requires Docker Desktop with its Linux engine,\n85 GiB of working storage after ISO staging and 10 GiB of free memory.'}
 The application still stores downloads, cache and operation/recovery records
 in their normal locations and requests administrator access for privileged work.
@@ -103,7 +106,7 @@ This is an unsigned, unofficial preview. Complete installation and boot/recovery
 qualification remain pending. The portable packaging does not change those limits.
 `, 'utf8'));
 put('verify-bundle.mjs', readFileSync(join(root, 'scripts/verify-portable-bundle.mjs')));
-put('bundle-files.json', Buffer.from(JSON.stringify({ schemaVersion: 1, distribution, files }, null, 2) + '\n'));
+put('bundle-files.json', Buffer.from(JSON.stringify({ schemaVersion: 1, distribution, testingBuild, files }, null, 2) + '\n'));
 // Compare copied bytes as well as their authenticated sources.
 for (const file of files) if (hash(readFileSync(join(portable, file.path))) !== file.sha256) throw new Error(`Portable copy mismatch: ${file.path}`);
 const recordPath = join(outputDirectory, 'portable-record.json');
@@ -114,5 +117,5 @@ const cacheHash = hash(cacheManifest);
 const cacheId = cacheHash.slice(0, 20); // Short paths; the full SHA-256 is always verified.
 const cacheManifestPath = join(outputDirectory, 'cache-manifest.json');
 writeFileSync(cacheManifestPath, cacheManifest, { flag: 'wx' });
-writeFileSync(recordPath, JSON.stringify({ schemaVersion: 1, model: 'gpt-6-astra', createdAt: new Date().toISOString(), format: 'portable-executable', profile, signed: false, installationQualified: false, windowsGuiSubsystemVerified: true, sourceApplicationSha256: applicationSha, providerManifestSha256: hash(manifestBytes), providerFilesVerified: manifest.files.length, cache: { id: cacheId, manifestSha256: cacheHash, payloadBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0) }, files }, null, 2) + '\n', { flag: 'wx' });
-console.log(JSON.stringify({ outputDirectory, payloadDirectory: portable, recordPath, cacheManifestPath, cacheHash, cacheId, executablePath: join(outputDirectory, 'Omarchy-Installer-0.1.0-x64-portable.exe'), nodeRelative: manifest.media.executable.replaceAll('/', '\\') }));
+writeFileSync(recordPath, JSON.stringify({ schemaVersion: 1, model: 'gpt-6-astra', createdAt: new Date().toISOString(), format: 'portable-executable', profile, testingBuild, signed: false, installationQualified: false, windowsGuiSubsystemVerified: true, sourceApplicationSha256: applicationSha, providerManifestSha256: hash(manifestBytes), providerFilesVerified: manifest.files.length, cache: { id: cacheId, manifestSha256: cacheHash, payloadBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0) }, files }, null, 2) + '\n', { flag: 'wx' });
+console.log(JSON.stringify({ outputDirectory, payloadDirectory: portable, recordPath, cacheManifestPath, cacheHash, cacheId, executablePath: join(outputDirectory, testingBuild ? 'Omarchy-Installer-0.1.0-x64-testing.exe' : 'Omarchy-Installer-0.1.0-x64-portable.exe'), nodeRelative: manifest.media.executable.replaceAll('/', '\\') }));

@@ -11,7 +11,7 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace Omarchy.DirectX86 {
-    public static class NativeDisk {
+    public static partial class NativeDisk {
         const uint READ = 0x80000000, WRITE = 0x40000000;
         const uint GET_LAYOUT = 0x00070050, SET_LAYOUT = 0x0007C054;
         const uint UPDATE_PROPERTIES = 0x00070140;

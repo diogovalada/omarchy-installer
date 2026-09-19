@@ -2,6 +2,7 @@
 param(
     [switch]$UnsignedPreview,
     [switch]$DebugBuild,
+    [switch]$StagedIsoTesting,
     [switch]$ReuseVerifiedBuild,
     [string]$VerifiedPortableRecord
 )
@@ -9,6 +10,8 @@ $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ($env:OS -ne 'Windows_NT') { throw 'Windows packaging requires Windows.' }
 if (-not $UnsignedPreview) { throw 'Portable packaging currently produces unsigned previews. Explicitly pass -UnsignedPreview.' }
+if ($StagedIsoTesting -and $env:CI -eq 'true') { throw 'Experimental staged builds must not be produced by release CI.' }
+$env:OMARCHY_STAGED_ISO_TESTING=if ($StagedIsoTesting) { '1' } else { '0' }
 if ($VerifiedPortableRecord -and -not $ReuseVerifiedBuild) { throw 'A prior portable record is only used with -ReuseVerifiedBuild.' }
 $buildProfile=if ($DebugBuild) { 'debug' } else { 'release' }
 $nsisCompiler=Join-Path $env:LOCALAPPDATA 'tauri/NSIS/makensis.exe'
@@ -23,10 +26,14 @@ if (-not $ReuseVerifiedBuild) {
         $arguments += @('--config',(Join-Path $root 'apps/desktop/src-tauri/tauri.windows-package.conf.json'))
     }
     if ($DebugBuild) { $arguments += '--debug' }
+    if ($StagedIsoTesting) { $arguments += @('--features','staged-iso-testing') }
     & pnpm @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }
 }
 if (-not (Test-Path -LiteralPath $nsisCompiler)) { throw 'The packaging machine requires the verified NSIS compiler supplied by the Tauri toolchain.' }
+$appExe=Join-Path $root "apps/desktop/src-tauri/target/$buildProfile/omarchy-setup-desktop.exe"
+$buildInfo=(& $appExe --build-info | Out-String) | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $null -eq $buildInfo.stagedIsoTesting -or $buildInfo.stagedIsoTesting -ne [bool]$StagedIsoTesting) { throw 'Executable testing mode does not match the requested package. Rebuild it explicitly.' }
 & cargo build --manifest-path (Join-Path $PSScriptRoot 'portable-cache-helper/Cargo.toml') --release --locked
 if ($LASTEXITCODE -ne 0) { throw 'Portable cache verifier build failed.' }
 $cacheHelper=Join-Path $PSScriptRoot 'portable-cache-helper/target/release/omarchy-portable-cache.exe'

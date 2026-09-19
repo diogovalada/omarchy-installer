@@ -1,5 +1,11 @@
 # BitLocker and the direct-install OS menu: specification findings
 
+**September 16 discussion:** the [consolidated notes](../direct-install-brainstorm-2026-09-12.md#which-measurements-affect-bitlocker)
+now cover PCR meanings, official Omarchy's direct Windows entry, the proposed
+setup-time Windows return for chainloading, and why a restart entry is only a
+conditional fallback. The findings below describe the implemented restart design;
+they do not establish same-session restoration for a newly inserted direct menu.
+
 **Implementation follow-up:** the [Windows completion pass](windows-direct-readiness-2026-09-06.md)
 adds protector/PCR inspection, current firmware/TCG boot-route validation and a
 separate Secure Boot preparation action. The research below records the

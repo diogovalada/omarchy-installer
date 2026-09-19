@@ -43,6 +43,7 @@ pub struct Snapshot {
     total_bytes: u64,
     image_path: Option<PathBuf>,
     image_locked: bool,
+    verification_skipped: bool,
     error: Option<String>,
     cancel_requested: bool,
     destination_directory: PathBuf,
@@ -171,6 +172,7 @@ impl Downloads {
         let inner = self.inner.lock().ok()?;
         let release = inner.snapshot.release.as_ref()?;
         if inner.snapshot.status != Status::Complete
+            || inner.snapshot.verification_skipped
             || inner.snapshot.image_path.as_ref() != Some(&source.path)
             || release.file_name() != source.file_name
             || release.length() != source.length
@@ -184,6 +186,7 @@ impl Downloads {
 
     fn complete(&self, image: VerifiedImage, existing: bool) {
         if let Ok(mut inner) = self.inner.lock() {
+            inner.snapshot.verification_skipped = false;
             if inner.cancel.load(Ordering::Relaxed) {
                 inner.snapshot.status = Status::Cancelled;
                 inner.snapshot.error = Some("Download cancelled".into());
@@ -235,6 +238,7 @@ impl Downloads {
                     total_bytes: 0,
                     image_path: None,
                     image_locked: false,
+                    verification_skipped: false,
                     error: None,
                     cancel_requested: false,
                     destination_directory: destination.clone(),
@@ -261,6 +265,51 @@ impl Downloads {
             .clone())
     }
 
+    fn reuse_testing_image(&self) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        let Some(release) = inner.snapshot.release.as_ref() else {
+            return false;
+        };
+        let (name, length) = (release.file_name().to_owned(), release.length());
+        Self::use_testing_file(&mut inner, &name, length)
+    }
+
+    // Only the explicitly compiled testing executable can skip the startup
+    // read. This is NOT a verified lease: the write helper still authenticates it.
+    fn use_testing_file(inner: &mut Inner, name: &str, length: u64) -> bool {
+        if !cfg!(feature = "staged-iso-testing") || inner.snapshot.status != Status::Ready {
+            return false;
+        }
+        let Ok(path) = expected_image_path(&inner.snapshot.destination_directory, name) else {
+            return false;
+        };
+        let Ok(file) = ReplacementTarget::inspect(&path) else {
+            return false;
+        };
+        if file.length != length {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            let Ok(guard) = crate::iso_source::HeldIso::open(&path, length) else {
+                return false;
+            };
+            inner.verified_iso = Some(Arc::new(guard));
+            inner.snapshot.image_locked = true;
+        }
+        inner.snapshot.verification_skipped = true;
+        inner.snapshot.status = Status::Complete;
+        inner.snapshot.image_path = Some(path);
+        inner.snapshot.existing_image = true;
+        inner.snapshot.received_bytes = length;
+        inner.snapshot.error = None;
+        inner.snapshot.replacement_available = false;
+        inner.replacement = None;
+        true
+    }
+
     fn update(&self, f: impl FnOnce(&mut Snapshot)) {
         if let Ok(mut inner) = self.inner.lock() {
             f(&mut inner.snapshot);
@@ -274,6 +323,7 @@ impl Downloads {
                 inner.verified_iso = None;
             }
             inner.snapshot.image_locked = false;
+            inner.snapshot.verification_skipped = false;
             inner.snapshot.status = if cancelled {
                 Status::Cancelled
             } else {
@@ -299,6 +349,7 @@ impl Downloads {
             inner.verified_iso = None;
         }
         inner.snapshot.image_locked = false;
+        inner.snapshot.verification_skipped = false;
         inner.snapshot.cancel_requested = false;
         inner.snapshot.error = None;
         inner.snapshot.release = None;
@@ -330,6 +381,7 @@ impl Downloads {
                 inner.verified_iso = None;
             }
             inner.snapshot.image_locked = false;
+            inner.snapshot.verification_skipped = false;
             inner.snapshot.destination_directory = path;
             inner.snapshot.image_path = None;
             inner.snapshot.error = None;
@@ -342,7 +394,9 @@ impl Downloads {
             };
         }
         detect_existing(&mut inner.snapshot);
-        Ok(inner.snapshot.clone())
+        drop(inner);
+        self.reuse_testing_image();
+        self.snapshot()
     }
 
     fn begin_transfer(&self, replace: bool) -> Result<Transfer, String> {
@@ -381,6 +435,7 @@ impl Downloads {
             inner.verified_iso = None;
         }
         inner.snapshot.image_locked = false;
+        inner.snapshot.verification_skipped = false;
         inner.snapshot.status = Status::Preparing;
         inner.snapshot.replacement_available = false;
         if replace {
@@ -454,6 +509,7 @@ pub async fn resolve_download(downloads: State<'_, Downloads>) -> Result<Snapsho
         Ok(Err(error)) => controller.finish_error(error.to_string(), false),
         Err(error) => controller.finish_error(format!("Release lookup failed: {error}"), false),
     }
+    controller.reuse_testing_image();
     controller.snapshot()
 }
 
@@ -468,6 +524,9 @@ pub fn replace_download(downloads: State<'_, Downloads>) -> Result<Snapshot, Str
 }
 
 fn start_transfer(downloads: &Downloads, replace: bool) -> Result<Snapshot, String> {
+    if !replace && downloads.reuse_testing_image() {
+        return downloads.snapshot();
+    }
     let Transfer {
         release,
         cancel,
@@ -748,6 +807,50 @@ fn hash_file(path: &Path, length: u64, expected: &str, cancel: &AtomicBool) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn testing_restart_reuses_existing_file_without_claiming_verification() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("image.iso");
+        // Deliberately not a valid signed image: the testing shortcut only checks
+        // the expected filename, size and ordinary-file constraints.
+        fs::write(&path, b"image").unwrap();
+        for _ in 0..2 {
+            let controller = Downloads::new(temp.path().join("cache"), temp.path().to_path_buf());
+            let mut inner = controller.inner.lock().unwrap();
+            inner.snapshot.status = Status::Ready;
+            let reused = Downloads::use_testing_file(&mut inner, "image.iso", 5);
+            assert_eq!(reused, cfg!(feature = "staged-iso-testing"));
+            assert_eq!(inner.snapshot.verification_skipped, reused);
+            assert_eq!(
+                inner.snapshot.status,
+                if reused {
+                    Status::Complete
+                } else {
+                    Status::Ready
+                }
+            );
+            assert_eq!(inner.snapshot.image_path.as_ref(), reused.then_some(&path));
+            drop(inner);
+            controller.begin_resolution().unwrap();
+            assert!(!controller.snapshot().unwrap().verification_skipped);
+        }
+    }
+
+    #[test]
+    fn testing_reuse_rejects_wrong_size_missing_files_and_active_transfers() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("image.iso"), b"partial").unwrap();
+        let controller = Downloads::new(temp.path().join("cache"), temp.path().to_path_buf());
+        let mut inner = controller.inner.lock().unwrap();
+        inner.snapshot.status = Status::Ready;
+        assert!(!Downloads::use_testing_file(&mut inner, "image.iso", 100));
+        assert!(!Downloads::use_testing_file(&mut inner, "missing.iso", 7));
+        assert!(!Downloads::use_testing_file(&mut inner, "../image.iso", 7));
+        inner.snapshot.status = Status::Downloading;
+        assert!(!Downloads::use_testing_file(&mut inner, "image.iso", 7));
+        assert!(!inner.snapshot.verification_skipped);
+    }
 
     #[test]
     fn replacement_requires_wrong_bytes_and_never_follows_links_or_cancellation() {

@@ -157,6 +157,9 @@ jobs:
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
       - name: Test native download state and export
         run: pnpm desktop:test:native
+      - name: Test explicit Windows staged-install testing mode
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib --locked --features staged-iso-testing
       - name: Test Windows disk inspection and portable verification
         if: runner.os == 'Windows'
         shell: powershell
@@ -165,6 +168,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Portable staging tests failed.' }
           & ./testkit/windows-direct/Test-StoragePlan.ps1
           & ./testkit/windows-direct/Test-RuntimeDistribution.ps1
+          # The existing storage test loads a synthetic NativeDisk class.
+          # Isolate the real native-type tests from that process-wide fixture.
+          foreach ($test in @('Test-BitLockerFollowup', 'Test-StagedNative', 'Test-StagedIso')) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File "./testkit/windows-direct/$test.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$test failed." }
+          }
           cargo test --manifest-path scripts/portable-cache-helper/Cargo.toml --locked
           if ($LASTEXITCODE -ne 0) { throw 'Portable verifier tests failed.' }
 

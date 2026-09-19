@@ -1,6 +1,13 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--build-info") {
+        println!(
+            "{}",
+            serde_json::json!({"stagedIsoTesting": cfg!(feature = "staged-iso-testing")})
+        );
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("--setup-helper") {
         let result = if args.len() == 4 {
             args[3]
