@@ -608,6 +608,7 @@ mod staging_tests {
             action: crate::setup_protocol::StagedAction::Cleanup,
             selection: None,
             operation_id: None,
+            resize: None,
         };
         let files = operation_files(&manifest, &destination).unwrap();
         assert_eq!(files.len(), 10);

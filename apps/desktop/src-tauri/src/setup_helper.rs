@@ -612,7 +612,12 @@ fn execute(
         let runtime = elevation::protected_directory(Some(&workspace), "providers")?;
         let preparing = if matches!(
             request.destination,
-            Destination::InspectDirect | Destination::InspectUsb { .. }
+            Destination::InspectDirect
+                | Destination::InspectUsb { .. }
+                | Destination::StagedIso {
+                    action: StagedAction::Inspect,
+                    ..
+                }
         ) {
             "Preparing the disk check…"
         } else {
@@ -747,6 +752,7 @@ fn execute(
             action,
             selection,
             operation_id,
+            resize,
         } = &request.destination
         {
             let run = |name: &str, input: &Value| -> Result<Value, String> {
@@ -764,8 +770,11 @@ fn execute(
                 }
                 return run(
                     "inspect",
-                    &json!({"sourceSha256":request.source.sha256,"sourceLength":request.source.length}),
+                    &json!({"sourceSha256":request.source.sha256,"sourceLength":request.source.length,"resize":resize}),
                 );
+            }
+            if resize.is_some() {
+                return Err("Resize analysis is only accepted during inspection".into());
             }
             if *action == StagedAction::Stage {
                 if operation_id.is_some() {
@@ -774,11 +783,7 @@ fn execute(
                 let choice = selection
                     .as_ref()
                     .ok_or("Review a staging allocation first")?;
-                if choice.disk_number > 4095
-                    || choice.disk_unique_id.is_empty()
-                    || choice.linux_bytes < 40 * 1024 * 1024 * 1024
-                    || choice.linux_bytes % 1048576 != 0
-                {
+                if choice.disk_number > 4095 || choice.disk_unique_id.is_empty() {
                     return Err("Invalid staged installation allocation".into());
                 }
                 let source = prepare_source(
@@ -789,7 +794,7 @@ fn execute(
                     source_verification.map(|(binding, parent)| (binding, parent, confirmations)),
                 )?;
                 let mut input = json!({"sourceIsoPath":source.path,"sourceSha256":request.source.sha256,"sourceLength":request.source.length,
-                    "diskNumber":choice.disk_number,"diskUniqueId":choice.disk_unique_id,"linuxBytes":choice.linux_bytes});
+                    "diskNumber":choice.disk_number,"diskUniqueId":choice.disk_unique_id});
                 match &choice.target {
                     DirectTarget::Free { start_offset_bytes } => {
                         input["targetKind"] = json!("free");
@@ -811,7 +816,7 @@ fn execute(
                 let plan = &planned["plan"];
                 if plan["diskNumber"] != choice.disk_number
                     || plan["diskUniqueId"] != choice.disk_unique_id
-                    || plan["linuxBytes"] != choice.linux_bytes
+                    || plan["linuxBytes"] != 0
                     || plan["sourceSha256"] != request.source.sha256
                 {
                     return Err("The staging plan changed the requested allocation or ISO".into());
@@ -847,7 +852,21 @@ fn execute(
                 } else {
                     format!("\n\nSuspend BitLocker protection on {} without decrypting. Protection stays suspended until you resume it. At your next Windows sign-in, a reminder will ask you to resume after booting through your final boot menu; it will not resume automatically.", active.join(", "))
                 };
-                let summary = format!("Prepare the official installer on Disk {}?\n\n{}\nLeave {:.2} GiB unallocated for Linux and create two temporary installer partitions. Windows Boot Manager and the boot order are preserved.{}\n\nThis copies installer files and a temporary EFI loader; it does not install Linux. After staging, separately choose the next startup. In the official installer, select this disk and its free space, preserving Windows and the installer partitions.", choice.disk_number, shrink, choice.linux_bytes as f64 / 1073741824.0, encryption);
+                let largest = plan["largestFreeAfterStagingBytes"]
+                    .as_u64()
+                    .ok_or("Missing free-space estimate after staging")?;
+                let required = plan["release"]["minimumLinuxBytes"]
+                    .as_u64()
+                    .ok_or("Missing official installation minimum")?;
+                let space_note = if largest < required {
+                    format!("After staging, the largest unallocated region is {:.1} GiB. The official installer needs at least {:.0} GiB. A future ISO with same-disk support can free more space after boot by deleting an unneeded partition.", largest as f64 / 1073741824.0, required as f64 / 1073741824.0)
+                } else {
+                    format!(
+                        "After staging, the largest unallocated region is {:.1} GiB.",
+                        largest as f64 / 1073741824.0
+                    )
+                };
+                let summary = format!("Prepare the official installer on Disk {}?\n\n{}\nCreate two temporary installer partitions. Windows Boot Manager and the boot order are preserved. {}{}\n\nThis does not install Linux. After staging, choose the next startup. In the booted installer, prepare space for Omarchy while keeping the temporary installer partitions until installation is complete.", choice.disk_number, shrink, space_note, encryption);
                 confirm(
                     output,
                     confirmations,

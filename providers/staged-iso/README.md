@@ -40,11 +40,12 @@ warn that booting and same-disk installation may fail in the official ISO.
    x64 UEFI and Secure Boot off. Inspection does not require BitLocker suspension.
    Planning accepts unlocked, fully encrypted or decrypted volumes; incomplete
    conversion and unknown status block preparation.
-2. Reserve the selected Linux region, followed by a 512 MiB FAT32 EFI partition
-   and an NTFS source partition sized to the ISO plus 1 GiB. The Linux region
-   remains unallocated. The inspected official configurator chooses the largest
-   gap, so planning and boot handoff require our exact aligned region to be the
-   unique largest gap, with a margin for GPT boundary accounting.
+2. Allocate only a 512 MiB FAT32 EFI partition and an NTFS source partition
+   sized to the ISO plus 1 GiB. Windows does not reserve or create Omarchy's
+   destination. Inspection shows the largest unallocated region that will remain
+   after staging. If it is below the official installer's 32 GiB minimum, the
+   user sees a warning and can make room in the booted installer by deleting an
+   unneeded partition, once upstream same-disk editor support is available.
 3. Hold the source against replacement, hash it against the qualified release,
    mount it read-only and inventory its files. Reject unsafe paths, missing boot
    files and an extraction that exceeds capacity before allocating partitions.
@@ -60,7 +61,7 @@ warn that booting and same-disk installation may fail in the official ISO.
    `archisodevice=/dev/disk/by-partuuid/<source GUID>` and `copytoram=n`.
    The live source is a directly mounted partition, not a loopback ISO.
 5. Register a temporary `Boot####` entry without changing `BootOrder`. A separate
-   user confirmation revalidates the files, region, encryption and firmware
+   user confirmation revalidates the files, owned partitions, encryption and firmware
    target, then sets `BootNext`. The app does not reboot automatically. Restart
    Windows to enter the official interactive installer, which owns Linux setup,
    its encryption and its permanent boot menu.
@@ -130,7 +131,7 @@ PR or a higher version number alone is insufficient. Each catalog entry needs:
   "sizeBytes": 0,
   "kernelPath": "arch/boot/x86_64/<qualified kernel>",
   "initrdPath": "arch/boot/x86_64/<qualified initramfs>",
-  "minimumLinuxBytes": 42949672960,
+  "minimumLinuxBytes": 34359738368,
   "sourceProtection": "direct-gpt-partition",
   "ntfsSource": true,
   "bootQualified": true

@@ -71,7 +71,8 @@ mod tests {
                 check_destination(&Destination::StagedIso {
                     action,
                     selection: None,
-                    operation_id: None
+                    operation_id: None,
+                    resize: None,
                 })
                 .is_ok(),
                 STAGED_ISO_TESTING
@@ -81,7 +82,8 @@ mod tests {
             assert!(check_destination(&Destination::StagedIso {
                 action,
                 selection: None,
-                operation_id: None
+                operation_id: None,
+                resize: None,
             })
             .is_ok());
         }

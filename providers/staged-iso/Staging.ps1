@@ -8,11 +8,11 @@ function Get-StagingRelease([string]$Hash,[long]$Length) {
         # Only the separately compiled testing helper supplies this switch.
         # The helper still authenticates the downloaded official ISO; staging
         # rehashes it and discovers its unmodified boot files before allocation.
-        return [pscustomobject]@{sha256=$Hash;sizeBytes=$Length;minimumLinuxBytes=[long]40GB;kernelPath='';initrdPath='';bootQualified=$false;sourceProtection='unqualified';ntfsSource=$false}
+        return [pscustomobject]@{sha256=$Hash;sizeBytes=$Length;minimumLinuxBytes=[long]32GB;kernelPath='';initrdPath='';bootQualified=$false;sourceProtection='unqualified';ntfsSource=$false}
     }
     if ($found.Count -ne 1) { throw 'No released official ISO has been qualified for staging. Installation without USB remains disabled.' }
     $release=$found[0]
-    if ($release.sourceProtection -cne 'direct-gpt-partition' -or $release.ntfsSource -ne $true -or $release.bootQualified -ne $true -or $release.minimumLinuxBytes -lt 40GB) { throw 'The official ISO lacks the required staged boot qualification.' }
+    if ($release.sourceProtection -cne 'direct-gpt-partition' -or $release.ntfsSource -ne $true -or $release.bootQualified -ne $true -or $release.minimumLinuxBytes -lt 32GB) { throw 'The official ISO lacks the required staged boot qualification.' }
     foreach ($path in @($release.kernelPath,$release.initrdPath)) { Assert-StagingRelativePath $path }
     if ($release.kernelPath -notmatch '^arch/boot/x86_64/[a-zA-Z0-9._-]+$' -or $release.initrdPath -notmatch '^arch/boot/x86_64/[a-zA-Z0-9._-]+$') { throw 'Unsupported official ISO boot files.' }
     return $release
@@ -67,8 +67,17 @@ function Assert-StagingFree($Disk,[long]$Start,[long]$Size) {
         if ($Start -lt [long]$p.Offset+[long]$p.Size -and [long]$p.Offset -lt $Start+$Size) { throw 'Staging or installation space overlaps an existing partition.' }
     }
 }
-function Get-StagingChoices($Release) {
-    $choices=@(); $blocked=@(); $overhead=512MB+(Align-Up ([long]$Release.sizeBytes+1GB))
+function Get-StagingChoices($Release,$Resize=$null) {
+    $choices=@(); $blocked=@(); $disks=@(); $overhead=512MB+(Align-Up ([long]$Release.sizeBytes+1GB))
+    $script:minimumBytes=[long]$overhead
+    if ($null -ne $Resize) {
+        Assert-Fields $Resize @('diskNumber','diskUniqueId','partitionNumber','partitionGuid') @('diskNumber','diskUniqueId','partitionNumber','partitionGuid')
+        if ($Resize.diskNumber -lt 0 -or $Resize.diskNumber -gt 4095 -or -not $Resize.diskUniqueId -or $Resize.partitionNumber -le 0) { throw 'Invalid resize inspection target.' }
+        $resizeDisk=Get-StagingDisk $Resize.diskNumber $Resize.diskUniqueId
+        $matches=@(Get-InspectedPartitions $resizeDisk | Where-Object { $_.PartitionNumber -eq $Resize.partitionNumber -and [guid]$_.Guid -eq [guid]$Resize.partitionGuid })
+        if ($matches.Count -ne 1) { throw 'The partition changed. Refresh disks before checking resize options.' }
+    }
+    Emit 'progress' 'inspecting' @{message='Reading disks and Windows encryption status...'}
     $encryptionSnapshot=Get-BitLockerSnapshot -ForStaging
     foreach ($disk in @(Get-Disk)) {
         $encryption=@()
@@ -84,50 +93,129 @@ function Get-StagingChoices($Release) {
                       protectionStatus=[int]$_.protectionStatus;lockStatus=[int]$_.lockStatus}
                 })
             }
-            $diskChoices=@()
+            Emit 'progress' 'inspecting' @{message=('Reading partitions on Disk '+$disk.Number+'...')}
+            $diskChoices=@(); $regions=@(); $unallocated=[long]0; $largest=[long]0
             $parts=@(Get-InspectedPartitions $disk | Sort-Object Offset); $cursor=[long]1MB
             foreach ($p in @($parts)+@([pscustomobject]@{Offset=(Align-Down ([long]$disk.Size-1MB));Size=0;GptType=''})) {
-                $available=(Align-Down ([long]$p.Offset))-$cursor-$overhead
-                if ($available -ge $Release.minimumLinuxBytes) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label="Unallocated space";maximumLinuxBytes=$available;target=@{target_kind='free';start_offset_bytes=$cursor}} }
-                $cursor=Align-Up ([long]$p.Offset+[long]$p.Size)
-                if ([string]$p.GptType -ieq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}') {
-                    $candidate=Get-ShrinkCandidate $p
-                    $available=$candidate.maximumAllocationBytes-$overhead
-                    if ($candidate.eligible -and $available -ge $Release.minimumLinuxBytes) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label="Shrink partition $($p.PartitionNumber)";maximumLinuxBytes=$available;target=@{target_kind='shrink';partition_number=[int]$p.PartitionNumber;partition_guid=[string]$p.Guid}} }
+                $gap=[Math]::Max([long]0,(Align-Down ([long]$p.Offset))-$cursor)
+                $available=$gap-$overhead
+                if ($gap -gt 0) {
+                    $regions+=@{kind='free';offsetBytes=$cursor;sizeBytes=$gap;label='Unallocated space'}
+                    $unallocated+=$gap; $largest=[Math]::Max($largest,$gap)
                 }
+                if ($available -ge 0) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label=('Unallocated space ('+[Math]::Round($gap/1GB,1)+' GiB)');target=@{target_kind='free';start_offset_bytes=$cursor}} }
+                $cursor=Align-Up ([long]$p.Offset+[long]$p.Size)
+                if ($p.Size -eq 0) { continue }
+                $region=@{kind='partition';partitionNumber=[int]$p.PartitionNumber;partitionGuid=[string]$p.Guid;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size;label=('Partition '+$p.PartitionNumber);fileSystem='';freeBytes=$null;resizeState='unavailable';resizeReason='System or unsupported partition; kept unchanged.';maximumReleaseBytes=$null;reserveBytes=$null}
+                switch ([string]$p.GptType) {
+                    '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' { $region.label='EFI system' }
+                    '{e3c9e316-0b5c-4db8-817d-f92df00215ae}' { $region.label='Microsoft reserved' }
+                    '{de94bba4-06d1-4d40-a16a-bfd50179d6ac}' { $region.label='Windows recovery' }
+                }
+                if ([string]$p.GptType -ieq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}') {
+                    try {
+                        $volumes=@($p | Get-Volume -ErrorAction Stop)
+                        if ($volumes.Count -ne 1) { throw 'Filesystem information is unavailable.' }
+                        $v=$volumes[0]; $region.fileSystem=[string]$v.FileSystemType
+                        if ($region.fileSystem -ne 'NTFS' -and $v.PSObject.Properties['FileSystem']) { $region.fileSystem=[string]$v.FileSystem }
+                        $volumeLabel=if ($v.PSObject.Properties['FileSystemLabel']) { ([string]$v.FileSystemLabel).Trim() } else { '' }
+                        if ($v.DriveLetter) {
+                            $drive=([string]$v.DriveLetter+':')
+                            $region.label=if ($volumeLabel) { "$volumeLabel ($drive)" } else { $drive }
+                        } elseif ($volumeLabel) { $region.label="$volumeLabel (Partition $($p.PartitionNumber))" }
+                        $region.freeBytes=if ($region.fileSystem -in @('NTFS','FAT32','exFAT','ReFS')) { [long]$v.SizeRemaining } else { $null }
+                        if ($region.fileSystem -eq 'NTFS') {
+                            # A partition cannot release more than its unused bytes. Avoid
+                            # Windows' slow exact shrink analysis when its unused bytes
+                            # cannot fit the installer after the existing reserve.
+                            $reserve=Align-Up ([long][Math]::Max(20GB,[decimal]$v.Size/10))
+                            if ($region.freeBytes -lt $overhead+$reserve) {
+                                $region.resizeState='insufficient'
+                                $region.reserveBytes=$reserve
+                                $region.resizeReason='Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'
+                            } else { $region.resizeState='unchecked'; $region.resizeReason='' }
+                        }
+                        else { $region.resizeReason='Only NTFS partitions can be resized here.' }
+                    } catch { $region.resizeReason='Cannot read this filesystem. Unlock it if needed, then refresh.' }
+                    if ($null -ne $Resize -and $Resize.diskNumber -eq $disk.Number -and $Resize.diskUniqueId -ceq [string]$disk.UniqueId -and $Resize.partitionNumber -eq $p.PartitionNumber -and [guid]$Resize.partitionGuid -eq [guid]$p.Guid -and $region.resizeState -eq 'unchecked') {
+                        Emit 'progress' 'analyzing-resize' @{message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
+                        $candidate=Get-ShrinkCandidate $p
+                        $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
+                        $region.reserveBytes=[long]$candidate.reserveBytes
+                        $region.resizeState=if ($candidate.windowsMinimumSizeBytes -gt 0) { 'checked' } else { 'failed' }
+                        $region.resizeReason=($candidate.blockers -join ' ')
+                        $available=$candidate.maximumAllocationBytes-$overhead
+                        if ($candidate.eligible -and $available -ge 0) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label=('Resize '+$region.label);target=@{target_kind='shrink';partition_number=[int]$p.PartitionNumber;partition_guid=[string]$p.Guid}} }
+                    }
+                }
+                $regions+=$region
             }
-            if ($diskChoices.Count -eq 0) { throw 'Not enough usable space. Free up space in Windows Disk Management, then refresh.' }
-            foreach ($choice in $diskChoices) { $choice.diskSizeBytes=[long]$disk.Size; $choice.encryption=$encryption }
+            $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption}
+            foreach ($choice in $diskChoices) {
+                $choice.diskSizeBytes=[long]$disk.Size; $choice.encryption=$encryption
+                $remaining=@(foreach ($region in $regions) {
+                    if ($region.kind -ne 'free') { continue }
+                    if ($choice.target.target_kind -eq 'free' -and $region.offsetBytes -eq $choice.target.start_offset_bytes) { [long]($region.sizeBytes-$overhead) }
+                    else { [long]$region.sizeBytes }
+                })
+                $choice.largestFreeAfterStagingBytes=if ($remaining.Count) { [long](($remaining | Measure-Object -Maximum).Maximum) } else { [long]0 }
+            }
             $choices+=$diskChoices
         } catch { $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
     }
-    return @{choices=$choices;blocked=$blocked;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead}
+    return @{choices=$choices;blocked=$blocked;disks=$disks;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead}
 }
-function Assert-StagingInstallRegion($Partitions,[long]$DiskSize,[long]$Start,[long]$Size) {
-    # The inspected upstream configurator selects the largest free extent.
-    # Require an exact aligned region, and reject competing gaps/ties (with a
-    # MiB margin for parted's usable-GPT boundary and inclusive-end accounting).
-    $cursor=[long]1MB; $found=$false
+function Merge-StagingAnalysis($Inventory,$Measured,$Query) {
+    $disk=@($Inventory.disks | Where-Object { $_.diskNumber -eq $Query.diskNumber -and $_.diskUniqueId -ceq $Query.diskUniqueId })
+    $fresh=@($Measured.disks | Where-Object { $_.diskNumber -eq $Query.diskNumber -and $_.diskUniqueId -ceq $Query.diskUniqueId })
+    if ($disk.Count -ne 1 -or $fresh.Count -ne 1 -or $disk[0].diskSizeBytes -ne $fresh[0].diskSizeBytes) { throw 'Disk layout changed during inspection. Refresh disks.' }
+    $oldRegions=@($disk[0].regions); $newRegions=@($fresh[0].regions)
+    if ($oldRegions.Count -ne $newRegions.Count) { throw 'Partitions changed during inspection. Refresh disks.' }
+    for ($i=0; $i -lt $oldRegions.Count; $i++) {
+        if ($oldRegions[$i].kind -cne $newRegions[$i].kind -or $oldRegions[$i].offsetBytes -ne $newRegions[$i].offsetBytes -or $oldRegions[$i].sizeBytes -ne $newRegions[$i].sizeBytes -or [string]$oldRegions[$i]['partitionGuid'] -cne [string]$newRegions[$i]['partitionGuid']) { throw 'Partitions changed during inspection. Refresh disks.' }
+    }
+    $measuredRegion=@($newRegions | Where-Object { $_.kind -eq 'partition' -and $_.partitionNumber -eq $Query.partitionNumber -and $_.partitionGuid -ceq $Query.partitionGuid })
+    if ($measuredRegion.Count -ne 1 -or $measuredRegion[0].resizeState -notin @('checked','failed')) { throw 'Windows did not return the requested resize measurement.' }
+    for ($i=0; $i -lt $oldRegions.Count; $i++) {
+        if ($oldRegions[$i].kind -eq 'partition' -and $oldRegions[$i].partitionNumber -eq $Query.partitionNumber -and $oldRegions[$i].partitionGuid -ceq $Query.partitionGuid) { $disk[0].regions[$i]=$measuredRegion[0] }
+    }
+    $disk[0].encryption=$fresh[0].encryption
+    $candidate=@($Measured.choices | Where-Object { $_.target.target_kind -eq 'shrink' -and $_.target.partition_number -eq $Query.partitionNumber -and $_.target.partition_guid -ceq $Query.partitionGuid })
+    $Inventory.choices=@($Inventory.choices | Where-Object { $_.diskUniqueId -cne $Query.diskUniqueId -or $_.target.target_kind -ne 'shrink' -or $_.target.partition_guid -cne $Query.partitionGuid })+@($candidate)
+    return $Inventory
+}
+function Get-StagingInspection($Release,$Resize=$null) {
+    $result=Get-StagingChoices $Release $Resize
+    if ($null -ne $Resize) { return $result }
+    Emit 'progress' 'inspecting' @{message='Disks are ready. Checking Windows resize limits...';stagedIsoInspection=$result}
+    foreach ($disk in @($result.disks)) {
+        foreach ($region in @($disk.regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'unchecked' })) {
+            $query=[pscustomobject]@{diskNumber=$disk.diskNumber;diskUniqueId=$disk.diskUniqueId;partitionNumber=$region.partitionNumber;partitionGuid=$region.partitionGuid}
+            $measured=Get-StagingChoices $Release $query
+            $result=Merge-StagingAnalysis $result $measured $query
+            Emit 'progress' 'analyzing-resize' @{message=('Checked resize limit for '+$region.label+' on Disk '+$disk.diskNumber+'.');stagedIsoInspection=$result}
+        }
+    }
+    return $result
+}
+function Get-LargestFreeRegion($Partitions,[long]$DiskSize) {
+    $cursor=[long]1MB; $largest=[long]0
     foreach ($p in @($Partitions | Sort-Object Offset)+@([pscustomobject]@{Offset=(Align-Down ($DiskSize-1MB));Size=0})) {
         $end=Align-Down ([long]$p.Offset); $gap=$end-$cursor
-        if ($gap -gt 0) {
-            if ($cursor -eq $Start -and $gap -eq $Size) { $found=$true }
-            elseif ($gap -ge $Size-1MB) { throw 'Another free region could be selected by the official installer. Choose a larger Linux allocation or prepare a simpler layout.' }
-        }
+        $largest=[Math]::Max($largest,$gap)
         $cursor=[Math]::Max($cursor,(Align-Up ([long]$p.Offset+[long]$p.Size)))
     }
-    if (-not $found) { throw 'The Linux allocation must be one exact free region, starting at the beginning of its gap.' }
+    return $largest
 }
 function Get-StagingPlan($Request) {
-    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid','linuxBytes') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','linuxBytes')
+    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind')
     $release=Get-StagingRelease $Request.sourceSha256 $Request.sourceLength
     if ([Omarchy.DirectX86.NativeDisk]::Firmware() -ne 'uefi' -or (Confirm-SecureBootUEFI -ErrorAction Stop)) { throw 'Staging requires x64 UEFI with Secure Boot disabled.' }
     $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
     $disk=Get-StagingDisk $Request.diskNumber $Request.diskUniqueId
     $bitLocker=@(Get-StagingEncryption $disk.Number)
-    $linux=[long]$Request.linuxBytes
-    if ($linux -lt $release.minimumLinuxBytes -or $linux % 1MB -ne 0 -or $linux -gt [long]$disk.Size) { throw 'Invalid Linux installation size.' }
-    $data=Align-Up ([long]$release.sizeBytes+1GB); $total=$linux+512MB+$data; $shrink=$null
+    $data=Align-Up ([long]$release.sizeBytes+1GB); $total=512MB+$data; $shrink=$null
+    $script:minimumBytes=[long]$total
     if ($Request.targetKind -eq 'free') {
         $start=[long]$Request.startOffsetBytes; Assert-StagingFree $disk $start $total
     } elseif ($Request.targetKind -eq 'shrink') {
@@ -142,9 +230,12 @@ function Get-StagingPlan($Request) {
     $projected=@(foreach ($p in @(Get-InspectedPartitions $disk)) {
         $size=if ($null -ne $shrink -and [guid]$p.Guid -eq [guid]$shrink.partitionGuid) { $shrink.afterSizeBytes } else { [long]$p.Size }
         [pscustomobject]@{Offset=[long]$p.Offset;Size=$size}
-    })+@([pscustomobject]@{Offset=$start+$linux;Size=[long]512MB},[pscustomobject]@{Offset=$start+$linux+512MB;Size=$data})
-    Assert-StagingInstallRegion $projected $disk.Size $start $linux
-    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=$linux;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start+$linux;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=$start+$linux+512MB;sizeBytes=$data});boot=$null;files=@();message='Restart into the official installer, select this disk and free space, and keep Windows and both installer partitions. Personal setup and Linux encryption run in the official installer.'}
+    })+@([pscustomobject]@{Offset=$start;Size=[long]512MB},[pscustomobject]@{Offset=$start+512MB;Size=$data})
+    $largest=Get-LargestFreeRegion $projected $disk.Size
+    $minimumGiB=[Math]::Ceiling([decimal]$release.minimumLinuxBytes/1GB)
+    # Keep zero-valued Linux fields in schema 1 recovery records. No Linux
+    # space is reserved by Windows; the booted installer prepares that space.
+    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=[long]0;largestFreeAfterStagingBytes=$largest;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=$start+512MB;sizeBytes=$data});boot=$null;files=@();message="Restart into the official installer. It will need at least $minimumGiB GiB of free space to install Omarchy; keep the two temporary installer partitions until installation is complete."}
 }
 function Get-StagingRoot {
     $common=[Environment]::GetFolderPath('CommonApplicationData')
@@ -389,8 +480,7 @@ function Invoke-StagingArm($State) {
     foreach ($owned in $State.partitions) { [void](Get-OwnedStagingPartition $State $owned) }
     $disk=(Get-OwnedStagingPartition $State $State.partitions[0]).DiskNumber
     Assert-StagingEncryption $disk
-    $currentDisk=Get-StagingDisk $disk $State.diskUniqueId
-    Assert-StagingInstallRegion @(Get-InspectedPartitions $currentDisk) $currentDisk.Size $State.linuxOffsetBytes $State.linuxBytes
+    [void](Get-StagingDisk $disk $State.diskUniqueId)
     if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot must be disabled before starting this installer.' }
     $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }

@@ -68,9 +68,76 @@ it('prepares again only after reviewed cleanup completes',async()=>{
   expect(prepareAgain).toHaveBeenCalledOnce();
   expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
 });
-const encrypted={diskNumber:0,diskUniqueId:'windows-disk',label:'Shrink partition 3',maximumLinuxBytes:100*1024**3,target:{target_kind:'shrink',partition_number:3,partition_guid:'guid'},encryption:[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}]};
-const free={diskNumber:1,diskUniqueId:'second-disk',label:'Unallocated space',maximumLinuxBytes:80*1024**3,target:{target_kind:'free',start_offset_bytes:1024**2}};
-const inspected=()=>({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[free,encrypted],blocked:[],temporaryBytes:8*1024**3,minimumLinuxBytes:40*1024**3}}});
+const encrypted={diskNumber:0,diskUniqueId:'windows-disk',label:'Shrink partition 3',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:'guid'},encryption:[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}]};
+const free={diskNumber:1,diskUniqueId:'second-disk',label:'Unallocated space',largestFreeAfterStagingBytes:80*1024**3,target:{target_kind:'free',start_offset_bytes:1024**2}};
+const inspected=()=>({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[free,encrypted],blocked:[],temporaryBytes:8*1024**3,minimumLinuxBytes:32*1024**3}}});
+const fullDisk={diskNumber:0,diskUniqueId:'windows-disk',diskSizeBytes:500*1024**3,unallocatedBytes:0,largestFreeBytes:0,regions:[{kind:'partition',partitionNumber:3,partitionGuid:'guid',offsetBytes:1024**2,sizeBytes:500*1024**3,label:'C:',fileSystem:'NTFS',freeBytes:100*1024**3,resizeState:'unchecked'}]};
+it('keeps tiny gaps in the total while moving them out of the partition list',async()=>{
+  const gap={kind:'free',offsetBytes:2*1024**2,sizeBytes:1024**2,label:'Unallocated space'};
+  const withGap={...fullDisk,unallocatedBytes:1024**2,regions:[fullDisk.regions[0],gap]};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[withGap],minimumLinuxBytes:40*1024**3,temporaryBytes:8*1024**3}}});
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText('1 MiB unallocated')).toBeInTheDocument();
+  expect(screen.getByText('1 MiB in small alignment gaps')).toBeInTheDocument();
+  expect(screen.queryByText('Unallocated space')).not.toBeInTheDocument();
+});
+it('explains a partition that cannot provide enough space without waiting for a shrink limit',async()=>{
+  const scarce={...fullDisk,regions:[{...fullDisk.regions[0],freeBytes:1.9*1024**3,resizeState:'insufficient'}]};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[scarce],minimumLinuxBytes:40*1024**3,temporaryBytes:7.3*1024**3}}});
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText('7.3 GiB needed')).toBeInTheDocument();
+  expect(screen.getByText('5.4 GiB more unused space needed in this partition. Free up space in Windows, then refresh.')).toBeInTheDocument();
+  expect(screen.queryByText('Checking Windows resize limit…')).not.toBeInTheDocument();
+});
+it('shows a full disk while Windows measures its resize limit',async()=>{
+  state.set({pending:false,snapshot:{status:'running',stage:'inspecting',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[fullDisk],minimumLinuxBytes:40*1024**3,temporaryBytes:8*1024**3}}});
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByRole('button',{name:/Disk 0/})).toHaveAttribute('aria-pressed','true');
+  expect(screen.getByText('8.0 GiB needed')).toBeInTheDocument();
+  expect(screen.getByText('0 MiB unallocated')).toBeInTheDocument();
+  expect(screen.getByText('100.0 GiB unused inside this partition')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  expect(screen.getByText('Checking Windows resize limit…')).toBeInTheDocument();
+  expect(calls.stagedIso).not.toHaveBeenCalled();
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[{...fullDisk.regions[0],resizeState:'checked',maximumReleaseBytes:108*1024**3,reserveBytes:20*1024**3}]}],minimumLinuxBytes:40*1024**3,temporaryBytes:8*1024**3}}});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
+});
+it('keeps browsing available while measured limits arrive in one inspection',async()=>{
+  const other={...fullDisk,diskNumber:1,diskUniqueId:'other-disk',regions:[{...fullDisk.regions[0],partitionGuid:'other-guid',label:'D:'}]};
+  const base={choices:[],blocked:[],disks:[fullDisk,other],minimumLinuxBytes:40*1024**3,temporaryBytes:8*1024**3};
+  state.set({pending:false,snapshot:{status:'running',stage:'inspecting',stagedTesting:true,stagedIso:base}});
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(calls.stagedIso).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole('button',{name:/Disk 1/}));
+  expect(screen.getByText('100.0 GiB unused inside this partition')).toBeInTheDocument();
+  state.set({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,stagedIso:{...base,choices:[encrypted],disks:[{...fullDisk,regions:[{...fullDisk.regions[0],resizeState:'checked',maximumReleaseBytes:108*1024**3,reserveBytes:20*1024**3}]},other]}}});
+  await import('svelte').then(({tick})=>tick());
+  expect(calls.stagedIso).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole('button',{name:/Disk 0/}));
+  expect(screen.getByText(/Can release 108.0 GiB/)).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
+  state.set({pending:false,snapshot:{status:'complete',stage:'complete',stagedTesting:true,stagedIso:{...base,choices:[encrypted],disks:[{...fullDisk,regions:[{...fullDisk.regions[0],resizeState:'checked',maximumReleaseBytes:108*1024**3,reserveBytes:20*1024**3}]},{...other,regions:[{...other.regions[0],resizeState:'checked',maximumReleaseBytes:10*1024**3,reserveBytes:20*1024**3}]}]}}});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText(/Can release 108.0 GiB/)).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  expect(calls.stagedIso).not.toHaveBeenCalled();
+});
+it('shows a measured shortfall without hiding the partitions or retry action',async()=>{
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[{...fullDisk,regions:[{...fullDisk.regions[0],resizeState:'checked',maximumReleaseBytes:6*1024**3,reserveBytes:20*1024**3}]}],minimumLinuxBytes:32*1024**3,temporaryBytes:8*1024**3}}});
+  render(StagedInstaller,{sourceReady:true});
+  await fireEvent.click(screen.getByRole('button',{name:/Disk 0/}));
+  expect(screen.getByText('2.0 GiB short of the space needed.')).toBeInTheDocument();
+  expect(screen.getByRole('list',{name:'Partitions and unallocated space'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Recheck C:'})).toBeEnabled();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+});
 it('allows encrypted space selection and defers suspension to confirmed staging',async()=>{
   state.set(inspected());
   render(StagedInstaller,{sourceReady:true});
@@ -78,24 +145,24 @@ it('allows encrypted space selection and defers suspension to confirmed staging'
   await fireEvent.click(screen.getByRole('button',{name:/Disk 0/}));
   expect(screen.getByRole('complementary',{name:'BitLocker preparation'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  expect(screen.getByText('More space needed to finish')).toBeInTheDocument();
   expect(calls.prepareBitLocker).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
-  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:100*1024**3});
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
   expect(calls.prepareBitLocker).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button',{name:/Disk 1/}));
   expect(screen.queryByRole('complementary',{name:'BitLocker preparation'})).not.toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
 });
-it('preserves the chosen allocation across status polling and submits the exact disk and extent',async()=>{
+it('preserves the chosen disk across status polling and submits the exact target',async()=>{
   state.set(inspected());
   render(StagedInstaller,{sourceReady:true});
   await fireEvent.click(screen.getByRole('button',{name:/Disk 1/}));
-  await fireEvent.input(screen.getByRole('spinbutton'),{target:{value:'60'}});
   state.set(structuredClone(inspected()));
   await import('svelte').then(({tick})=>tick());
-  expect(screen.getByRole('spinbutton')).toHaveValue(60);
+  expect(screen.getByRole('button',{name:/Disk 1/})).toHaveAttribute('aria-pressed','true');
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
-  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:1,diskUniqueId:'second-disk',target:free.target,linuxBytes:60*1024**3});
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:1,diskUniqueId:'second-disk',target:free.target});
 });
 it('keeps the selected disk after refresh',async()=>{
   state.set(inspected());

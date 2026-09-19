@@ -712,6 +712,7 @@ pub fn staged_iso(
     action: crate::setup_protocol::StagedAction,
     selection: Option<crate::setup_protocol::StagedSelection>,
     operation_id: Option<String>,
+    resize: Option<crate::setup_protocol::StagedResizeQuery>,
     app: tauri::AppHandle,
     setup: State<'_, Setup>,
     downloads: State<'_, Downloads>,
@@ -730,6 +731,7 @@ pub fn staged_iso(
         action: action.clone(),
         selection,
         operation_id,
+        resize,
     };
     crate::direct_install_policy::check_destination(&destination)?;
     let source = if matches!(action, StagedAction::Stage | StagedAction::Inspect) {
@@ -1242,6 +1244,13 @@ fn run_elevated(
     app: &tauri::AppHandle,
     request: OperationRequest,
 ) -> Result<Value, String> {
+    let staged_inspection = matches!(
+        &request.destination,
+        Destination::StagedIso {
+            action: crate::setup_protocol::StagedAction::Inspect,
+            ..
+        }
+    );
     let usb_approval = crate::setup_protocol::usb_confirmation_plan(&request)?;
     let mut usb_approval_used = false;
     let mut export = crate::operation_records::Export::choose(app, &request.destination)?;
@@ -1355,6 +1364,15 @@ fn run_elevated(
                 )?;
             }
             Some("event") => service.update(app, |inner| {
+                if staged_inspection
+                    && value["stagedIsoInspection"]["disks"].is_array()
+                    && value["stagedIsoInspection"]["choices"].is_array()
+                    && value["stagedIsoInspection"]["blocked"].is_array()
+                    && value["stagedIsoInspection"]["minimumLinuxBytes"].is_u64()
+                    && value["stagedIsoInspection"]["temporaryBytes"].is_u64()
+                {
+                    inner.snapshot.staged_iso = Some(value["stagedIsoInspection"].clone());
+                }
                 if value["recovery"].is_object() {
                     inner.snapshot.recovery = if value["recovery"]["cleanup"]["workspaceRemoved"]
                         == true

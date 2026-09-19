@@ -2,6 +2,25 @@
 
 Decision date: 2026-09-06.
 
+**September 19 update — temporary space only:** Windows now prepares only the
+temporary installer-file and EFI loader partitions (ISO size plus 1 GiB, and 512 MiB
+for EFI). It does not reserve a Linux region. The booted official installer
+chooses where to install Omarchy. The app estimates the largest free region left
+after staging and warns, without blocking, when it is below the current 32 GiB
+minimum; a corrected draft of upstream PR #187 allows deleting other unmounted
+partitions there while protecting the installer source and temporary EFI.
+
+**September 19 update — partition browsing:** a supported disk remains visible
+even when no allocation fits. Inspection reports every partition and free region,
+unused filesystem space, and the temporary-installer budget.
+Windows shrink-limit analysis runs automatically, one partition at a time in
+the same elevated disk check, because it can take minutes. The disk and
+partition list appears first and stays usable while measured limits arrive.
+A resize result shows the amount Windows can release,
+the free-space reserve, and any shortfall; it does not resize anything. Actual
+NTFS shrinking still occurs in confirmed staging after fresh identity, layout,
+and sizing checks. Browsing and resize analysis do not suspend BitLocker.
+
 Local testing executables reuse an existing ISO with the expected release
 filename and size immediately after release lookup, without re-reading it on
 every app restart. The UI says **Verification skipped · testing**, and the

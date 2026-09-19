@@ -78,6 +78,7 @@ pub enum Destination {
         action: StagedAction,
         selection: Option<StagedSelection>,
         operation_id: Option<String>,
+        resize: Option<StagedResizeQuery>,
     },
     InspectDirect,
     PrepareFirmware,
@@ -120,7 +121,15 @@ pub struct StagedSelection {
     pub disk_number: u32,
     pub disk_unique_id: String,
     pub target: DirectTarget,
-    pub linux_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StagedResizeQuery {
+    pub disk_number: u32,
+    pub disk_unique_id: String,
+    pub partition_number: u32,
+    pub partition_guid: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

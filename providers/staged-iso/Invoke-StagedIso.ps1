@@ -5,7 +5,7 @@ param([Parameter(Mandatory=$true)][ValidateSet('inspect','plan','stage','status'
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
 $env:PSModulePath=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/WindowsPowerShell/v1.0/Modules'
-$script:minimumBytes=[long]40GB
+$script:minimumBytes=[long]0
 $script:testingBuild=[bool]$TestingBuild
 function Fail([string]$Code,[string]$Message) { throw $Message }
 function Emit([string]$Type,[string]$Stage,[hashtable]$Fields) {
@@ -53,6 +53,7 @@ try {
     Assert-ProtectedDirectory (Split-Path -Parent $PSScriptRoot)
     Assert-ProtectedDirectory (Split-Path -Parent $RequestPath)
     $direct=Join-Path $PSScriptRoot '../direct-x86'
+    Emit 'progress' 'loading' @{message='Loading Windows disk tools...'}
     Add-Type -Path @((Join-Path $direct 'NativeDisk.cs'),(Join-Path $PSScriptRoot 'NativeStaged.cs'),(Join-Path $direct 'NativeSource.cs'))
     . (Join-Path $direct 'BitLocker.ps1')
     . (Join-Path $direct 'StoragePlan.ps1')
@@ -63,8 +64,10 @@ try {
     $request=Read-Json $RequestPath
     switch ($Action) {
         'inspect' {
-            Assert-Fields $request @('sourceSha256','sourceLength') @('sourceSha256','sourceLength')
-            $result=Get-StagingChoices (Get-StagingRelease $request.sourceSha256 $request.sourceLength)
+            Assert-Fields $request @('sourceSha256','sourceLength','resize') @('sourceSha256','sourceLength')
+            $resize=if ($request.PSObject.Properties['resize']) { $request.resize } else { $null }
+            $release=Get-StagingRelease $request.sourceSha256 $request.sourceLength
+            $result=Get-StagingInspection $release $resize
         }
         'plan' {
             $plan=Get-StagingPlan $request

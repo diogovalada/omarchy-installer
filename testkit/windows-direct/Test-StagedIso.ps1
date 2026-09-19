@@ -90,10 +90,9 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
 foreach ($path in @('../escape','a/../b','/absolute','a\b','a:stream','CON','folder/LPT1.txt','trailing.','double//slash')) { Reject { Assert-StagingRelativePath $path } "Unsafe filename accepted: $path" }
 Assert-StagingRelativePath 'arch/x86_64/airootfs.sfs'
 $layout=@([pscustomobject]@{Offset=1MB;Size=100GB-1MB},[pscustomobject]@{Offset=200GB;Size=20GB},[pscustomobject]@{Offset=250GB;Size=50GB-1MB})
-Assert-StagingInstallRegion $layout 300GB 100GB 100GB
-Reject { Assert-StagingInstallRegion $layout 300GB 110GB 90GB } 'Starting inside a larger gap must not change the official allocation.'
+Assert ((Get-LargestFreeRegion $layout 300GB) -eq 100GB) 'Largest remaining free region was miscalculated.'
 $competing=@([pscustomobject]@{Offset=1MB;Size=100GB-1MB},[pscustomobject]@{Offset=140GB;Size=10GB})
-Reject { Assert-StagingInstallRegion $competing 300GB 100GB 40GB } 'Upstream would select the larger remaining gap.'
+Assert ((Get-LargestFreeRegion $competing 300GB) -eq 150GB-1MB) 'A later free region was missed.'
 function Read-Json($Path) { return [pscustomobject]@{schema=1;releases=@()} }
 Reject { Get-StagingRelease ('a'*64) 6GB } 'An unqualified ISO bypassed the release gate.'
 $script:testingBuild=$true
@@ -139,7 +138,98 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     Assert-StagingEncryption 0
     $disk.Size=20GB
     $found=Get-StagingChoices $release
-    Assert ($found.choices.Count -eq 0 -and $found.blocked.Count -eq 1) 'Small disk silently disappeared from discovery.'
+    Assert ($found.choices.Count -eq 1 -and $found.blocked.Count -eq 0 -and $found.disks.Count -eq 1) 'A disk fitting the temporary installer must remain selectable.'
+    Assert ($found.disks[0].unallocatedBytes -eq 20GB-2MB) 'Small unallocated region lost its size.'
+    Assert ($found.choices[0].largestFreeAfterStagingBytes -lt $release.minimumLinuxBytes) 'Small disk did not warn about later installation space.'
+}
+
+# Full disks remain browsable; slow Windows shrink analysis is explicit and
+# bound to the exact selected disk/partition. All OS calls here are mocked.
+& {
+    $disk=[pscustomobject]@{Number=0;UniqueId='small-data';Size=[long](22GB+2MB)}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=5;Guid='55555555-5555-5555-5555-555555555555';Offset=[long]1MB;Size=[long]22GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}
+    function Emit { }
+    function Get-Disk { return $disk }
+    function Get-StagingDisk { return $disk }
+    function Get-InspectedPartitions { return @($part) }
+    function Get-BitLockerSnapshot { return @{known=$true;volumes=@()} }
+    function Get-Volume { return [pscustomobject]@{Path='restore';DriveLetter='';FileSystemLabel='RESTORE';FileSystemType='NTFS';Size=[long]22GB;SizeRemaining=[long](8.6GB)} }
+    function Get-PartitionSupportedSize { throw 'A slow resize query should not run.' }
+    $release=[pscustomobject]@{sizeBytes=6GB;minimumLinuxBytes=32GB}
+    $found=Get-StagingInspection $release
+    Assert ($found.disks[0].regions[0].resizeState -eq 'insufficient' -and $found.choices.Count -eq 0) 'A small data partition bypassed the reserve precheck.'
+}
+& {
+    $disk=[pscustomobject]@{Number=0;UniqueId='disk';Size=[long]200GB}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long](200GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+    $script:shrinkCalls=0; $script:shrinkLimit=[long]120GB
+    $script:minimumBytes=[long]40GB
+    function Emit { }
+    function Get-Disk { return $disk }
+    function Get-StagingDisk($Number,$Identity) { if ($Number -ne 0 -or $Identity -cne 'disk') { throw 'Changed disk' }; return $disk }
+    function Get-InspectedPartitions { return @($part) }
+    function Get-BitLockerSnapshot { return @{known=$true;volumes=@()} }
+    $script:volumeLetter='C'; $script:volumeLabel=''
+    function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter=$script:volumeLetter;FileSystemLabel=$script:volumeLabel;FileSystemType='NTFS';Size=$part.Size;SizeRemaining=[long]100GB;HealthStatus='Healthy';OperationalStatus=@('OK')} }
+    function Get-PartitionSupportedSize { $script:shrinkCalls++; return @{SizeMin=$script:shrinkLimit} }
+    $release=[pscustomobject]@{sizeBytes=6GB;minimumLinuxBytes=40GB}
+    $found=Get-StagingChoices $release
+    Assert ($script:shrinkCalls -eq 0) 'Disk listing must not trigger shrink analysis.'
+    Assert ($found.disks.Count -eq 1 -and $found.choices.Count -eq 0 -and $found.blocked.Count -eq 0) 'A full disk was hidden or blocked.'
+    $region=$found.disks[0].regions[0]
+    Assert ($region.freeBytes -eq 100GB -and $region.resizeState -eq 'unchecked') 'Unused filesystem space must remain distinct from unallocated space.'
+    Assert ($found.disks[0].unallocatedBytes -eq 0) 'Filesystem free bytes became unallocated disk space.'
+    $script:volumeLetter=''; $script:volumeLabel='RESTORE'
+    $labeled=Get-StagingChoices $release
+    Assert ($labeled.disks[0].regions[0].label -eq 'RESTORE (Partition 3)') 'A volume label without a drive letter was hidden.'
+    $script:volumeLetter='C'; $script:volumeLabel='OS'
+    $labeled=Get-StagingChoices $release
+    Assert ($labeled.disks[0].regions[0].label -eq 'OS (C:)') 'The drive letter and filesystem label were not shown together.'
+    $script:volumeLabel=''
+    $query=[pscustomobject]@{diskNumber=0;diskUniqueId='disk';partitionNumber=3;partitionGuid=$part.Guid}
+    $found=Get-StagingChoices $release $query
+    Assert ($script:shrinkCalls -eq 1 -and $found.choices.Count -eq 1) 'Selected resize analysis did not expose a usable allocation.'
+    Assert ($found.choices[0].target.partition_guid -eq $part.Guid -and $found.choices[0].largestFreeAfterStagingBytes -eq 0) 'Temporary-only shrink lost identity or invented Linux space.'
+    $script:shrinkLimit=195GB
+    $found=Get-StagingChoices $release $query
+    Assert ($found.choices.Count -eq 0 -and $found.disks[0].regions[0].resizeState -eq 'checked' -and $found.disks[0].regions[0].maximumReleaseBytes -eq 5GB-2MB) 'Insufficient shrink space must retain the measured limit and partition.'
+    $query.partitionGuid='44444444-4444-4444-4444-444444444444'
+    Reject { Get-StagingChoices $release $query } 'Resize query accepted a replaced partition.'
+    Assert ($script:shrinkCalls -eq 2) 'Changed partition reached shrink analysis.'
+}
+
+# One privileged inspection emits the inventory before running the expensive
+# Windows query, then publishes each result without opening another helper.
+& {
+    $script:streamDisk=[pscustomobject]@{Number=0;UniqueId='stream-disk';Size=[long]400GB}
+    $partitions=@(
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false},
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=4;Guid='44444444-4444-4444-4444-444444444444';Offset=[long]181GB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+    )
+    $script:minimumBytes=[long]40GB; $script:shrinkCalls=0; $script:partial=@(); $script:streamFree=[long]5GB
+    function Emit($Type,$Stage,$Fields) {
+        if ($Fields.ContainsKey('stagedIsoInspection')) { $script:partial+=@{stage=$Stage;choices=@($Fields.stagedIsoInspection.choices).Count;regions=@($Fields.stagedIsoInspection.disks[0].regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'checked' }).Count} }
+    }
+    function Get-Disk { return $script:streamDisk }
+    function Get-StagingDisk($Number,$Identity) { if ($Number -ne 0 -or $Identity -cne 'stream-disk') { throw 'Changed disk' }; return $script:streamDisk }
+    function Get-InspectedPartitions { return $partitions }
+    function Get-BitLockerSnapshot { return @{known=$true;volumes=@()} }
+    function Get-Volume { process { return [pscustomobject]@{Path=('volume-'+$_.PartitionNumber);DriveLetter='C';FileSystemType='NTFS';Size=$_.Size;SizeRemaining=$script:streamFree;HealthStatus='Healthy';OperationalStatus=@('OK')} } }
+    function Get-PartitionSupportedSize { $script:shrinkCalls++; return @{SizeMin=[long]90GB} }
+    $release=[pscustomobject]@{sizeBytes=6GB;minimumLinuxBytes=40GB}
+    $tooFull=Get-StagingInspection $release
+    Assert ($script:shrinkCalls -eq 0 -and $script:partial.Count -eq 1) 'Insufficient unused space must skip slow Windows shrink queries.'
+    Assert (@($tooFull.disks[0].regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'insufficient' }).Count -eq 2) 'Insufficient partitions must stay visible with an immediate result.'
+    $script:streamFree=[long]120GB; $script:partial=@()
+    $found=Get-StagingInspection $release
+    Assert ($script:shrinkCalls -eq 2) 'Background inspection repeated a shrink calculation.'
+    Assert ($script:partial.Count -eq 3 -and $script:partial[0].regions -eq 0 -and $script:partial[0].choices -eq 1) 'Partition list was not published before shrink analysis.'
+    Assert ($script:partial[1].regions -eq 1 -and $script:partial[1].choices -eq 2 -and $script:partial[2].regions -eq 2 -and $script:partial[2].choices -eq 3) 'Measured limits did not accumulate.'
+    Assert ($found.choices.Count -eq 3 -and @($found.disks[0].regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'checked' }).Count -eq 2) 'Final inspection lost a resize option.'
+    $query=[pscustomobject]@{diskNumber=0;diskUniqueId='stream-disk';partitionNumber=3;partitionGuid=$partitions[0].Guid}
+    $initial=Get-StagingChoices $release; $measured=Get-StagingChoices $release $query
+    $measured.disks[0].regions[0].sizeBytes+=1MB
+    Reject { Merge-StagingAnalysis $initial $measured $query } 'Changed partition was merged into an old inventory.'
 }
 
 # Late suspension uses only the reviewed volume set; pre-existing suspension is
