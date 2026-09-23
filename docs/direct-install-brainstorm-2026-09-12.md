@@ -19,6 +19,10 @@ do not expose it as a fallback. Earlier comparisons below describe that retained
 implementation, not the latest product selection.
 See [the implementation record](evidence/bitlocker-followup-2026-09-16.md).
 
+The September 20 follow-up retains dedicated staging and records
+[booting the existing ISO file](#future-work-boot-the-downloaded-iso-in-place)
+as a future optimization, not a change to the current implementation or PR scope.
+
 ## Scope and intended result
 
 The comparison concerns Windows x86-64 on UEFI/GPT hardware, installing Omarchy
@@ -70,6 +74,58 @@ An **installer ISO** contains a bootable environment and installation materials.
 An **installed-system image** contains the system to deploy. Calling both a
 “prebuilt ISO” concealed this distinction. A prepared filesystem payload can be
 used by either route; its file format does not decide when installation occurs.
+
+## Future work: boot the downloaded ISO in place
+
+**Decision, 2026-09-20:** finish and qualify the current dedicated-source staging
+route first. Later, evaluate booting the downloaded ISO directly from its existing
+Windows partition as an optional optimization, especially for dual boot.
+
+Windows would prepare a boot entry, then stop running at reboot. The bootloader
+and early Linux environment would read the ISO file from that partition through
+a loopback device. "Copy-less" means avoiding a second on-disk copy of the large
+installer payload; downloading, integrity checks and writing the installed system
+still happen. Small unencrypted boot files or a temporary EFI partition may still
+be needed, so this is not automatically a zero-staging or zero-partition-change route.
+
+| Concern | Current dedicated source partition | Existing ISO file on Windows |
+| --- | --- | --- |
+| Preparation | Allocate a source partition, extract the ISO files and verify the copy. | Potentially avoid that allocation and copy; measure the complete preparation time, including verification. |
+| Source lifetime | Keep the temporary source; Windows can be explicitly deleted in the live installer once supported. | Keep the ISO and its containing partition intact while the installer depends on them. |
+| Encrypted Windows | The temporary source is unencrypted and independent of Windows file access. Windows boot trust and the installer's BitLocker policy still apply. | Reading an encrypted source requires BitLocker-aware access before the live system can start. Suspension supplies a clear key but does not turn the volume into ordinary readable NTFS. |
+| Final layout | Windows can be removed before choosing Omarchy's destination, while staging remains protected. | Install elsewhere first if Windows must remain as the source; deleting Windows later may require additional work to use its space. |
+| Cleanup | Remove the owned temporary source, EFI partition and boot entry when no longer needed. | Remove the ISO file and temporary boot artifacts; retaining Windows avoids the larger partition-reclamation problem. |
+
+Keeping Windows does not inherently require resizing Omarchy after installation:
+allocate enough destination space initially. Replacing Windows later is harder
+if its freed space is before Omarchy or separated by another partition. Growing
+an existing partition may then require moving data, or choosing a separate data
+partition instead. This geometry issue applies to SSDs as well as HDDs; moving
+data can be particularly costly on an HDD. Neither route automatically merges
+all space freed during cleanup. Benchmark actual layouts and total installation
+time rather than assuming that eliminating the copy makes the whole process faster.
+
+A RAM-backed variant could release Windows earlier, but only after every required
+live-system and offline-package dependency has been copied and detached from that
+volume. That adds RAM requirements and still performs a copy, just not to another
+disk partition. It is a separate experiment, not an assumed property of loopback boot.
+
+Feasibility checks before adopting this route:
+
+- Prove booting and completing installation from an existing ISO on unencrypted
+  NTFS, then from supported suspended-BitLocker volumes. The PR's clear-key check
+  runs after the live system starts; it cannot provide access needed to boot it.
+  Check clean shutdown, dirty/hibernated volume handling and interrupted boots.
+- Protect the real containing partition and any backing storage, not only the
+  virtual loop device. At reviewed PR #187 head `c5cb70b`, same-disk loopback
+  installation remains excluded. Upstream's loopback boot configuration does not
+  by itself establish that the installer permits or safely handles that layout.
+- Exercise dual boot, later Windows removal, space reclamation and cleanup;
+  compare preparation time, peak disk use and total work on SSD and HDD systems.
+
+Sources: [Omarchy's loopback boot configuration](https://github.com/omacom/omarchy-iso/blob/c5cb70b55d2fec1c6e8678c8462a38eb259ed52e/configs/grub/loopback.cfg),
+[same-disk PR #187](https://github.com/omacom/omarchy-iso/pull/187),
+and [Microsoft's suspension/decryption distinction](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/faq#what-is-the-difference-between-suspending-and-decrypting-bitlocker).
 
 ## Linux, WSL 2, QEMU, WHPX and Docker
 

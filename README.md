@@ -87,6 +87,22 @@ installation from Linux, are planned next steps.
 
 Other planned improvements:
 
+- **Boot the downloaded ISO in place:** evaluate reading the existing ISO from
+  the Windows partition instead of copying its contents to a temporary source
+  partition. Keep the current staging approach while investigating the
+  [boot, BitLocker and disk-layout tradeoffs](docs/direct-install-brainstorm-2026-09-12.md#future-work-boot-the-downloaded-iso-in-place).
+- **Consider copying the installer into memory:** decide whether it is worth
+  booting the staged installer with `copytoram=y` on machines with enough RAM.
+  The live system would then stop using the internal disk, so an official ISO
+  without same-disk support could install there. It needs memory for the whole
+  image (about 5.5 GiB) plus the installer, and adds a second staging path to
+  test; machines with less RAM would keep the current approach.
+- **Consider installer-side cleanup of the temporary installer:** cleanup of
+  the temporary partition holding the installer files, the temporary EFI
+  partition and its firmware boot entry currently runs from Windows, so
+  replacing Windows leaves all three behind. If this installation method gains
+  upstream acceptance, consider proposing that the installed system remove
+  them after its first successful boot.
 - **Reclaim space after direct installation:** let users optionally remove the
   original OS and its partitions, leaving the space unallocated or using it to
   expand Omarchy's home storage.
@@ -110,6 +126,13 @@ already installed, so direct installation would not require us to build and
 maintain our own images. Ideally, these would ship unencrypted for efficient
 compression, with native setup support to encrypt each installation with a
 fresh, unique key.
+
+Omarchy's boot menu could also list Windows automatically after a dual-boot
+installation. Today users add it manually with `limine-scan` or use the
+computer's boot menu ([omarchy#7867](https://github.com/omacom/omarchy/issues/7867)).
+Omarchy already enables automatic bootloader discovery in
+[limine-entry-tool](https://gitlab.com/Zesko/limine-entry-tool), but it only
+searches Limine's own EFI partition, not the separate Windows one.
 
 ## Development
 
