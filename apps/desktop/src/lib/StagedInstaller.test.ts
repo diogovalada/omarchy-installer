@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StagedInstaller from './StagedInstaller.svelte';
 import { setup } from './setup';
-const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn()}));
+const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn()}));
 vi.mock('./setup',async importOriginal=>{
   const actual=await importOriginal<typeof import('./setup')>();
   const {writable}=await import('svelte/store');
@@ -106,7 +106,7 @@ it('shows a full disk while Windows measures its resize limit',async()=>{
   await import('svelte').then(({tick})=>tick());
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
-  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*1024**3});
 });
 it('keeps browsing available while measured limits arrive in one inspection',async()=>{
   const other={...fullDisk,diskNumber:1,diskUniqueId:'other-disk',regions:[{...fullDisk.regions[0],partitionGuid:'other-guid',label:'D:'}]};
@@ -185,4 +185,54 @@ it('invalidates destinations when refreshing fails',async()=>{
   state.set({...inspected(),error:'Inspection failed'});
   await import('svelte').then(({tick})=>tick());
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+});
+const measured=()=>({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[{...fullDisk.regions[0],resizeState:'checked',maximumReleaseBytes:108*1024**3,reserveBytes:20*1024**3}]}],minimumLinuxBytes:32*1024**3,temporaryBytes:8*1024**3,secureBoot:true}}});
+it('keeps Windows with a chosen Omarchy size or replaces it later',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.queryByText('More space needed to finish')).not.toBeInTheDocument();
+  await fireEvent.input(screen.getByRole('spinbutton',{name:/Space for Omarchy/}),{target:{value:'40'}});
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*1024**3});
+  await fireEvent.click(screen.getByRole('radio',{name:'Replace Windows in the installer'}));
+  expect(screen.getByText('More space needed to finish')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
+});
+it('tells users to leave Secure Boot on until the installer is prepared',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText(/Secure Boot is on. Leave it on for now/)).toBeInTheDocument();
+});
+it('reviews the staging plan in the app before any disk change',async()=>{
+  state.set({pending:false,snapshot:{...measured().snapshot,status:'running',stagedReview:{summary:'Prepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB.'}}});
+  render(StagedInstaller,{sourceReady:true});
+  await import('svelte').then(({tick})=>tick());
+  const review=screen.getByRole('region',{name:'Review changes'});
+  expect(review).toHaveTextContent('Shrink C: from 500.0 to 428.0 GiB.');
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  expect(calls.respondStagedReview).toHaveBeenLastCalledWith(false);
+  await fireEvent.click(screen.getByRole('button',{name:'Prepare installer'}));
+  expect(calls.respondStagedReview).toHaveBeenLastCalledWith(true);
+});
+it('shows copy progress and offers to stop only while copying',async()=>{
+  state.set({pending:false,snapshot:{status:'running',stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*1024**3,totalBytes:6*1024**3,cancelAvailable:true,cancelRequested:false,stagedTesting:true}});
+  render(StagedInstaller,{sourceReady:true});
+  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*1024**3));
+  await fireEvent.click(screen.getByRole('button',{name:'Stop preparing'}));
+  expect(calls.cancel).toHaveBeenCalledOnce();
+});
+it('lets the installer be selected again after a restart and restarts to firmware settings',async()=>{
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:''};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op]}}});
+  render(StagedInstaller,{recoveryOnly:true});
+  expect(screen.getByText('Installer selected for a restart')).toBeInTheDocument();
+  expect(screen.getByText('What happens next')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
+  await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('firmware',null,op.operationId);
 });

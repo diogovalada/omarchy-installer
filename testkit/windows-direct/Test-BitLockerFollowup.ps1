@@ -198,4 +198,18 @@ Assert ($script:events.Count -eq 0) 'Rejected resume changed protection.'
 $state.status='pending'
 Resume-OwnedProtection $state 'mock'
 Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only verified resumption may retire the reminder.'
+# A prepared installer that has not been selected for startup hides Resume;
+# unreadable or missing summaries keep the normal choices.
+& {
+    $summary=Join-Path $env:TEMP ('omarchy-staged-summary-'+[guid]::NewGuid().ToString('N')+'.json')
+    try {
+        Assert (-not (Test-StagedInstallerWaiting $summary)) 'A missing summary hid Resume.'
+        foreach ($case in @(@{status='staged';waiting=$true},@{status='arming';waiting=$true},@{status='boot-scheduled';waiting=$false},@{status='copying';waiting=$false})) {
+            [IO.File]::WriteAllText($summary,(@{operations=@(@{status=$case.status})} | ConvertTo-Json -Depth 4))
+            Assert ((Test-StagedInstallerWaiting $summary) -eq $case.waiting) ('Wrong waiting state for '+$case.status)
+        }
+        [IO.File]::WriteAllText($summary,'not json')
+        Assert (-not (Test-StagedInstallerWaiting $summary)) 'An unreadable summary hid Resume.'
+    } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
+}
 Write-Output 'Passed BitLocker follow-up policy and mocked preparation checks; no host changes.'

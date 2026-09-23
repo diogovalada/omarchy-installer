@@ -46,35 +46,50 @@ warn that booting and same-disk installation may fail in the official ISO.
 
 1. Select existing free space or explicitly review an NTFS shrink. Existing
    Windows sizing/reserve checks are reused; no existing partition is deleted.
-   The target must be a basic GPT disk with 512-byte logical sectors, native
-   x64 UEFI and Secure Boot off. Inspection does not require BitLocker suspension.
+   The target must be a basic GPT disk with 512-byte logical sectors on native
+   x64 UEFI. Disks that cannot be used report a specific reason. Inspection does
+   not require BitLocker suspension, and preparation does not require Secure Boot
+   off: it is checked when selecting the installer startup, after suspension.
    Planning accepts unlocked, fully encrypted or decrypted volumes; incomplete
    conversion and unknown status block preparation.
 2. Allocate only a 512 MiB FAT32 EFI partition and an NTFS source partition
-   sized to the ISO plus 1 GiB. Windows does not reserve or create Omarchy's
-   destination. Inspection shows the largest unallocated region that will remain
-   after staging. If it is below the official installer's 32 GiB minimum, the
-   user sees a warning and can make room in the booted installer by deleting an
-   unneeded partition, once upstream same-disk editor support is available.
+   sized to the ISO plus 1 GiB. When a shrink keeps Windows, it can also leave
+   at least 32 GiB unallocated for Omarchy right after the temporary installer;
+   Windows never creates Omarchy's partitions. The installer sits directly after
+   the shrunk partition so Windows can reclaim it with Extend Volume later.
+   Inspection shows the largest unallocated region that will remain. If it is
+   below the official installer's 32 GiB minimum, the user sees a warning and
+   can make room in the booted installer by deleting an unneeded partition, such
+   as Windows, once upstream same-disk editor support is available.
 3. Hold the source against replacement, hash it against the qualified release,
-   mount it read-only and inventory its files. Reject unsafe paths, missing boot
+   mount it read-only and list its files. Reject unsafe paths, missing boot
    files and an extraction that exceeds capacity before allocating partitions.
+   The app shows the plan for review before any change.
    After confirmation and source checks, suspend active protection on the reviewed
    Windows/target volumes, without decrypting. Register a per-volume sign-in
    reminder first; existing suspensions are not adopted. OS suspension is
    indefinite (DisableCount=0); data volumes omit DisableCount. The user explicitly
    resumes through the reminder after Windows boots through the final boot path.
-   Copy the original ISO files to NTFS with file-level hash readback; no live
-   filesystem or installer code is patched. NTFS supports the large squashfs file.
+   Copy the original ISO files to NTFS, hashing each while copying and
+   comparing a readback; no live filesystem or installer code is patched. NTFS
+   supports the large squashfs file. Copying reports progress and can be stopped;
+   the partial installer is then removed through reviewed cleanup.
 4. Copy the existing packaged GRUB loader to the new FAT32 partition. Its config
    locates an operation-specific source marker and supplies
-   `archisodevice=/dev/disk/by-partuuid/<source GUID>` and `copytoram=n`.
-   The live source is a directly mounted partition, not a loopback ISO.
+   `archisodevice=/dev/disk/by-partuuid/<source GUID>` and `copytoram=n`. It
+   boots without a menu delay and omits `checksum=y`, because the staged files
+   are verified before startup is selected. The live source is a directly
+   mounted partition, not a loopback ISO.
 5. Register a temporary `Boot####` entry without changing `BootOrder`. A separate
    user confirmation revalidates the files, owned partitions, encryption and firmware
-   target, then sets `BootNext`. The app does not reboot automatically. Restart
-   Windows to enter the official interactive installer, which owns Linux setup,
-   its encryption and its permanent boot menu.
+   target, then sets `BootNext`. If Secure Boot is still on, the app offers a
+   firmware-settings restart (`shutdown /r /fw`) instead; BitLocker is already
+   suspended then, so turning Secure Boot off cannot trigger recovery. The app
+   does not reboot into the installer automatically. Restart Windows to enter
+   the official interactive installer, which owns Linux setup, its encryption and
+   its permanent boot menu. The installer can be selected again after an attempt.
+   While an installer waits to be selected, the BitLocker reminder does not offer
+   to resume protection.
 6. On returning to Windows, an existing temporary installer appears automatically.
    Use **Remove temporary installer**, or **Prepare again** in a testing build
    with a verified download. Preparation again performs reviewed cleanup first,

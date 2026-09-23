@@ -8,7 +8,8 @@ pub const STAGED_ISO_TESTING: bool = cfg!(feature = "staged-iso-testing");
 pub fn check_destination(destination: &Destination) -> Result<(), String> {
     match destination {
         Destination::StagedIso {
-            action: StagedAction::Stage | StagedAction::Inspect | StagedAction::Arm,
+            action:
+                StagedAction::Stage | StagedAction::Inspect | StagedAction::Arm | StagedAction::Firmware,
             ..
         } if !STAGED_ISO_TESTING => Err(STAGED_ISO_BLOCKER.into()),
         Destination::InspectDirect
@@ -66,6 +67,7 @@ mod tests {
             StagedAction::Stage,
             StagedAction::Inspect,
             StagedAction::Arm,
+            StagedAction::Firmware,
         ] {
             assert_eq!(
                 check_destination(&Destination::StagedIso {

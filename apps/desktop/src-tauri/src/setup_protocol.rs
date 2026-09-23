@@ -112,6 +112,7 @@ pub enum StagedAction {
     Stage,
     Status,
     Arm,
+    Firmware,
     Cleanup,
 }
 
@@ -121,6 +122,10 @@ pub struct StagedSelection {
     pub disk_number: u32,
     pub disk_unique_id: String,
     pub target: DirectTarget,
+    /// Space a reviewed shrink leaves unallocated for Omarchy after the
+    /// temporary installer, when Windows is kept. Zero replaces nothing.
+    #[serde(default)]
+    pub linux_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -650,4 +655,29 @@ pub fn write_frame(writer: &mut impl Write, value: &impl Serialize) -> Result<()
     bytes.push(b'\n');
     writer.write_all(&bytes).map_err(|e| e.to_string())?;
     writer.flush().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod staged_selection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn omarchy_space_is_optional_and_only_accepted_by_its_protocol_name() {
+        let free = json!({"target_kind":"free","start_offset_bytes":1048576});
+        let shrink = json!({"target_kind":"shrink","partition_number":3,"partition_guid":"guid"});
+        let replace: StagedSelection =
+            serde_json::from_value(json!({"diskNumber":0,"diskUniqueId":"disk","target":free}))
+                .unwrap();
+        assert_eq!(replace.linux_bytes, 0);
+        let keep: StagedSelection = serde_json::from_value(
+            json!({"diskNumber":0,"diskUniqueId":"disk","target":shrink,"linuxBytes":40_u64 << 30}),
+        )
+        .unwrap();
+        assert_eq!(keep.linux_bytes, 40 << 30);
+        assert!(serde_json::from_value::<StagedSelection>(
+            json!({"diskNumber":0,"diskUniqueId":"disk","target":free,"linux_bytes":1})
+        )
+        .is_err());
+    }
 }

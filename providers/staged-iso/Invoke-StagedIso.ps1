@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][ValidateSet('inspect','plan','stage','status','arm','cleanup')][string]$Action,
+param([Parameter(Mandatory=$true)][ValidateSet('inspect','plan','stage','status','arm','firmware','cleanup')][string]$Action,
       [Parameter(Mandatory=$true)][string]$RequestPath,
       [switch]$TestingBuild)
 Set-StrictMode -Version Latest
@@ -76,15 +76,18 @@ try {
             $result=@{plan=$plan;planPath=$path;planSha256=(Sha $path)}
         }
         'stage' {
-            Assert-Fields $request @('planPath','planSha256','desktopProcessId') @('planPath','planSha256','desktopProcessId')
+            Assert-Fields $request @('planPath','planSha256','desktopProcessId','cancelPath') @('planPath','planSha256','desktopProcessId')
             $path=Assert-Path $request.planPath
             if ((Split-Path -Parent $path) -ine (Split-Path -Parent $RequestPath) -or [IO.Path]::GetFileName($path) -cne 'staged-plan.json' -or (Sha $path) -cne $request.planSha256) { throw 'The confirmed protected plan changed.' }
+            # The helper creates this file to request cooperative cancellation.
+            $cancel=if ($request.PSObject.Properties['cancelPath']) { [string]$request.cancelPath } else { '' }
+            if ($cancel -and ((Split-Path -Parent $cancel) -ine (Split-Path -Parent $RequestPath) -or [IO.Path]::GetFileName($cancel) -cne 'staged-cancel')) { throw 'Invalid cancellation request.' }
             $worker=Join-Path $PSScriptRoot '../windows-bitlocker/BitLockerSetup.ps1'
             $result=& {
-                param($Plan,[uint32]$AuthenticatedPid,[string]$WorkerPath)
+                param($Plan,[uint32]$AuthenticatedPid,[string]$WorkerPath,[string]$CancelPath)
                 . $WorkerPath -LibraryOnly
-                Invoke-StagingWrite $Plan $AuthenticatedPid
-            } (Read-Json $path) $request.desktopProcessId $worker
+                Invoke-StagingWrite $Plan $AuthenticatedPid $CancelPath
+            } (Read-Json $path) $request.desktopProcessId $worker $cancel
         }
         'status' {
             $result=Get-StagingStatus $request
@@ -92,11 +95,17 @@ try {
         default {
             Assert-Fields $request @('operationId') @('operationId')
             $state=Read-StagingState $request.operationId
-            $result=if ($Action -eq 'arm') { Invoke-StagingArm $state } else { Invoke-StagingCleanup $state }
+            $result=switch ($Action) {
+                'arm' { Invoke-StagingArm $state }
+                'firmware' { Invoke-StagingFirmware $state }
+                default { Invoke-StagingCleanup $state }
+            }
         }
     }
     Emit 'result' $Action @{result=$result}
 } catch {
-    Emit 'error' $Action @{code='staged_iso_failed';message=($_.Exception.Message+' If preparation already started, use Remove temporary installer before trying again.')}
+    # Only staging can leave partial partitions behind for reviewed removal.
+    $hint=if ($Action -eq 'stage') { ' If preparation already started, use Remove temporary installer before trying again.' } else { '' }
+    Emit 'error' $Action @{code='staged_iso_failed';message=($_.Exception.Message+$hint)}
     exit 1
 } finally { if ($acquired) { $mutex.ReleaseMutex() }; if ($null -ne $mutex) { $mutex.Dispose() } }

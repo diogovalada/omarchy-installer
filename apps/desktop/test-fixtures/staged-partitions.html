@@ -8,9 +8,10 @@ import StagedInstaller from '/src/lib/StagedInstaller.svelte';
 import { setup } from '/src/lib/setup';
 const GiB=1024**3, MiB=1024**2;
 const limited=new URLSearchParams(location.search).has('limited');
+const review=new URLSearchParams(location.search).has('review');
 const partition={kind:'partition',partitionNumber:3,partitionGuid:'fixture-guid',offsetBytes:300*MiB,sizeBytes:953*GiB,label:'C:',fileSystem:'NTFS',freeBytes:180*GiB,resizeState:'unchecked'};
 const disk={diskNumber:0,diskUniqueId:'fixture-disk',diskSizeBytes:954*GiB,unallocatedBytes:0,largestFreeBytes:0,regions:[{kind:'partition',partitionNumber:1,offsetBytes:MiB,sizeBytes:260*MiB,label:'EFI system',resizeState:'unavailable',resizeReason:'System partition; kept unchanged.'},partition,{kind:'partition',partitionNumber:4,offsetBytes:954*GiB-GiB,sizeBytes:GiB,label:'Windows recovery',resizeState:'unavailable',resizeReason:'System partition; kept unchanged.'}]};
-const snapshot={status:'running',stage:'inspecting',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[disk],minimumLinuxBytes:32*GiB,temporaryBytes:7.5*GiB}};
+const snapshot={status:'running',stage:'inspecting',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[disk],minimumLinuxBytes:32*GiB,temporaryBytes:7.5*GiB,secureBoot:true}};
 window.isTauri=true;
 window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
   if(command==='setup_status')return structuredClone(snapshot);
@@ -30,5 +31,5 @@ setTimeout(()=>{
   snapshot.stagedIso.choices=limited?[]:[{diskNumber:0,diskUniqueId:disk.diskUniqueId,diskSizeBytes:disk.diskSizeBytes,label:'Resize C:',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:partition.partitionGuid},encryption:[{protectionStatus:1}]}];
   snapshot.stage='analyzing-resize';void setup.refresh();
 },1000);
-setTimeout(()=>{snapshot.status='complete';snapshot.stage='complete';void setup.refresh();},2000);
+setTimeout(()=>{snapshot.status='complete';snapshot.stage='complete';if(review)snapshot.stagedReview={summary:'EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk 0?\n\nShrink C: from 953.0 to 881.5 GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.\n\nSuspend BitLocker protection on C: without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.'};void setup.refresh();},2000);
 </script><style>body{overflow:auto}#app{max-width:880px;padding:24px;margin:auto}</style></body></html>

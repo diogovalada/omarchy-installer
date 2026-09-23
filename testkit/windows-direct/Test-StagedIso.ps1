@@ -379,4 +379,56 @@ try {
     foreach($name in @('EFI/limine','EFI')){$path=Join-Path $temp $name;if(Test-Path -LiteralPath $path){[IO.Directory]::Delete($path)}}
     [IO.Directory]::Delete($temp)
 }
+# Planning never consults Secure Boot, and a reviewed shrink can also leave
+# room for Omarchy right after the temporary installer.
+if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
+    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return "layout"; } } }'
+}
+& {
+    $planDisk=[pscustomobject]@{Number=0;UniqueId='plan-disk';Size=[long]500GB;SerialNumber='serial'}
+    $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='66666666-6666-6666-6666-666666666666';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}
+    function Get-StagingRelease { return [pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB} }
+    function Confirm-SecureBootUEFI { throw 'Planning must not require Secure Boot to be off.' }
+    function Get-StagingDisk { return $planDisk }
+    function Get-StagingEncryption { return @() }
+    function Get-Partition { return $windowsPart }
+    function Get-ShrinkCandidate { return @{eligible=$true;maximumAllocationBytes=[long]100GB;volumeId='volume';driveLetter='C'} }
+    function Get-InspectedPartitions { return @($windowsPart) }
+    function Assert-Path($Path) { return $Path }
+    $staging=[long](512MB+7GB)
+    $request=[pscustomobject]@{sourceIsoPath='C:\omarchy.iso';sourceSha256=('a'*64);sourceLength=[long]6GB;diskNumber=0;diskUniqueId='plan-disk';targetKind='shrink';shrinkPartitionNumber=3;shrinkPartitionGuid=$windowsPart.Guid;linuxBytes=[long]40GB}
+    $plan=Get-StagingPlan $request
+    Assert ($plan.linuxBytes -eq 40GB -and $plan.shrink.allocationBytes -eq $staging+40GB) 'Space for Omarchy was not added to the shrink.'
+    Assert ($plan.partitions[0].offsetBytes -eq $plan.shrink.freedOffsetBytes -and $plan.shrink.afterSizeBytes -eq $plan.shrink.freedOffsetBytes-1MB) 'The installer must sit right after the shrunk partition.'
+    Assert ($plan.largestFreeAfterStagingBytes -eq 40GB -and $plan.shrink.driveLetter -eq 'C') 'Omarchy space or the drive letter is missing from the plan.'
+    $request.linuxBytes=[long]0
+    $replace=Get-StagingPlan $request
+    Assert ($replace.linuxBytes -eq 0 -and $replace.shrink.allocationBytes -eq $staging) 'Replacing Windows must shrink only for the temporary installer.'
+    $request.linuxBytes=[long]31GB
+    Reject { Get-StagingPlan $request } 'Space below the installer minimum was accepted.'
+    $request.linuxBytes=[long]99GB
+    Reject { Get-StagingPlan $request } 'More space than Windows can release was accepted.'
+    $free=[pscustomobject]@{sourceIsoPath='C:\omarchy.iso';sourceSha256=('a'*64);sourceLength=[long]6GB;diskNumber=0;diskUniqueId='plan-disk';targetKind='free';startOffsetBytes=[long]1MB;linuxBytes=[long]40GB}
+    Reject { Get-StagingPlan $free } 'Omarchy space was reserved without a reviewed shrink.'
+}
+
+# Copying records the source hash while reporting progress, and cancellation
+# from the progress callback stops it. The boot entry neither rereads the
+# whole image nor waits on a one-entry menu.
+& {
+    $dir=Join-Path $env:TEMP ('omarchy-staged-hash-test-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($dir)
+    try {
+        $src=Join-Path $dir 'source'; [IO.File]::WriteAllBytes($src,[byte[]](1..200))
+        $counted=@{bytes=[long]0}
+        $hash=Copy-StagedFile $src (Join-Path $dir 'copy') '' { param($Count) $counted.bytes+=$Count }
+        Assert ($hash -ceq (Sha $src) -and $counted.bytes -eq 200) 'Copy did not return the source hash or report every byte.'
+        Reject { Copy-StagedFile $src (Join-Path $dir 'cancelled') '' { param($Count) throw 'Preparation was cancelled.' } } 'A cancelled copy completed.'
+        $config=Get-StagingConfig ([pscustomobject]@{partitions=@(@{},@{guid=[guid]::NewGuid().ToString()});release=[pscustomobject]@{kernelPath='arch/boot/x86_64/vmlinuz-linux';initrdPath='arch/boot/x86_64/initramfs-linux.img'}})
+        Assert ($config -notmatch 'checksum=' -and $config -match 'set timeout=0') 'The staged boot entry rereads the image or waits on a one-entry menu.'
+    } finally {
+        foreach ($name in @('source','copy','cancelled')) { $path=Join-Path $dir $name; if (Test-Path -LiteralPath $path) { [IO.File]::Delete($path) } }
+        [IO.Directory]::Delete($dir)
+    }
+}
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'

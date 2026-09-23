@@ -2,6 +2,16 @@
 
 Decision date: 2026-09-06.
 
+**September 23 update — review fixes:** a reviewed shrink can again leave
+unallocated space for Omarchy after the temporary installer when the user keeps
+Windows; replacing Windows still shrinks only for the installer. Secure Boot is
+no longer required off before preparation: startup selection checks it, and the
+app offers a firmware-settings restart once staging has suspended BitLocker. The
+plan is reviewed in the app, copying shows progress and can be stopped, files
+are hashed while copying, and the reminder does not offer to resume protection
+while an installer waits to be selected. See the
+[provider README](../providers/staged-iso/README.md).
+
 **September 19 update — temporary space only:** Windows now prepares only the
 temporary installer-file and EFI loader partitions (ISO size plus 1 GiB, and 512 MiB
 for EFI). It does not reserve a Linux region. The booted official installer

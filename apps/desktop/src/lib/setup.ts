@@ -10,7 +10,8 @@ export interface UsbReview { token:string; choiceId:string; mode:'erase'|'preser
 export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
-  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;operationId?:string;status?:string;message?:string}|null;
+  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
+  stagedReview?:{summary:string}|null;
   usbReview?:UsbReview|null;
   bitLocker?:{message:string;reminderRegistered:boolean}|null;
   kind: 'usb' | 'direct' | null; status: string; stage: string; message: string;
@@ -50,10 +51,11 @@ export const setup = { subscribe:state.subscribe, refresh,
   inspectUsb:(choiceId:string,elevated=false) => command('inspect_usb_choice',{choiceId,elevated}),
   prepare:(action:'firmware'|'runtime') => command('prepare_setup', {action}),
   prepareBitLocker:(reminderOnly:boolean) => command('prepare_bitlocker', {reminderOnly}),
-  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
+  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'firmware'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
   reviewUsb:(choiceId:string,mode:'erase'|'preserve') => command('review_usb_setup',{choiceId,mode}),
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),
+  respondStagedReview:(approved:boolean) => command('respond_staged_review',{approved}),
   cancel:() => command('cancel_setup') };
 
 export function usbIssueSummary(inspection:UsbInspection):string {

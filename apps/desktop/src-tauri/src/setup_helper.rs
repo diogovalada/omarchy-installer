@@ -875,31 +875,50 @@ fn execute(
                         input["targetKind"] = json!("shrink");
                         input["shrinkPartitionNumber"] = json!(partition_number);
                         input["shrinkPartitionGuid"] = json!(partition_guid);
+                        if choice.linux_bytes > 0 {
+                            input["linuxBytes"] = json!(choice.linux_bytes);
+                        }
                     }
                     DirectTarget::Delete { .. } => {
                         return Err("Staging never deletes existing partitions".into())
                     }
                 }
+                if choice.linux_bytes > 0 && input["targetKind"] != "shrink" {
+                    return Err("Space for Omarchy is only reserved by shrinking Windows".into());
+                }
                 let planned = run("plan", &input)?;
                 let plan = &planned["plan"];
                 if plan["diskNumber"] != choice.disk_number
                     || plan["diskUniqueId"] != choice.disk_unique_id
-                    || plan["linuxBytes"] != 0
+                    || plan["linuxBytes"] != choice.linux_bytes
                     || plan["sourceSha256"] != request.source.sha256
                 {
                     return Err("The staging plan changed the requested allocation or ISO".into());
                 }
+                let gib = |bytes: &Value| bytes.as_u64().unwrap_or(0) as f64 / 1073741824.0;
                 let shrink = if plan["shrink"].is_null() {
                     "Use existing unallocated space.".to_owned()
                 } else {
+                    let volume = plan["shrink"]["driveLetter"]
+                        .as_str()
+                        .filter(|letter| !letter.is_empty())
+                        .map(|letter| format!("{letter}:"))
+                        .unwrap_or_else(|| {
+                            format!("partition {}", plan["shrink"]["partitionNumber"])
+                        });
                     format!(
-                        "Shrink Windows partition {} from {:.2} to {:.2} GiB.",
-                        plan["shrink"]["partitionNumber"],
-                        plan["shrink"]["beforeSizeBytes"].as_u64().unwrap_or(0) as f64
-                            / 1073741824.0,
-                        plan["shrink"]["afterSizeBytes"].as_u64().unwrap_or(0) as f64
-                            / 1073741824.0
+                        "Shrink {volume} from {:.1} to {:.1} GiB.",
+                        gib(&plan["shrink"]["beforeSizeBytes"]),
+                        gib(&plan["shrink"]["afterSizeBytes"])
                     )
+                };
+                let omarchy_space = if choice.linux_bytes > 0 {
+                    format!(
+                        " Leave {:.0} GiB unallocated for Omarchy after it.",
+                        gib(&plan["linuxBytes"])
+                    )
+                } else {
+                    String::new()
                 };
                 let volumes = plan["bitLocker"]
                     .as_array()
@@ -918,7 +937,7 @@ fn execute(
                 let encryption = if active.is_empty() {
                     String::new()
                 } else {
-                    format!("\n\nSuspend BitLocker protection on {} without decrypting. Protection stays suspended until you resume it. At your next Windows sign-in, a reminder will ask you to resume after booting through your final boot menu; it will not resume automatically.", active.join(", "))
+                    format!("\n\nSuspend BitLocker protection on {} without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.", active.join(", "))
                 };
                 let largest = plan["largestFreeAfterStagingBytes"]
                     .as_u64()
@@ -927,14 +946,14 @@ fn execute(
                     .as_u64()
                     .ok_or("Missing official installation minimum")?;
                 let space_note = if largest < required {
-                    format!("After staging, the largest unallocated region is {:.1} GiB. The official installer needs at least {:.0} GiB. A future ISO with same-disk support can free more space after boot by deleting an unneeded partition.", largest as f64 / 1073741824.0, required as f64 / 1073741824.0)
+                    format!("Afterwards, the largest free space is {:.1} GiB, but Omarchy needs at least {:.0} GiB. In the installer, delete a partition you no longer need, such as Windows, to make room.", largest as f64 / 1073741824.0, required as f64 / 1073741824.0)
                 } else {
                     format!(
-                        "After staging, the largest unallocated region is {:.1} GiB.",
+                        "Afterwards, the largest free space is {:.1} GiB.",
                         largest as f64 / 1073741824.0
                     )
                 };
-                let summary = format!("Prepare the official installer on Disk {}?\n\n{}\nCreate two temporary installer partitions. Windows Boot Manager and the boot order are preserved. {}{}\n\nThis does not install Linux. After staging, choose the next startup. In the booted installer, prepare space for Omarchy while keeping the temporary installer partitions until installation is complete.", choice.disk_number, shrink, space_note, encryption);
+                let summary = format!("Prepare the installer on Disk {}?\n\n{}{} Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. {}{}\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.", choice.disk_number, shrink, omarchy_space, space_note, encryption);
                 confirm(
                     output,
                     confirmations,
@@ -961,9 +980,23 @@ fn execute(
                     "Preparing the installer partitions and verifying copied files…",
                     false,
                 );
-                return run(
-                    "stage",
-                    &json!({"planPath":planned["planPath"],"planSha256":planned["planSha256"],"desktopProcessId":desktop_pid}),
+                // Copying can take minutes. The provider checks this file between
+                // chunks; the recorded partial installer is then removed by review.
+                let cancel_path = workspace.join("staged-cancel");
+                let path = write_request(
+                    &workspace,
+                    "staged-stage-request.json",
+                    &json!({"planPath":planned["planPath"],"planSha256":planned["planSha256"],"desktopProcessId":desktop_pid,"cancelPath":cancel_path}),
+                )?;
+                let mut command = provider_process::staged_command(&runtime, "stage", &path)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                return provider_process::run(
+                    command,
+                    None,
+                    Arc::clone(&cancel),
+                    Some(cancel_path),
+                    true,
+                    |value| provider_event(output, value),
                 );
             }
             if selection.is_some() {
@@ -985,7 +1018,9 @@ fn execute(
                 .and_then(|items| items.iter().find(|record| record["operationId"] == id))
                 .ok_or("Recorded staging operation not found")?;
             let (name, kind, summary) = if *action == StagedAction::Arm {
-                ("arm", "staged_arm", "Select the official installer for the next startup only? Restart Windows when ready. This does not restart now or change the normal firmware boot order.")
+                ("arm", "staged_arm", "Select the installer for the next restart only? Restart Windows when you're ready. This doesn't restart now or change the normal boot order.")
+            } else if *action == StagedAction::Firmware {
+                ("firmware", "staged_firmware", "Restart into firmware settings now to turn off Secure Boot? Save your work first. BitLocker protection is suspended, so this won't ask for your recovery key. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.")
             } else {
                 ("cleanup", "staged_cleanup", "Remove this temporary installer and all files on its two recorded partitions? Continue only after booting the installed Omarchy independently, or if you are abandoning this installation. Linux completion is not inferred. Windows and installed Linux partitions are preserved; reclaimed space stays unallocated.")
             };

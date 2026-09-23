@@ -163,7 +163,11 @@ pub fn direct_command(
 }
 
 pub fn staged_command(root: &Path, action: &str, request: &Path) -> Result<Command, String> {
-    if !["inspect", "plan", "stage", "status", "arm", "cleanup"].contains(&action) {
+    if ![
+        "inspect", "plan", "stage", "status", "arm", "firmware", "cleanup",
+    ]
+    .contains(&action)
+    {
         return Err("Unknown staged installation action".into());
     }
     let mut command = Command::new(system_powershell()?);

@@ -59,7 +59,7 @@
   {:else if complete}
     <div class="done" role="status"><Check size={21}/>{kind === 'usb' ? 'Bootable USB created and verified.' : 'Omarchy has been installed.'}</div>
     {#if kind === 'usb'}
-      {#if snapshot?.receipt?.receipt?.mode === 'preserve'}<p>Your existing files and partitions were kept.</p>{/if}
+      {#if snapshot?.receipt?.receipt?.mode === 'preserve'}<p>Your existing files and partitions were kept.</p><p>When the installer asks where to install, choose your computer's disk. Current installers may also list this USB drive; installing to it would erase your files.</p>{/if}
       {#if snapshot?.receipt?.receipt?.eject?.status === 'ejected'}
         <p>The USB was safely ejected. You can unplug it now.</p>
       {:else}

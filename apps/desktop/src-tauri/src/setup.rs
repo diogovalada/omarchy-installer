@@ -64,6 +64,7 @@ pub struct Snapshot {
     staged_iso: Option<Value>,
     staged_testing: bool,
     staged_recovery: Option<Value>,
+    staged_review: Option<Value>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +96,7 @@ struct Inner {
     usb_review: Option<PendingUsbReview>,
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
     cancel: Arc<AtomicBool>,
+    staged_review: Option<std::sync::mpsc::Sender<bool>>,
 }
 #[derive(Clone)]
 pub struct Setup {
@@ -124,11 +126,13 @@ impl Default for Setup {
                     staged_iso: None,
                     staged_testing: crate::direct_install_policy::STAGED_ISO_TESTING,
                     staged_recovery: None,
+                    staged_review: None,
                 },
                 destinations: vec![],
                 usb_review: None,
                 writer: None,
                 cancel: Arc::new(AtomicBool::new(false)),
+                staged_review: None,
             })),
         }
     }
@@ -1205,6 +1209,40 @@ pub fn start_setup(
     setup.snapshot()
 }
 
+/// Show the staging plan in the app, like the USB review, and wait for the
+/// user's answer. The helper gives up after 15 minutes, so the wait does too.
+fn review_staged_write(service: &Setup, app: &tauri::AppHandle, summary: &str) -> bool {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    service.update(app, |inner| {
+        inner.staged_review = Some(sender);
+        inner.snapshot.staged_review = Some(json!({"summary": summary}));
+        inner.snapshot.cancel_available = false;
+    });
+    let approved = receiver
+        .recv_timeout(std::time::Duration::from_secs(900))
+        .unwrap_or(false);
+    service.update(app, |inner| {
+        inner.staged_review = None;
+        inner.snapshot.staged_review = None;
+    });
+    approved
+}
+
+#[tauri::command]
+pub fn respond_staged_review(approved: bool, setup: State<'_, Setup>) -> Result<Snapshot, String> {
+    let sender = setup
+        .inner
+        .lock()
+        .map_err(|_| "Setup state is unavailable")?
+        .staged_review
+        .take()
+        .ok_or("No installer preparation is waiting for review")?;
+    sender
+        .send(approved)
+        .map_err(|_| "The review is no longer active")?;
+    setup.snapshot()
+}
+
 #[tauri::command]
 pub fn cancel_setup(setup: State<'_, Setup>) -> Result<Snapshot, String> {
     let mut inner = setup
@@ -1295,6 +1333,9 @@ fn run_elevated(
                     "bitlocker_reminder" => (MessageDialogKind::Info, "Set restoration reminder"),
                     "staged_write" => (MessageDialogKind::Warning, "Prepare installer partitions"),
                     "staged_arm" => (MessageDialogKind::Info, "Select next startup"),
+                    "staged_firmware" => {
+                        (MessageDialogKind::Warning, "Restart to firmware settings")
+                    }
                     "staged_cleanup" => (MessageDialogKind::Warning, "Remove temporary installer"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
@@ -1328,6 +1369,8 @@ fn run_elevated(
                             false
                         }
                     }
+                } else if operation == "staged_write" {
+                    review_staged_write(service, app, summary)
                 } else if let Some(expected) = &usb_approval {
                     consume_usb_confirmation(expected, &value["plan"], &mut usb_approval_used)?;
                     !service

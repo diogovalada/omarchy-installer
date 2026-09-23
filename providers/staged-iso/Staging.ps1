@@ -54,10 +54,15 @@ function Start-StagingSuspension($Plan,[uint32]$AuthenticatedPid) {
 }
 function Get-StagingDisk([int]$Number,[string]$Identity) {
     $disk=Get-Disk -Number $Number -ErrorAction Stop
-    if ([string]$disk.UniqueId -cne $Identity -or -not $Identity -or $disk.PartitionStyle -ne 'GPT' -or $disk.IsOffline -or $disk.IsReadOnly -or $disk.LogicalSectorSize -ne 512 -or [string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { throw 'Unsupported or changed staging disk.' }
+    if ([string]$disk.UniqueId -cne $Identity -or -not $Identity) { throw 'This disk changed. Refresh disks.' }
+    if ($disk.IsOffline -or $disk.IsReadOnly) { throw 'This disk is offline or read-only in Windows.' }
+    if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { throw ('Only internal NVMe and SATA disks are supported, not '+[string]$disk.BusType+' disks. Use a USB installer instead.') }
+    if ($disk.PartitionStyle -eq 'MBR') { throw 'This disk uses the older MBR layout (legacy BIOS). Installing without USB needs a GPT disk; use a USB installer instead.' }
+    if ($disk.PartitionStyle -ne 'GPT') { throw 'This disk is not initialized with a GPT partition table.' }
+    if ($disk.LogicalSectorSize -ne 512) { throw 'Disks with 4K logical sectors are not supported yet. Use a USB installer instead.' }
     if ($disk.PhysicalSectorSize -lt 512 -or $disk.PhysicalSectorSize -gt 65536 -or ($disk.PhysicalSectorSize -band ($disk.PhysicalSectorSize-1)) -ne 0) { throw 'Unsupported physical sector alignment.' }
     foreach ($p in @(Get-InspectedPartitions $disk)) {
-        if ([string]$p.GptType -in @('{5808c8aa-7e8f-42e0-85d2-e1e90434cfb3}','{af9b60a0-1431-4f62-bc68-3311714a69ad}')) { throw 'Dynamic disks are not supported for staging.' }
+        if ([string]$p.GptType -in @('{5808c8aa-7e8f-42e0-85d2-e1e90434cfb3}','{af9b60a0-1431-4f62-bc68-3311714a69ad}')) { throw 'Dynamic disks are not supported. Use a USB installer instead.' }
     }
     return $disk
 }
@@ -78,6 +83,8 @@ function Get-StagingChoices($Release,$Resize=$null) {
         if ($matches.Count -ne 1) { throw 'The partition changed. Refresh disks before checking resize options.' }
     }
     Emit 'progress' 'inspecting' @{message='Reading disks and Windows encryption status...'}
+    # Reported so the app can explain when to turn it off; staging never needs it off.
+    $secureBoot=try { [bool](Confirm-SecureBootUEFI -ErrorAction Stop) } catch { $null }
     $encryptionSnapshot=Get-BitLockerSnapshot -ForStaging
     foreach ($disk in @(Get-Disk)) {
         $encryption=@()
@@ -163,7 +170,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
             $choices+=$diskChoices
         } catch { $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
     }
-    return @{choices=$choices;blocked=$blocked;disks=$disks;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead}
+    return @{choices=$choices;blocked=$blocked;disks=$disks;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead;secureBoot=$secureBoot}
 }
 function Merge-StagingAnalysis($Inventory,$Measured,$Query) {
     $disk=@($Inventory.disks | Where-Object { $_.diskNumber -eq $Query.diskNumber -and $_.diskUniqueId -ceq $Query.diskUniqueId })
@@ -208,13 +215,19 @@ function Get-LargestFreeRegion($Partitions,[long]$DiskSize) {
     return $largest
 }
 function Get-StagingPlan($Request) {
-    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind')
+    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid','linuxBytes') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind')
     $release=Get-StagingRelease $Request.sourceSha256 $Request.sourceLength
-    if ([Omarchy.DirectX86.NativeDisk]::Firmware() -ne 'uefi' -or (Confirm-SecureBootUEFI -ErrorAction Stop)) { throw 'Staging requires x64 UEFI with Secure Boot disabled.' }
+    # Secure Boot is checked when selecting the installer startup. By then
+    # staging has suspended BitLocker, so turning it off cannot trigger recovery.
+    if ([Omarchy.DirectX86.NativeDisk]::Firmware() -ne 'uefi') { throw 'Installing without USB requires a UEFI computer.' }
     $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
     $disk=Get-StagingDisk $Request.diskNumber $Request.diskUniqueId
     $bitLocker=@(Get-StagingEncryption $disk.Number)
-    $data=Align-Up ([long]$release.sizeBytes+1GB); $total=512MB+$data; $shrink=$null
+    # Space left unallocated for Omarchy after the temporary installer when
+    # Windows is kept. Only a reviewed shrink can create it.
+    $linux=if ($Request.PSObject.Properties['linuxBytes']) { [long]$Request.linuxBytes } else { [long]0 }
+    if ($linux -ne 0 -and ($Request.targetKind -ne 'shrink' -or $linux -lt $release.minimumLinuxBytes -or $linux % 1MB -ne 0)) { throw 'Invalid space for Omarchy.' }
+    $data=Align-Up ([long]$release.sizeBytes+1GB); $staging=512MB+$data; $total=$staging+$linux; $shrink=$null
     $script:minimumBytes=[long]$total
     if ($Request.targetKind -eq 'free') {
         $start=[long]$Request.startOffsetBytes; Assert-StagingFree $disk $start $total
@@ -223,8 +236,10 @@ function Get-StagingPlan($Request) {
         if ([guid]$part.Guid -ne [guid]$Request.shrinkPartitionGuid) { throw 'Shrink partition changed.' }
         $candidate=Get-ShrinkCandidate $part
         if (-not $candidate.eligible -or $candidate.maximumAllocationBytes -lt $total) { throw 'Windows cannot release the requested space while retaining its reserve.' }
+        # The installer sits right after the shrunk partition, so Windows can
+        # reclaim it with Extend Volume later; Omarchy's space follows it.
         $start=(Align-Down ([long]$part.Offset+[long]$part.Size))-$total
-        $shrink=[ordered]@{partitionNumber=[int]$part.PartitionNumber;partitionGuid=[string]$part.Guid;volumeId=$candidate.volumeId;offsetBytes=[long]$part.Offset;beforeSizeBytes=[long]$part.Size;afterSizeBytes=$start-[long]$part.Offset;freedOffsetBytes=$start;allocationBytes=$total}
+        $shrink=[ordered]@{partitionNumber=[int]$part.PartitionNumber;partitionGuid=[string]$part.Guid;volumeId=$candidate.volumeId;driveLetter=[string]$candidate.driveLetter;offsetBytes=[long]$part.Offset;beforeSizeBytes=[long]$part.Size;afterSizeBytes=$start-[long]$part.Offset;freedOffsetBytes=$start;allocationBytes=$total}
     } else { throw 'Staging supports free space or an explicitly reviewed NTFS shrink; it never deletes existing partitions.' }
     $esp=[guid]::NewGuid().ToString(); $source=[guid]::NewGuid().ToString()
     $projected=@(foreach ($p in @(Get-InspectedPartitions $disk)) {
@@ -233,9 +248,9 @@ function Get-StagingPlan($Request) {
     })+@([pscustomobject]@{Offset=$start;Size=[long]512MB},[pscustomobject]@{Offset=$start+512MB;Size=$data})
     $largest=Get-LargestFreeRegion $projected $disk.Size
     $minimumGiB=[Math]::Ceiling([decimal]$release.minimumLinuxBytes/1GB)
-    # Keep zero-valued Linux fields in schema 1 recovery records. No Linux
-    # space is reserved by Windows; the booted installer prepares that space.
-    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=[long]0;largestFreeAfterStagingBytes=$largest;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=$start+512MB;sizeBytes=$data});boot=$null;files=@();message="Restart into the official installer. It will need at least $minimumGiB GiB of free space to install Omarchy; keep the two temporary installer partitions until installation is complete."}
+    # linuxBytes is space left unallocated, never a partition Windows creates.
+    # The booted installer installs Omarchy into the largest free region.
+    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=$linux;largestFreeAfterStagingBytes=$largest;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=$start+512MB;sizeBytes=$data});boot=$null;files=@();message="Restart into the installer. It needs at least $minimumGiB GiB of free space to install Omarchy. Keep the two temporary installer partitions until Omarchy starts on its own."}
 }
 function Get-StagingRoot {
     $common=[Environment]::GetFolderPath('CommonApplicationData')
@@ -339,7 +354,8 @@ function Get-IsoInventory([string]$Root) {
         $relative=$item.FullName.Substring($Root.TrimEnd('\').Length+1).Replace('\','/')
         Assert-StagingRelativePath $relative
         if (-not $seen.Add($relative) -or $items.Count -ge 10000) { throw 'Duplicate or excessive ISO files.' }
-        $items.Add(@{path=$relative;sizeBytes=[long]$item.Length;sha256=(Sha $item.FullName)})
+        # Hashes are recorded while copying; the whole ISO was verified already.
+        $items.Add(@{path=$relative;sizeBytes=[long]$item.Length;sha256=''})
     }
     return $items.ToArray()
 }
@@ -348,17 +364,35 @@ function Get-StagingConfig($State) {
     $kernel=$State.release.kernelPath; $initrd=$State.release.initrdPath
     Assert-StagingRelativePath $kernel; Assert-StagingRelativePath $initrd
     # Find only this operation's marker; the kernel uses its exact GPT GUID.
-    return "set timeout=5`nmenuentry 'Start official Omarchy installer' {`n  search --no-floppy --file --set=root /omarchy-stage-$guid`n  linux /$kernel archisobasedir=arch archisodevice=/dev/disk/by-partuuid/$guid copytoram=n checksum=y quiet splash xe.enable_panel_replay=0 initramfs_async=0`n  initrd /$initrd`n}`n"
+    # Files are verified before startup is selected, so archiso's checksum=y
+    # would only reread the whole live image on every installer boot.
+    return "set timeout=0`nmenuentry 'Start official Omarchy installer' {`n  search --no-floppy --file --set=root /omarchy-stage-$guid`n  linux /$kernel archisobasedir=arch archisodevice=/dev/disk/by-partuuid/$guid copytoram=n quiet splash xe.enable_panel_replay=0 initramfs_async=0`n  initrd /$initrd`n}`n"
 }
-function Copy-StagedFile([string]$Source,[string]$Destination,[string]$ExpectedHash) {
+# Copy while hashing the source, then compare a readback of the destination.
+# Returns the hash; an expected hash, when given, must match the source.
+function Copy-StagedFile([string]$Source,[string]$Destination,[string]$ExpectedHash='',[scriptblock]$Progress=$null) {
     if (Test-Path -LiteralPath $Destination) { throw 'Refusing to overwrite a staged file.' }
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination))
-    $input=[IO.File]::OpenRead($Source)
+    $sha=[Security.Cryptography.SHA256]::Create(); $buffer=New-Object byte[] 4194304
     try {
-        $output=New-Object IO.FileStream($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,1048576,[IO.FileOptions]::WriteThrough)
-        try { $input.CopyTo($output,1048576); $output.Flush($true) } finally { $output.Dispose() }
-    } finally { $input.Dispose() }
-    if ((Sha $Destination) -cne $ExpectedHash) { throw 'Staged file readback failed.' }
+        $reader=[IO.File]::OpenRead($Source)
+        try {
+            $output=New-Object IO.FileStream($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,1048576,[IO.FileOptions]::WriteThrough)
+            try {
+                while (($read=$reader.Read($buffer,0,$buffer.Length)) -gt 0) {
+                    [void]$sha.TransformBlock($buffer,0,$read,$null,0)
+                    $output.Write($buffer,0,$read)
+                    if ($null -ne $Progress) { & $Progress $read }
+                }
+                [void]$sha.TransformFinalBlock($buffer,0,0)
+                $output.Flush($true)
+            } finally { $output.Dispose() }
+        } finally { $reader.Dispose() }
+        $hash=([BitConverter]::ToString($sha.Hash)).Replace('-','').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+    if ($ExpectedHash -and $hash -cne $ExpectedHash) { throw 'Staged source file changed.' }
+    if ((Sha $Destination) -cne $hash) { throw 'Staged file readback failed.' }
+    return $hash
 }
 function Write-StagedText([string]$Path,[string]$Text) {
     $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes($Text)
@@ -374,7 +408,7 @@ function Write-StagingBootFiles($State,[string]$Mount,[string]$Loader) {
     [void][IO.Directory]::CreateDirectory($scratch)
     $pendingLoader=Join-Path $scratch 'BOOTX64.EFI'
     $pendingConfig=Join-Path $scratch 'grub.cfg'
-    Copy-StagedFile $Loader $pendingLoader $State.loaderSha256
+    [void](Copy-StagedFile $Loader $pendingLoader $State.loaderSha256)
     Write-StagedText $pendingConfig $State.configText
     $boot=Join-Path $Mount 'EFI/BOOT'; $menu=Join-Path $Mount 'EFI/Omarchy'
     [void][IO.Directory]::CreateDirectory($boot)
@@ -383,7 +417,7 @@ function Write-StagingBootFiles($State,[string]$Mount,[string]$Loader) {
     [IO.File]::Move($pendingConfig,(Join-Path $menu 'grub.cfg'))
     [IO.Directory]::Delete($scratch)
 }
-function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid) {
+function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath='') {
     [void](Get-StagingRelease $Plan.sourceSha256 $Plan.sourceLength)
     Assert-PhysicalDiskIdentity $Plan
     Assert-BitLockerUnchanged @($Plan.bitLocker) @(Get-StagingEncryption $Plan.diskNumber)
@@ -419,7 +453,6 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid) {
         if (($files | Measure-Object sizeBytes -Sum).Sum -gt $Plan.partitions[1].sizeBytes-512MB) { throw 'Extracted ISO exceeds the planned staging capacity.' }
         $Plan.files=$files; $Plan.status='allocation-starting'; Save-StagingState $Plan
         Assert-PhysicalDiskIdentity $Plan
-        if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot changed after review.' }
         Start-StagingSuspension $Plan $AuthenticatedPid
         $layout=$Plan.layoutSha256
         Emit 'progress' 'allocating-staging' @{message='Preparing the reviewed free space and temporary installer partitions...'}
@@ -437,11 +470,20 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid) {
             $mount=Mount-StagingPartition $Plan $owned
             try {
                 if ($owned.role -eq 'source') {
-                    $copied=[long]0; $total=[long]($files | Measure-Object sizeBytes -Sum).Sum
+                    # Cancellation is cooperative and only offered while copying.
+                    # The partial installer stays recorded for reviewed removal.
+                    $copyState=@{copied=[long]0;reported=[long]0;total=[long]($files | Measure-Object sizeBytes -Sum).Sum}
+                    $step={
+                        param([long]$Count)
+                        $copyState.copied+=$Count
+                        if ($copyState.copied-$copyState.reported -ge 64MB -or $copyState.copied -eq $copyState.total) {
+                            $copyState.reported=$copyState.copied
+                            if ($CancelPath -and (Test-Path -LiteralPath $CancelPath)) { throw 'Preparation was cancelled.' }
+                            Emit 'progress' 'copying-installer' @{message='Copying and verifying the installer...';completedBytes=$copyState.copied;totalBytes=$copyState.total;cancelAvailable=[bool]$CancelPath}
+                        }
+                    }
                     foreach ($file in $files) {
-                        Copy-StagedFile (Join-Path $isoRoot $file.path) (Join-Path $mount $file.path) $file.sha256
-                        $copied+=$file.sizeBytes
-                        Emit 'progress' 'copying-installer' @{message='Copying and verifying the official installer...';completedBytes=$copied;totalBytes=$total}
+                        $file.sha256=Copy-StagedFile (Join-Path $isoRoot $file.path) (Join-Path $mount $file.path) '' $step
                     }
                     Write-StagedText (Join-Path $mount ('omarchy-stage-'+$owned.guid)) $Plan.operationId
                 } else {
@@ -481,7 +523,7 @@ function Invoke-StagingArm($State) {
     $disk=(Get-OwnedStagingPartition $State $State.partitions[0]).DiskNumber
     Assert-StagingEncryption $disk
     [void](Get-StagingDisk $disk $State.diskUniqueId)
-    if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot must be disabled before starting this installer.' }
+    if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot is on. Use Restart to firmware settings to turn it off; BitLocker is suspended, so this does not need your recovery key.' }
     $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }
     $efi=Get-OwnedStagingPartition $State $State.partitions[0]
@@ -493,6 +535,7 @@ function Invoke-StagingArm($State) {
             if ($owned.role -eq 'source') {
                 foreach ($file in $State.files) {
                     Assert-StagingRelativePath $file.path
+                    if ($file.sha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'The staging record has no verified hash for an installer file.' }
                     $path=Join-Path $mount $file.path
                     if ((Get-Item -LiteralPath $path).Length -ne $file.sizeBytes -or (Sha $path) -cne $file.sha256) { throw 'Installer files changed since staging.' }
                 }
@@ -506,6 +549,19 @@ function Invoke-StagingArm($State) {
     [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,[Convert]::FromBase64String($State.boot.option))
     $State.status='boot-scheduled'; Save-StagingState $State
     return @{operationId=$State.operationId;status=$State.status;message='Restart Windows when ready. The next startup selects the official installer once; the existing boot order is unchanged. Returning to Windows does not prove Linux installation completed.'}
+}
+function Invoke-StagingFirmware($State) {
+    if ($State.status -notin @('staged','arming','boot-scheduled')) { throw 'Only a completely staged installer can restart into firmware settings.' }
+    $disk=(Get-OwnedStagingPartition $State $State.partitions[0]).DiskNumber
+    # Turning Secure Boot off is safe only while BitLocker is suspended.
+    Assert-StagingEncryption $disk
+    if (-not (Confirm-SecureBootUEFI -ErrorAction Stop)) {
+        return @{operationId=$State.operationId;status=$State.status;message='Secure Boot is already off. Select the installer for the next restart.'}
+    }
+    $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
+    & $shutdown /r /fw /t 0
+    if ($LASTEXITCODE -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
+    return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }
 function Invoke-StagingCleanup($State) {
     if ($State.status -eq 'cleaned') { return Get-StagingSummary $State }

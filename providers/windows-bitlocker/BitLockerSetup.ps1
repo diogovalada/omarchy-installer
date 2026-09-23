@@ -221,6 +221,16 @@ function Resume-OwnedProtection($State,[string]$Path) {
     $State.status='restored'; Write-FollowupState $Path $State
     Remove-EncryptionReminder $State.volume.partitionGuid
 }
+# A prepared installer that has not been selected for startup still needs
+# protection suspended. The summary is display-only; failure to read it keeps
+# the normal choices.
+function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OmarchyStagedInstaller/summary.json')) {
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) { return $false }
+        $summary=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        return @($summary.operations | Where-Object { $_.status -in @('staged','arming') }).Count -gt 0
+    } catch { return $false }
+}
 function Show-EncryptionFollowup {
     $root=Get-FollowupRoot
     $guid=([guid](Split-Path -Leaf $PSScriptRoot)).ToString()
@@ -229,6 +239,7 @@ function Show-EncryptionFollowup {
     $path=Join-Path $PSScriptRoot 'state.json'; $state=Read-FollowupState $path
     if ($state.userSid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or $state.volume.partitionGuid -cne $guid -or $state.scriptSha256 -cne (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Reminder owner or program identity changed.' }
     $facts=Get-EncryptionFacts $state.volume.volumeId; $decision=Get-FollowupDecision $state $facts
+    $installerWaiting=$decision -eq 'suspended' -and (Test-StagedInstallerWaiting)
     if ($decision -in @('finished','restored')) {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
@@ -243,15 +254,15 @@ function Show-EncryptionFollowup {
         'uncertain' { 'Omarchy preparation was interrupted before the encryption change was confirmed. Check Windows encryption settings. Nothing will be re-enabled automatically; this reminder stays until protection is verified or you explicitly dismiss it.' }
         'decrypting' { 'Windows decryption is still running or paused. Wait for it to finish before using the official installer. You can check its progress in Windows settings. The restoration reminder remains active.' }
         'encrypting' { 'Windows encryption is running or paused. It is not yet verified as fully protected. Check progress in Windows settings; this reminder will retire when encryption and protection are both verified.' }
-        'suspended' { 'BitLocker protection is suspended on '+$facts.driveLetter+'. If you finished installing, first boot Windows through your final boot menu. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' }
+        'suspended' { if ($installerWaiting) { 'BitLocker protection is suspended on '+$facts.driveLetter+' for the Omarchy installer prepared on this computer. Keep it suspended until Omarchy is installed; the installer cannot start while protection is on. Closing this window reminds you next sign-in.' } else { 'BitLocker protection is suspended on '+$facts.driveLetter+'. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
     }
     $settings=New-Object Windows.Forms.Button; $settings.Text='Open BitLocker settings'; $settings.SetBounds(20,155,175,38)
-    $canResume=$state.origin -eq 'installer-suspension' -and $state.status -eq 'pending' -and $decision -eq 'suspended'
+    $canResume=$state.origin -eq 'installer-suspension' -and $state.status -eq 'pending' -and $decision -eq 'suspended' -and -not $installerWaiting
     if ($canResume) { $settings.Text='Resume protection' }
     $settings.Add_Click({
         if ($canResume) {
             try {
-                if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started through your final boot menu.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
+                if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started the way you normally start it.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
                 Resume-OwnedProtection $state $path; $form.Close()
             } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'BitLocker','OK','Error') }
             return
