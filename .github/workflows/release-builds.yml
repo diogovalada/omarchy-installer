@@ -57,7 +57,7 @@ jobs:
         run: node scripts/release-version.mjs --check
       - name: Test Windows portable staging
         if: runner.os == 'Windows'
-        run: node --test scripts/stage-windows-portable.test.mjs
+        run: node --test scripts/stage-windows-portable.test.mjs scripts/finalize-windows-portable.test.mjs
       - name: Select pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Cache Rust dependencies

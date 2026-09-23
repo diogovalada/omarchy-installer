@@ -164,7 +164,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          node --test scripts/stage-windows-portable.test.mjs
+          node --test scripts/stage-windows-portable.test.mjs scripts/finalize-windows-portable.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Portable staging tests failed.' }
           & ./testkit/windows-direct/Test-StoragePlan.ps1
           & ./testkit/windows-direct/Test-RuntimeDistribution.ps1

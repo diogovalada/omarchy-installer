@@ -59,4 +59,6 @@ $record.cache | Add-Member -NotePropertyName verifierSourceSha256 -NotePropertyV
 $launcher=[ordered]@{path=$stage.executablePath;sizeBytes=(Get-Item -LiteralPath $stage.executablePath).Length;sha256=(Get-FileHash -LiteralPath $stage.executablePath -Algorithm SHA256).Hash.ToLowerInvariant();signatureStatus=[string](Get-AuthenticodeSignature -LiteralPath $stage.executablePath).Status;extractionAndHashesVerified=$true;extractionAndHashSeconds=$verificationTimer.Elapsed.TotalSeconds;stagedMediaFileWriteVerified=$true;normalApplicationLaunchTested=$false}
 $record | Add-Member -NotePropertyName launcher -NotePropertyValue $launcher
 [IO.File]::WriteAllText($stage.recordPath,($record | ConvertTo-Json -Depth 12)+"`n",(New-Object Text.UTF8Encoding($false)))
-Write-Output ("Portable executable: "+$stage.executablePath)
+$finalExecutable=& node (Join-Path $PSScriptRoot 'finalize-windows-portable.mjs') (Split-Path -Leaf $stage.outputDirectory)
+if ($LASTEXITCODE -ne 0) { throw 'Portable package finalization failed.' }
+Write-Output ("Portable executable: "+($finalExecutable -join "`n"))

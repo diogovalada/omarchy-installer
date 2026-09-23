@@ -58,7 +58,7 @@ function verifyNotices(file) {
 }
 if (process.platform === 'win32') {
   const portableParent = join(root, 'artifacts/windows-portable');
-  const portable = one(portableParent, name => existsSync(join(portableParent, name, 'portable-record.json')));
+  const portable = join(portableParent, 'release');
   const recordPath = join(portable, 'portable-record.json');
   const record = JSON.parse(readFileSync(recordPath));
   assert.equal(record.testingBuild, false, 'Testing executables must not be published as normal releases.');

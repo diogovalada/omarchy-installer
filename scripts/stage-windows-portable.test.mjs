@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,8 @@ test('Windows preview staging produces a complete, verifiable payload', { skip: 
   });
   assert.equal(staged.status, 0, staged.stderr);
   const output = JSON.parse(staged.stdout);
+  assert.equal(basename(output.outputDirectory), 'release');
+  assert.equal(basename(output.payloadDirectory), 'release');
   const record = JSON.parse(readFileSync(output.recordPath, 'utf8'));
   assert.equal(record.testingBuild, false);
   assert.match(output.executablePath, /-portable\.exe$/);
@@ -96,6 +98,17 @@ test('Windows preview staging produces a complete, verifiable payload', { skip: 
   });
   assert.equal(testing.status, 0, testing.stderr);
   const testingOutput = JSON.parse(testing.stdout);
+  assert.equal(basename(testingOutput.outputDirectory), 'testing');
+  assert.equal(basename(testingOutput.payloadDirectory), 'testing');
   assert.match(testingOutput.executablePath, /-testing\.exe$/);
   assert.equal(JSON.parse(readFileSync(testingOutput.recordPath)).testingBuild, true);
+  const repeated = spawnSync(process.execPath, [join(root, 'scripts/stage-windows-portable.mjs'), 'release', 'built'], {
+    encoding:'utf8', env:{ ...process.env, OMARCHY_DISTRIBUTION:'usb-preview', OMARCHY_STAGED_ISO_TESTING:'1' },
+  });
+  assert.equal(repeated.status, 0, repeated.stderr);
+  const repeatedOutput = JSON.parse(repeated.stdout);
+  assert.equal(repeatedOutput.outputDirectory, testingOutput.outputDirectory);
+  assert.equal(repeatedOutput.payloadDirectory, testingOutput.payloadDirectory);
+  assert.deepEqual(readdirSync(join(root, 'artifacts/windows-portable')).sort(), ['release', 'testing']);
+  assert.deepEqual(readdirSync(join(root, 'artifacts/p')).sort(), ['release', 'testing']);
 });

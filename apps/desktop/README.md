@@ -44,7 +44,7 @@ Windows requires the ordinary Tauri WebView2/MSVC build prerequisites.
 
 The default Windows distribution is one portable executable. Run
 `pnpm desktop:package:windows -UnsignedPreview` to create an optimized release
-`Omarchy-Installer-0.1.0-x64-portable.exe` under `artifacts/windows-portable/`. Open
+`Omarchy-Installer-0.1.0-x64-portable.exe` under `artifacts/windows-portable/release/`. Open
 that executable directly. On first launch, an opening indicator appears while
 the launcher extracts and verifies its app and provider files into
 `%LOCALAPPDATA%\OmarchySetup\p\<id>`. Later launches verify and reuse that cache.
@@ -66,6 +66,8 @@ assets; development packages, native build artifacts and declarations are omitte
 Its output includes
 `portable-record.json` with hashes. The maintainer-only `-ReuseVerifiedBuild`
 option additionally binds an existing executable to its previous package record.
+Release and testing builds reuse fixed `release` and `testing` folders. Packaging
+removes older generated copies.
 An unsigned preview is not a signed or installation-qualified release.
 
 `-DebugBuild` remains available for development; Windows debug builds also use
@@ -81,8 +83,8 @@ Normal app exit is already blocked during active setup work; the elevated
 helper independently copies verified providers into its protected workspace.
 The downloaded ISO stays in place and is opened through a validated, read-only
 handle; the helper verifies its release checksum and signature before use.
-Abrupt process termination can leave temporary files. The build also retains an
-extracted development payload for review; users only need the outer executable.
+Abrupt process termination can leave temporary files. Packaging verifies an
+extracted payload before removing it; users only need the outer executable.
 
 The earlier NSIS distribution remains available only through the explicit
 `desktop:package:windows:installed` command. Its certificate/timestamp options

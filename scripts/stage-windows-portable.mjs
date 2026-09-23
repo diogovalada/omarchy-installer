@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, lstatSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, lstatSync, existsSync, rmSync } from 'node:fs';
 import { resolve, dirname, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,17 +37,22 @@ if (usbPreview) {
   if (manifest.direct_x86 !== null || manifest.apple !== null || manifest.files.some(file => /^(direct-x86|image-builder-x86)\//.test(file.path) && !sharedDiskFiles.has(file.path))) throw new Error('USB preview contains a direct-install provider.');
 } else if (!manifest.files.some(file => file.path === 'image-builder-x86/runtime.tar')) throw new Error('The full development package must include the construction runtime.');
 const outputParent = join(root, 'artifacts/windows-portable');
-mkdirSync(outputParent, { recursive: true });
-const packageId = randomUUID().slice(0, 8);
-const outputDirectory = join(outputParent, packageId);
-mkdirSync(outputDirectory); // Always a new directory; never merge user files into a package.
+const kind = testingBuild ? 'testing' : 'release';
+const outputDirectory = join(outputParent, kind);
 // NSIS's Windows compiler still bounds source paths. Keep its private staging
 // shorter than the normal output directory for deeply nested SDK dependencies.
 const stagingParent = join(root, 'artifacts/p');
-mkdirSync(stagingParent, { recursive: true });
-const portable = join(stagingParent, packageId);
+const portable = join(stagingParent, kind);
 if (manifest.files.some(file => join(portable, 'providers', file.path).length >= 260)) throw new Error('The checkout path is too long for NSIS packaging; use a shorter checkout path.');
-mkdirSync(portable);
+for (const path of [outputDirectory, portable]) {
+  if (existsSync(path)) {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe package directory: ${path}`);
+    rmSync(path, { recursive: true });
+  }
+}
+mkdirSync(outputDirectory, { recursive: true });
+mkdirSync(portable, { recursive: true });
 const files = [];
 function put(relative, bytes) {
   const path = join(portable, relative);
