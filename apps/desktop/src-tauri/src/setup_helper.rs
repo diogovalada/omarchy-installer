@@ -204,7 +204,9 @@ fn prepare_source(
     if !source.path.is_absolute()
         || source.length == 0
         || source.length > 64 * 1024 * 1024 * 1024
-        || source.signature.is_empty()
+        || (source.signature.is_empty() && !cfg!(feature = "staged-iso-testing"))
+        || source.sha256.len() != 64
+        || !source.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
         || source.signature.len() > 16384
         || source.file_name.len() > 128
         || !source.file_name.starts_with("omarchy-")
@@ -322,7 +324,27 @@ fn prepare_source(
     };
     #[cfg(not(windows))]
     let reused = false;
-    if !reused {
+    #[cfg(feature = "staged-iso-testing")]
+    if !reused && source.signature.is_empty() {
+        stage(
+            output,
+            "authenticating",
+            "Checking the local test image…",
+            true,
+        );
+        let digest = crate::downloads::testing_iso_digest(&path, source.length, cancel, |bytes| {
+            emit(
+                output,
+                json!({"protocol":1,"type":"event","stage":"authenticating",
+                "message":"Checking the local test image…", "bytes":bytes,
+                "totalBytes":source.length,"cancelAvailable":true}),
+            );
+        })?;
+        if !digest.eq_ignore_ascii_case(&source.sha256) {
+            return Err("The local test ISO changed since selection. Select it again.".into());
+        }
+    }
+    if !reused && !source.signature.is_empty() {
         stage(
             output,
             "authenticating",
@@ -343,15 +365,17 @@ fn prepare_source(
     )
     .map_err(|e| e.to_string())?;
     }
-    let mut signature = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(directory.join(format!("{}.sig", source.file_name)))
-        .map_err(|e| e.to_string())?;
-    signature
-        .write_all(&source.signature)
-        .map_err(|e| e.to_string())?;
-    signature.sync_all().map_err(|e| e.to_string())?;
+    if !source.signature.is_empty() {
+        let mut signature = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(format!("{}.sig", source.file_name)))
+            .map_err(|e| e.to_string())?;
+        signature
+            .write_all(&source.signature)
+            .map_err(|e| e.to_string())?;
+        signature.sync_all().map_err(|e| e.to_string())?;
+    }
     Ok(PreparedSource {
         path,
         #[cfg(windows)]
@@ -385,6 +409,50 @@ mod source_tests {
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn unsigned_images_require_testing_build_and_matching_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.iso");
+        fs::write(&path, b"ISO").unwrap();
+        let output: Emitter = Arc::new(Mutex::new(Box::new(std::io::sink())));
+        let mut source = SourceImage {
+            path: path.clone(),
+            file_name: "omarchy-local-test.iso".into(),
+            length: 3,
+            sha256: format!("{:x}", Sha256::digest(b"ISO")),
+            signature: vec![],
+        };
+        let stage_dir = tempfile::tempdir().unwrap();
+        let result = prepare_source(
+            &source,
+            stage_dir.path(),
+            &output,
+            &AtomicBool::new(false),
+            None,
+        );
+        assert_eq!(result.is_ok(), cfg!(feature = "staged-iso-testing"));
+        drop(result);
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
+        for (digest, length, cancelled) in [
+            ("0".repeat(64), 3, false),
+            (source.sha256.clone(), 4, false),
+            (source.sha256.clone(), 3, true),
+        ] {
+            source.sha256 = digest;
+            source.length = length;
+            let stage_dir = tempfile::tempdir().unwrap();
+            assert!(prepare_source(
+                &source,
+                stage_dir.path(),
+                &output,
+                &AtomicBool::new(cancelled),
+                None
+            )
+            .is_err());
+            assert_eq!(fs::read(&path).unwrap(), b"ISO");
         }
     }
 
@@ -874,7 +942,11 @@ fn execute(
                     &format!(
                         "{}{}",
                         if crate::direct_install_policy::STAGED_ISO_TESTING {
-                            "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n"
+                            if request.source.signature.is_empty() {
+                                "LOCAL UNSIGNED TEST ISO: real disk changes. This image has no verified official signature and may fail to boot or install.\n\n"
+                            } else {
+                                "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n"
+                            }
                         } else {
                             ""
                         },

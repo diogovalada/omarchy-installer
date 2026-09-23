@@ -2,11 +2,12 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { get, writable } from 'svelte/store';
 
 export type DownloadStatus = 'idle' | 'resolving' | 'ready' | 'preparing' | 'downloading' | 'verifying' | 'saving' | 'complete' | 'cancelled' | 'failed';
-export interface Release { version: string; file_name: string; length: number; sha256: string; signer_fingerprint: string }
+export interface Release { version: string; file_name: string; length: number; sha256: string; signer_fingerprint?: string; local_image?: boolean }
 export interface DownloadSnapshot {
   status: DownloadStatus; release: Release | null; received_bytes: number; total_bytes: number;
   image_locked?: boolean;
   verification_skipped?: boolean;
+  testing_build?: boolean;
   replacement_available?: boolean;
   existing_image: boolean; cancel_requested: boolean; image_path: string | null; error: string | null; destination_directory: string; host_os: string; host_architecture: string;
 }
@@ -29,7 +30,7 @@ export function createDownloads(call: Invoke, native: boolean) {
       if (epoch === requestEpoch) state.update(value => ({ ...value, error: String(error) }));
     } finally { reading = false; }
   }
-  async function command(name: 'resolve_download' | 'start_download' | 'replace_download' | 'cancel_download' | 'choose_download_directory') {
+  async function command(name: 'resolve_download' | 'start_download' | 'replace_download' | 'cancel_download' | 'choose_download_directory' | 'choose_testing_iso') {
     if (!native || get(state).pending) return;
     epoch += 1;
     commandError = null;
@@ -42,6 +43,6 @@ export function createDownloads(call: Invoke, native: boolean) {
       state.update(value => ({ ...value, error: commandError }));
     } finally { state.update(value => ({ ...value, pending: false })); }
   }
-  return { subscribe: state.subscribe, native, refresh, resolve: () => command('resolve_download'), start: () => command('start_download'), replace: () => command('replace_download'), cancel: () => command('cancel_download'), chooseDirectory: () => command('choose_download_directory') };
+  return { subscribe: state.subscribe, native, refresh, resolve: () => command('resolve_download'), start: () => command('start_download'), replace: () => command('replace_download'), cancel: () => command('cancel_download'), chooseDirectory: () => command('choose_download_directory'), chooseTestingIso: () => command('choose_testing_iso') };
 }
 export const downloads = createDownloads(invoke, isTauri());

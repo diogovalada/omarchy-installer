@@ -9,7 +9,7 @@ vi.mock('./downloads', async importOriginal => {
   const actual = await importOriginal<typeof import('./downloads')>();
   const { writable } = await import('svelte/store');
   const state = writable({ snapshot: null, pending: false, error: null });
-  return { ...actual, downloads: { ...state, native: true, refresh: vi.fn().mockResolvedValue(undefined), resolve: vi.fn(), start: vi.fn(), replace: vi.fn(), cancel: vi.fn(), chooseDirectory: vi.fn() } };
+  return { ...actual, downloads: { ...state, native: true, refresh: vi.fn().mockResolvedValue(undefined), resolve: vi.fn(), start: vi.fn(), replace: vi.fn(), cancel: vi.fn(), chooseDirectory: vi.fn(), chooseTestingIso: vi.fn() } };
 });
 
 const controller = downloads as typeof downloads & { set: (value: { snapshot: DownloadSnapshot; pending: boolean; error: string | null }) => void };
@@ -21,6 +21,21 @@ const setState = async (snapshot: DownloadSnapshot) => { controller.set({ snapsh
 
 describe('single-screen native download flow', () => {
   beforeEach(async () => { vi.clearAllMocks(); await setState(state('ready')); });
+  it('offers the local ISO picker only in testing builds and labels unsigned images honestly', async () => {
+    const view = render(DownloadPanel);
+    expect(screen.queryByRole('button', {name:'Choose local ISO'})).not.toBeInTheDocument();
+    await setState(state('ready', {testing_build:true}));
+    await fireEvent.click(screen.getByRole('button', {name:'Choose local ISO'}));
+    expect(downloads.chooseTestingIso).toHaveBeenCalledOnce();
+    await setState(state('complete', {testing_build:true, image_path:'C:/local.iso', image_locked:true,
+      release:{version:'local test image',file_name:'omarchy-local-test.iso',length:1000,sha256:'ab'.repeat(32),local_image:true}}));
+    expect(screen.getByRole('status')).toHaveTextContent('Unsigned · testing');
+    expect(screen.queryByText('File size, SHA-256 and signature verified.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Signing key/)).not.toBeInTheDocument();
+    expect(screen.getByText(/no official signature checked/)).toBeInTheDocument();
+    await view.rerender({locked:true});
+    expect(screen.getByRole('button', {name:'Choose local ISO'})).toBeDisabled();
+  });
   it('locks image changes during installation while allowing details to expand', async () => {
     await setState(state('complete', {image_path:'C:\\fixture.iso'}));
     render(DownloadPanel, {compact:true,locked:true});

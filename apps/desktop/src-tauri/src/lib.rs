@@ -4,6 +4,7 @@ mod apple_setup;
 mod direct_install_policy;
 mod downloads;
 mod elevation;
+mod image_release;
 #[cfg(windows)]
 mod iso_source;
 mod operation_cleanup;
@@ -54,6 +55,7 @@ pub fn run() {
             downloads::replace_download,
             downloads::cancel_download,
             downloads::choose_download_directory,
+            downloads::choose_testing_iso,
             setup::setup_status,
             setup::inspect_setup,
             setup::inspect_usb_choice,

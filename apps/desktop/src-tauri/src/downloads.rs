@@ -1,3 +1,4 @@
+use crate::image_release::ImageRelease;
 use omarchy_release_client::{DownloadPhase, Release};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -38,7 +39,8 @@ impl Status {
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     status: Status,
-    release: Option<Release>,
+    release: Option<ImageRelease>,
+    testing_build: bool,
     received_bytes: u64,
     total_bytes: u64,
     image_path: Option<PathBuf>,
@@ -207,7 +209,7 @@ impl Downloads {
             inner.snapshot.error = None;
         }
     }
-    pub(crate) fn verified_source(&self) -> Result<(PathBuf, Release), String> {
+    pub(crate) fn verified_source(&self) -> Result<(PathBuf, ImageRelease), String> {
         let inner = self
             .inner
             .lock()
@@ -234,6 +236,7 @@ impl Downloads {
                 snapshot: Snapshot {
                     status: Status::Idle,
                     release: None,
+                    testing_build: cfg!(all(windows, feature = "staged-iso-testing")),
                     received_bytes: 0,
                     total_bytes: 0,
                     image_path: None,
@@ -272,6 +275,9 @@ impl Downloads {
         let Some(release) = inner.snapshot.release.as_ref() else {
             return false;
         };
+        if release.official().is_err() {
+            return false;
+        }
         let (name, length) = (release.file_name().to_owned(), release.length());
         Self::use_testing_file(&mut inner, &name, length)
     }
@@ -374,6 +380,14 @@ impl Downloads {
             return Err("Wait for the current operation to stop before changing folders".into());
         }
         if inner.snapshot.destination_directory != path {
+            if inner
+                .snapshot
+                .release
+                .as_ref()
+                .is_some_and(|r| r.official().is_err())
+            {
+                inner.snapshot.release = None;
+            }
             inner.replacement = None;
             inner.snapshot.replacement_available = false;
             #[cfg(windows)]
@@ -411,7 +425,9 @@ impl Downloads {
             .snapshot
             .release
             .clone()
-            .ok_or("Check the official release first")?;
+            .ok_or("Check the official release first")?
+            .official()?
+            .clone();
         let replacement = if replace {
             let candidate = inner
                 .replacement
@@ -467,6 +483,138 @@ pub fn download_status(downloads: State<'_, Downloads>) -> Result<Snapshot, Stri
     downloads.snapshot()
 }
 
+#[cfg(feature = "staged-iso-testing")]
+pub(crate) fn testing_iso_digest(
+    path: &Path,
+    length: u64,
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
+) -> Result<String, String> {
+    if length == 0 || length > 64 * 1024 * 1024 * 1024 {
+        return Err("Choose a nonempty ISO smaller than 64 GiB.".into());
+    }
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Choose an ordinary ISO file.".into());
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0; 8 * 1024 * 1024];
+    let mut total = 0;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Image selection cancelled".into());
+        }
+        let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > length {
+            return Err("The selected ISO changed size.".into());
+        }
+        hash.update(&buffer[..count]);
+        progress(total);
+    }
+    if total != length {
+        return Err("The selected ISO changed size.".into());
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(all(windows, feature = "staged-iso-testing"))]
+impl Downloads {
+    fn import_testing_iso(&self, path: PathBuf, cancel: Arc<AtomicBool>) -> Result<(), String> {
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("iso"))
+        {
+            return Err("Choose an ISO file.".into());
+        }
+        let before = ReplacementTarget::inspect(&path)?;
+        let guard = Arc::new(crate::iso_source::HeldIso::open(&path, before.length)?);
+        self.update(|s| s.total_bytes = before.length);
+        let sha256 = testing_iso_digest(&path, before.length, &cancel, |bytes| {
+            self.update(|s| s.received_bytes = bytes);
+        })?;
+        before.check(&path)?;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "Download state is unavailable")?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Image selection cancelled".into());
+        }
+        inner.snapshot.release = Some(ImageRelease::Local(crate::image_release::LocalImage {
+            version: "local test image".into(),
+            // Internal handoff name; the selected file is never renamed or copied.
+            file_name: "omarchy-local-test.iso".into(),
+            length: before.length,
+            sha256,
+            local_image: true,
+        }));
+        inner.snapshot.status = Status::Complete;
+        inner.snapshot.image_path = Some(path);
+        inner.snapshot.image_locked = true;
+        inner.snapshot.verification_skipped = false;
+        inner.snapshot.existing_image = true;
+        inner.verified_iso = Some(guard);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub async fn choose_testing_iso(
+    app: tauri::AppHandle,
+    downloads: State<'_, Downloads>,
+) -> Result<Snapshot, String> {
+    #[cfg(not(all(windows, feature = "staged-iso-testing")))]
+    {
+        let _ = (app, downloads);
+        Err("Local unsigned ISOs are available only in Windows testing builds.".into())
+    }
+    #[cfg(all(windows, feature = "staged-iso-testing"))]
+    {
+        if crate::operation_active(&app) || downloads.snapshot()?.status.active() {
+            return Err("Wait for the current operation to finish before changing images.".into());
+        }
+        let picker_app = app.clone();
+        let selected = tauri::async_runtime::spawn_blocking(move || {
+            picker_app
+                .dialog()
+                .file()
+                .set_title("Choose a local test ISO")
+                .add_filter("ISO image", &["iso"])
+                .blocking_pick_file()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        let Some(selected) = selected else {
+            return downloads.snapshot();
+        };
+        if crate::operation_active(&app) {
+            return Err("Wait for setup to finish before changing images.".into());
+        }
+        let path = selected.into_path().map_err(|e| e.to_string())?;
+        downloads.begin_resolution()?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut inner = downloads
+                .inner
+                .lock()
+                .map_err(|_| "Download state is unavailable")?;
+            inner.cancel = Arc::clone(&cancel);
+            inner.snapshot.status = Status::Verifying;
+        }
+        let controller = downloads.inner().clone();
+        std::thread::spawn(move || {
+            if let Err(error) = controller.import_testing_iso(path, Arc::clone(&cancel)) {
+                controller.finish_error(error, cancel.load(Ordering::Relaxed));
+            }
+        });
+        downloads.snapshot()
+    }
+}
+
 #[tauri::command]
 pub async fn choose_download_directory(
     app: tauri::AppHandle,
@@ -502,7 +650,7 @@ pub async fn resolve_download(downloads: State<'_, Downloads>) -> Result<Snapsho
     match result {
         Ok(Ok(release)) => controller.update(|snapshot| {
             snapshot.total_bytes = release.length();
-            snapshot.release = Some(release);
+            snapshot.release = Some(release.into());
             detect_existing(snapshot);
             snapshot.status = Status::Ready;
         }),
@@ -808,6 +956,55 @@ fn hash_file(path: &Path, length: u64, expected: &str, cancel: &AtomicBool) -> R
 mod tests {
     use super::*;
 
+    #[cfg(all(windows, feature = "staged-iso-testing"))]
+    #[test]
+    fn local_testing_image_is_locked_hashed_and_never_treated_as_official() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("My custom image.iso");
+        fs::write(&path, b"ISO").unwrap();
+        let controller = Downloads::new(temp.path().join("cache"), temp.path().to_path_buf());
+        controller
+            .import_testing_iso(path.clone(), Arc::new(AtomicBool::new(false)))
+            .unwrap();
+        let (selected, release) = controller.verified_source().unwrap();
+        assert_eq!(selected, path);
+        assert_eq!(release.sha256(), format!("{:x}", Sha256::digest(b"ISO")));
+        assert!(release.signature().is_empty());
+        assert!(release.official().is_err());
+        assert!(controller.begin_transfer(false).is_err());
+        assert!(!controller.reuse_testing_image());
+        assert!(controller.snapshot().unwrap().image_locked);
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        let source = crate::setup_protocol::SourceImage {
+            path: path.clone(),
+            file_name: release.file_name().into(),
+            length: release.length(),
+            sha256: release.sha256().into(),
+            signature: vec![],
+        };
+        assert!(controller.verified_lease(&source).is_some());
+        let mut changed = source;
+        changed.sha256 = "0".repeat(64);
+        assert!(controller.verified_lease(&changed).is_none());
+        controller.begin_resolution().unwrap();
+        assert!(controller.snapshot().unwrap().release.is_none());
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
+    }
+
+    #[cfg(all(windows, feature = "staged-iso-testing"))]
+    #[test]
+    fn cancelled_local_import_does_not_publish_an_image() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("local.iso");
+        fs::write(&path, b"ISO").unwrap();
+        let controller = Downloads::new(temp.path().join("cache"), temp.path().to_path_buf());
+        assert!(controller
+            .import_testing_iso(path.clone(), Arc::new(AtomicBool::new(true)))
+            .is_err());
+        assert!(controller.verified_source().is_err());
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
+    }
+
     #[test]
     fn testing_restart_reuses_existing_file_without_claiming_verification() {
         let temp = tempfile::tempdir().unwrap();
@@ -1022,7 +1219,7 @@ mod tests {
             signature: release.signature().to_vec(),
         };
         let controller = Downloads::new(PathBuf::new(), path.parent().unwrap().to_path_buf());
-        controller.update(|snapshot| snapshot.release = Some(release));
+        controller.update(|snapshot| snapshot.release = Some(release.into()));
         controller.complete(image, true);
         let lease = controller.verified_lease(&source).unwrap();
         let timer = std::time::Instant::now();

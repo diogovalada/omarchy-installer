@@ -27,8 +27,18 @@ keeps normal builds closed, including ordinary debug builds. The packager checks
 the executable's compiled mode with its read-only `--build-info` command; release
 collection rejects testing executables. Release CI refuses the testing switch.
 
-Testing mode still authenticates the official ISO in the privileged helper and
-holds its source open. Staging rechecks its hash and file inventory. An unqualified
+Testing builds also offer **Choose local ISO** for unsigned images built from a
+development branch. Selection records SHA-256 and holds the original file read-only;
+the helper accepts the unsigned image only when compiled with `staged-iso-testing`.
+The UI labels it **Unsigned · testing**. Published builds reject unsigned images,
+and official downloads still require their official signature in testing builds.
+Use **Use official release** in image details to switch back. Local images are
+selected again after restarting the app; they are never added to the release catalog.
+
+The privileged helper authenticates official ISOs and holds the source open.
+For a local test image it verifies the recorded hash, or reuses the native desktop's
+checked hash while both processes hold the file read-only. Staging rechecks the hash
+and file inventory. An unqualified
 ISO must contain one unambiguous kernel/initramfs pair; boot paths are discovered
 from those original files before disk allocation. All disk ownership, encryption,
 free-space and confirmation checks remain. The UI and preparation confirmation

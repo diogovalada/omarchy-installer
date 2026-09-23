@@ -14,14 +14,16 @@
   $: transfer = !!snapshot && ['preparing', 'downloading', 'verifying', 'saving'].includes(snapshot.status);
   $: indeterminate = !!snapshot && ['resolving', 'preparing', 'saving'].includes(snapshot.status);
   $: verificationSkipped = complete && snapshot?.verification_skipped === true;
-  $: readyLabel = verificationSkipped ? 'Verification skipped · testing' : 'Verified';
+  $: localImage = release?.local_image === true;
+  $: authenticated = complete && !verificationSkipped && !localImage;
+  $: readyLabel = localImage ? 'Unsigned · testing' : verificationSkipped ? 'Verification skipped · testing' : 'Verified';
   $: statusText = complete ? readyLabel : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: snapshot?.existing_image ? 'Verification cancelled' : 'Download paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
 
 <section class="download-panel" class:compact={compact && complete} aria-label="Omarchy image download">
   {#if compact && complete}
-    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · ${readyLabel}`}><span role="status" class:testing={verificationSkipped}>{#if !verificationSkipped}<Check size={17}/>{/if}Omarchy {release?.version} · {readyLabel}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
+    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · ${readyLabel}`}><span role="status" class:testing={verificationSkipped || localImage}>{#if authenticated}<Check size={17}/>{/if}Omarchy {release?.version} · {readyLabel}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
   {/if}
   {#if !compact || !complete || expanded}
   <div class="release">
@@ -29,18 +31,19 @@
     <img src={quattro} alt="Omarchy Quattro wallpaper"/>
   </div>
   <div class="download-body">
-    <div class="destination"><FolderOpen size={17}/><div><span class="sr-only">Save to </span><span title={snapshot?.destination_directory}>{snapshot?.destination_directory ?? 'Downloads/Omarchy'}</span></div><button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Change</button></div>
-    <div class="progress-label"><span class:verified={complete && !verificationSkipped} role="status" aria-live="polite">{#if complete && !verificationSkipped}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
-    {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={complete && !verificationSkipped}></progress>{/if}
+    <div class="destination"><FolderOpen size={17}/><div><span class="sr-only">{localImage ? 'Selected image' : 'Save to'} </span><span>{localImage ? snapshot?.image_path : snapshot?.destination_directory ?? 'Downloads/Omarchy'}</span></div>{#if !localImage}<button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Change</button>{/if}</div>
+    <div class="progress-label"><span class:verified={authenticated} role="status" aria-live="polite">{#if authenticated}<Check size={17}/>{/if}{downloads.native ? (snapshot?.cancel_requested && active ? 'Stopping…' : statusText) : 'Not downloaded'}</span>{#if snapshot?.status === 'downloading'}<span class="bytes">{formatBytes(snapshot.received_bytes)} / {formatBytes(snapshot.total_bytes)}</span>{/if}</div>
+    {#if indeterminate}<progress max="100" aria-label={statusText}></progress>{:else}<progress max="100" value={complete ? 100 : percent} aria-label="Download progress" class:verified={authenticated}></progress>{/if}
     {#if $downloads.error || (snapshot?.error && snapshot.status !== 'cancelled')}<p class="error" role="alert">{$downloads.error ?? snapshot?.error}</p>{/if}
     {#if snapshot?.replacement_available && !active}
       <p class="replacement-note">This file couldn't be verified. Download a fresh copy? The existing file will be replaced only after the new copy passes verification.</p>
     {/if}
     <div class="controls">
+      {#if snapshot?.testing_build}<button class="secondary" disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseTestingIso(); }}>Choose local ISO</button>{/if}
       {#if transfer}<button class="secondary" disabled={$downloads.pending || snapshot?.cancel_requested} onclick={() => { void downloads.cancel(); }}>{snapshot?.status === 'downloading' ? 'Pause' : 'Cancel'}</button>
       {:else if snapshot?.replacement_available}<button class="primary" disabled={!downloads.native || active || locked} onclick={() => { void downloads.replace(); }}><Download size={16}/>Download replacement</button><button disabled={!downloads.native || active || locked} onclick={() => { void downloads.chooseDirectory(); }}>Choose another folder</button><button class="text-button" disabled={!downloads.native || active || locked} onclick={() => { void downloads.start(); }}>Verify again</button>
       {:else if !complete}<button class="primary" disabled={!downloads.native || active || locked} onclick={() => { if (release) void downloads.start(); else void downloads.resolve(); }}><Download size={16}/>{release ? (snapshot?.existing_image ? 'Verify' : snapshot?.status === 'cancelled' || snapshot?.status === 'failed' ? 'Resume' : 'Download') : (snapshot?.status === 'failed' || $downloads.error ? 'Retry' : 'Download')}</button>{/if}
-      {#if release}<details><summary>Details</summary><div class="detail-content"><p>{release.file_name}</p>{#if complete}<p>File size, SHA-256 and signature verified.</p>{:else}<p>File size, SHA-256 and signature are checked before use.</p>{/if}{#if snapshot?.image_locked}<p>The ISO is kept read-only so installation can reuse this verification. Close the app to move or edit the file.</p>{/if}<p>SHA-256 <code>{release.sha256}</code></p><p>Signing key <code>{release.signer_fingerprint}</code></p>{#if snapshot?.image_path}<p>Saved to <code>{snapshot.image_path}</code></p>{/if}<button class="text-button" disabled={active || locked} onclick={() => { void downloads.resolve(); }}>Check for updates</button></div></details>{/if}
+      {#if release}<details><summary>Details</summary><div class="detail-content">{#if !localImage}<p>{release.file_name}</p>{/if}{#if localImage}<p>Local test image. SHA-256 recorded; no official signature checked.</p>{:else if authenticated}<p>File size, SHA-256 and signature verified.</p>{:else}<p>File size, SHA-256 and signature are checked before use.</p>{/if}{#if snapshot?.image_locked}<p>The ISO is kept read-only until setup finishes. Close the app to move or edit the file.</p>{/if}<p>SHA-256 <code>{release.sha256}</code></p>{#if !localImage}<p>Signing key <code>{release.signer_fingerprint}</code></p>{/if}{#if snapshot?.image_path}<p>File <code>{snapshot.image_path}</code></p>{/if}<button class="text-button" disabled={active || locked} onclick={() => { void downloads.resolve(); }}>{localImage ? 'Use official release' : 'Check for updates'}</button></div></details>{/if}
     </div>
   </div>
   {/if}
