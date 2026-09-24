@@ -568,9 +568,10 @@ function Invoke-StagingFirmware($State) {
         return @{operationId=$State.operationId;status=$State.status;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
-    # Read the exit code from the process: in the elevated helper, calling
-    # shutdown.exe directly left $LASTEXITCODE unset and did not restart.
+    # When the OsIndications variable does not exist yet, shutdown.exe creates
+    # it but exits with 203 without restarting; the second attempt restarts.
     $process=Start-Process -FilePath $shutdown -ArgumentList '/r /fw /t 0' -WindowStyle Hidden -Wait -PassThru
+    if ($process.ExitCode -eq 203) { $process=Start-Process -FilePath $shutdown -ArgumentList '/r /fw /t 0' -WindowStyle Hidden -Wait -PassThru }
     if ($process.ExitCode -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
     return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }

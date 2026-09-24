@@ -444,4 +444,18 @@ if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
         [IO.Directory]::Delete($dir)
     }
 }
+# shutdown.exe exits with 203 without restarting when OsIndications does not
+# exist yet; the firmware restart retries that once and fails on anything else.
+& {
+    function Get-OwnedStagingPartition { return [pscustomobject]@{DiskNumber=0} }
+    function Assert-StagingEncryption { }
+    function Confirm-SecureBootUEFI { return $true }
+    function Start-Process { $script:shutdownCalls++; return [pscustomobject]@{ExitCode=$script:exitCodes[$script:shutdownCalls-1]} }
+    $state=[pscustomobject]@{operationId='firmware';status='staged';partitions=@(@{})}
+    foreach ($case in @(@{codes=@(203,0);calls=2;ok=$true},@{codes=@(0);calls=1;ok=$true},@{codes=@(203,203);calls=2;ok=$false},@{codes=@(5);calls=1;ok=$false})) {
+        $script:exitCodes=$case.codes; $script:shutdownCalls=0; $ok=$true
+        try { [void](Invoke-StagingFirmware $state) } catch { $ok=$false }
+        Assert ($ok -eq $case.ok -and $script:shutdownCalls -eq $case.calls) "Firmware restart with exit codes $($case.codes -join ',') was handled incorrectly."
+    }
+}
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'
