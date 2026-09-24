@@ -335,6 +335,29 @@ mod environment_tests {
     }
 
     #[test]
+    fn non_object_completion_is_rejected_without_panicking() {
+        let mut command = Command::new(system_powershell().unwrap());
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"'{"protocolVersion":1,"type":"result","result":[{"status":"staged"},{"leaked":true}]}'"#,
+        ]);
+        let outcome = run(
+            command,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            true,
+            |_| {},
+        );
+        assert_eq!(
+            outcome.unwrap_err(),
+            "Provider returned an invalid completion record"
+        );
+    }
+
+    #[test]
     fn testing_switch_is_set_only_by_compiled_mode() {
         let workspace = tempfile::tempdir().unwrap();
         let command = staged_command(
@@ -549,6 +572,14 @@ fn run_inner(
                                 .get("result")
                                 .cloned()
                                 .unwrap_or_else(|| value.clone());
+                            // Callers extend the record by key, which panics on
+                            // anything but an object, such as leaked PowerShell output.
+                            if !body.is_object() {
+                                failure.get_or_insert_with(|| {
+                                    "Provider returned an invalid completion record".into()
+                                });
+                                continue;
+                            }
                             if let Some(object) = body.as_object_mut() {
                                 for key in [
                                     "manifestPath",

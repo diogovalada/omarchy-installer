@@ -506,7 +506,7 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         [Omarchy.DirectX86.NativeDisk]::RegisterStagingBoot($Plan.boot.name,$option,$Plan.windowsBoot.bootOrderSha256)
         $Plan.status='staged'; Save-StagingState $Plan
         return Get-StagingSummary $Plan
-    } finally { try { if ($mounted) { Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop } } finally { $lease.Dispose() } }
+    } finally { try { if ($mounted) { [void](Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop) } } finally { $lease.Dispose() } }
 }
 function Get-StagingSummary($State) {
     return @{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
