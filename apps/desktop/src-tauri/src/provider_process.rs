@@ -60,6 +60,24 @@ pub fn system_powershell() -> Result<std::path::PathBuf, String> {
 }
 
 #[cfg(windows)]
+fn computer_name() -> Result<String, String> {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameNetBIOS, GetComputerNameExW};
+    let mut size = 0;
+    unsafe { GetComputerNameExW(ComputerNameNetBIOS, std::ptr::null_mut(), &mut size) };
+    if size == 0 {
+        return Err("Windows computer name is unavailable".into());
+    }
+    let mut buffer = vec![0_u16; size as usize];
+    if unsafe { GetComputerNameExW(ComputerNameNetBIOS, buffer.as_mut_ptr(), &mut size) } == 0
+        || size == 0
+        || size as usize >= buffer.len()
+    {
+        return Err("Windows computer name is unavailable".into());
+    }
+    Ok(String::from_utf16_lossy(&buffer[..size as usize]))
+}
+
+#[cfg(windows)]
 pub fn program_files() -> Result<std::path::PathBuf, String> {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles)
 }
@@ -255,6 +273,9 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
             )
             .env("windir", windows)
             .env("ComSpec", system.join("cmd.exe"));
+        // shutdown.exe /fw exits with 203 (ERROR_ENVVAR_NOT_FOUND) without this.
+        // Resolve it from Windows rather than trusting the parent's environment.
+        command.env("COMPUTERNAME", computer_name()?);
         // Docker is invoked by its installed system path, not a user PATH entry.
         let program_files = program_files()?;
         let docker = program_files.join("Docker/Docker/resources/bin");
@@ -312,6 +333,25 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
 #[cfg(all(test, windows))]
 mod environment_tests {
     use super::*;
+
+    #[test]
+    fn clean_powershell_environment_resolves_computer_name() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut command = Command::new(system_powershell().unwrap());
+        command.env("COMPUTERNAME", "untrusted-parent-value");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$env:COMPUTERNAME",
+        ]);
+        privileged_environment(&mut command, workspace.path()).unwrap();
+        let result = command.output().unwrap();
+        assert!(result.status.success());
+        let actual = String::from_utf8_lossy(&result.stdout);
+        assert!(!actual.trim().is_empty());
+        assert_eq!(actual.trim(), computer_name().unwrap());
+    }
 
     #[test]
     fn clean_powershell_environment_resolves_program_data() {
