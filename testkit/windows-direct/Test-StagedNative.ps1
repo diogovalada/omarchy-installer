@@ -18,6 +18,7 @@ Assert ([BitConverter]::ToInt32($after,4) -eq 3) 'Must create only two staging p
 Assert ([Convert]::ToBase64String($before,48,144) -ceq [Convert]::ToBase64String($after,48,144)) 'Existing Windows partition metadata must survive byte-for-byte.'
 Assert ([BitConverter]::ToInt64($after,48+144+8) -eq 200GB) 'EFI start must match approved extent.'
 Assert ([BitConverter]::ToInt64($after,48+288+8) -eq 200GB+512MB) 'Source follows EFI without overlap.'
+Assert ((New-Object guid (,[byte[]]$after[(48+288+32)..(48+288+47)])) -eq [guid]'de94bba4-06d1-4d40-a16a-bfd50179d6ac') 'The source must use a type Windows device encryption skips.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,50GB,8GB,$esp,$data) } 'Existing Windows overlap accepted.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,499GB,8GB,$esp,$data) } 'GPT end overrun accepted.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,200GB,8GB,$existing,$data) } 'Reused GUID accepted.'

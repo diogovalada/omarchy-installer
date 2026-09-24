@@ -26,7 +26,9 @@ namespace Omarchy.DirectX86 {
             if (!string.Equals(actual.ToString(), volume, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Refusing to detach another volume");
             Check(DeleteVolumeMountPoint(path.TrimEnd('\\') + "\\"), "Cannot remove owned staging mount");
         }
-        static readonly Guid StageDataType = new Guid("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
+        // Windows recovery type: Windows device encryption automatically encrypts
+        // new basic data volumes, which the Linux installer could not then read.
+        static readonly Guid StageDataType = new Guid("de94bba4-06d1-4d40-a16a-bfd50179d6ac");
         public static byte[] PlanStagingLayout(byte[] before, long start, long dataSize, Guid esp, Guid data) {
             const long espSize = 536870912;
             if (before.Length < Header || BitConverter.ToInt32(before, 0) != 1) throw new InvalidDataException("GPT required");
