@@ -60,6 +60,24 @@ pub fn system_powershell() -> Result<std::path::PathBuf, String> {
 }
 
 #[cfg(windows)]
+fn computer_name() -> Result<String, String> {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameNetBIOS, GetComputerNameExW};
+    let mut size = 0;
+    unsafe { GetComputerNameExW(ComputerNameNetBIOS, std::ptr::null_mut(), &mut size) };
+    if size == 0 {
+        return Err("Windows computer name is unavailable".into());
+    }
+    let mut buffer = vec![0_u16; size as usize];
+    if unsafe { GetComputerNameExW(ComputerNameNetBIOS, buffer.as_mut_ptr(), &mut size) } == 0
+        || size == 0
+        || size as usize >= buffer.len()
+    {
+        return Err("Windows computer name is unavailable".into());
+    }
+    Ok(String::from_utf16_lossy(&buffer[..size as usize]))
+}
+
+#[cfg(windows)]
 pub fn program_files() -> Result<std::path::PathBuf, String> {
     known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_ProgramFiles)
 }
@@ -255,6 +273,9 @@ pub fn privileged_environment(command: &mut Command, workspace: &Path) -> Result
             )
             .env("windir", windows)
             .env("ComSpec", system.join("cmd.exe"));
+        // shutdown.exe /fw exits with 203 (ERROR_ENVVAR_NOT_FOUND) without this.
+        // Resolve it from Windows rather than trusting the parent's environment.
+        command.env("COMPUTERNAME", computer_name()?);
         // Docker is invoked by its installed system path, not a user PATH entry.
         let program_files = program_files()?;
         let docker = program_files.join("Docker/Docker/resources/bin");
@@ -314,6 +335,25 @@ mod environment_tests {
     use super::*;
 
     #[test]
+    fn clean_powershell_environment_resolves_computer_name() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut command = Command::new(system_powershell().unwrap());
+        command.env("COMPUTERNAME", "untrusted-parent-value");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$env:COMPUTERNAME",
+        ]);
+        privileged_environment(&mut command, workspace.path()).unwrap();
+        let result = command.output().unwrap();
+        assert!(result.status.success());
+        let actual = String::from_utf8_lossy(&result.stdout);
+        assert!(!actual.trim().is_empty());
+        assert_eq!(actual.trim(), computer_name().unwrap());
+    }
+
+    #[test]
     fn clean_powershell_environment_resolves_program_data() {
         let workspace = tempfile::tempdir().unwrap();
         let mut command = Command::new(system_powershell().unwrap());
@@ -331,6 +371,29 @@ mod environment_tests {
                 .trim()
                 .to_lowercase(),
             program_data().unwrap().to_string_lossy().to_lowercase()
+        );
+    }
+
+    #[test]
+    fn non_object_completion_is_rejected_without_panicking() {
+        let mut command = Command::new(system_powershell().unwrap());
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"'{"protocolVersion":1,"type":"result","result":[{"status":"staged"},{"leaked":true}]}'"#,
+        ]);
+        let outcome = run(
+            command,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            true,
+            |_| {},
+        );
+        assert_eq!(
+            outcome.unwrap_err(),
+            "Provider returned an invalid completion record"
         );
     }
 
@@ -549,6 +612,14 @@ fn run_inner(
                                 .get("result")
                                 .cloned()
                                 .unwrap_or_else(|| value.clone());
+                            // Callers extend the record by key, which panics on
+                            // anything but an object, such as leaked PowerShell output.
+                            if !body.is_object() {
+                                failure.get_or_insert_with(|| {
+                                    "Provider returned an invalid completion record".into()
+                                });
+                                continue;
+                            }
                             if let Some(object) = body.as_object_mut() {
                                 for key in [
                                     "manifestPath",

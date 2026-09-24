@@ -21,7 +21,7 @@ export interface SetupSnapshot {
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
-export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string }
+export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean }
 export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;label:string;largestFreeAfterStagingBytes:number;target:Record<string,unknown>;encryption?:StagedEncryption[] }
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }

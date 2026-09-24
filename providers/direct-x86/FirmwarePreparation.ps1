@@ -48,6 +48,9 @@ function Invoke-FirmwarePreparation($Request) {
         # cancels/blocks this restart, the short watchdog deadline restores it.
         $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
         & $shutdown /r /fw /t 0
+        # When the OsIndications variable does not exist yet, shutdown.exe creates
+        # it but exits with 203 without restarting; the second attempt restarts.
+        if ($LASTEXITCODE -eq 203) { & $shutdown /r /fw /t 0 }
         if ($LASTEXITCODE -ne 0) { Fail 'firmware_restart_failed' 'Windows could not schedule the firmware restart. Protection is being restored.' }
         $restarting=$true
         Emit 'result' 'firmware-restart' @{result=@{restartRequested=$true;message='In firmware settings, disable Secure Boot and leave TPM enabled. Save, return to Windows, reopen Omarchy Installer and check with administrator access.'}}

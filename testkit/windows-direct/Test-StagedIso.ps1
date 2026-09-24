@@ -265,6 +265,15 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 }
 
 $script:disk=[pscustomobject]@{Number=7;UniqueId='disk-identity';Size=[long]500GB;SerialNumber='serial';PartitionStyle='GPT';IsOffline=$false;IsReadOnly=$false;LogicalSectorSize=512;PhysicalSectorSize=4096;BusType='NVMe'}
+& {
+    function Get-Disk { return $script:disk }
+    function Get-InspectedPartitions($Disk) { return @() }
+    $script:disk.BusType='SAS'
+    Assert ($null -ne (Get-StagingDisk 7 'disk-identity')) 'Internal SAS disks, as in Hyper-V virtual machines, must be accepted.'
+    $script:disk.BusType='USB'
+    Reject { Get-StagingDisk 7 'disk-identity' } 'USB disks must be rejected.'
+    $script:disk.BusType='NVMe'
+}
 $esp=[guid]::NewGuid().ToString(); $data=[guid]::NewGuid().ToString()
 $owned=@([pscustomobject]@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=[long]200GB;sizeBytes=[long]512MB},[pscustomobject]@{role='source';guid=$data;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=[long](200GB+512MB);sizeBytes=[long]8GB})
 $script:parts=@(foreach ($p in $owned) { [pscustomobject]@{DiskNumber=7;PartitionNumber=$(if($p.role -eq 'efi'){4}else{5});Guid=$p.guid;GptType=$p.gptType;Offset=$p.offsetBytes;Size=$p.sizeBytes;IsBoot=$false;IsSystem=$false;AccessPaths=@()} })
@@ -426,9 +435,27 @@ if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
         Reject { Copy-StagedFile $src (Join-Path $dir 'cancelled') '' { param($Count) throw 'Preparation was cancelled.' } } 'A cancelled copy completed.'
         $config=Get-StagingConfig ([pscustomobject]@{partitions=@(@{},@{guid=[guid]::NewGuid().ToString()});release=[pscustomobject]@{kernelPath='arch/boot/x86_64/vmlinuz-linux';initrdPath='arch/boot/x86_64/initramfs-linux.img'}})
         Assert ($config -notmatch 'checksum=' -and $config -match 'set timeout=0') 'The staged boot entry rereads the image or waits on a one-entry menu.'
+        # Staging sums the inventory with Measure-Object, which Windows PowerShell only supports on objects.
+        $inventory=@(Get-IsoInventory ($dir+'\'))
+        $expected=@(Get-ChildItem -LiteralPath $dir -File)
+        Assert ((($inventory | Measure-Object sizeBytes -Sum).Sum -eq ($expected | Measure-Object Length -Sum).Sum) -and $inventory.Count -eq $expected.Count) 'The ISO inventory cannot be measured.'
     } finally {
         foreach ($name in @('source','copy','cancelled')) { $path=Join-Path $dir $name; if (Test-Path -LiteralPath $path) { [IO.File]::Delete($path) } }
         [IO.Directory]::Delete($dir)
+    }
+}
+# shutdown.exe exits with 203 without restarting when OsIndications does not
+# exist yet; the firmware restart retries that once and fails on anything else.
+& {
+    function Get-OwnedStagingPartition { return [pscustomobject]@{DiskNumber=0} }
+    function Assert-StagingEncryption { }
+    function Confirm-SecureBootUEFI { return $true }
+    function Start-Process { $script:shutdownCalls++; return [pscustomobject]@{ExitCode=$script:exitCodes[$script:shutdownCalls-1]} }
+    $state=[pscustomobject]@{operationId='firmware';status='staged';partitions=@(@{})}
+    foreach ($case in @(@{codes=@(203,0);calls=2;ok=$true},@{codes=@(0);calls=1;ok=$true},@{codes=@(203,203);calls=2;ok=$false},@{codes=@(5);calls=1;ok=$false})) {
+        $script:exitCodes=$case.codes; $script:shutdownCalls=0; $ok=$true
+        try { [void](Invoke-StagingFirmware $state) } catch { $ok=$false }
+        Assert ($ok -eq $case.ok -and $script:shutdownCalls -eq $case.calls) "Firmware restart with exit codes $($case.codes -join ',') was handled incorrectly."
     }
 }
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'
