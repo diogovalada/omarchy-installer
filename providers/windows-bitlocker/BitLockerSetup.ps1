@@ -118,6 +118,12 @@ function Get-FactsHash($Facts) {
     $sha=[Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($Facts | ConvertTo-Json -Compress))))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
 }
+# Task Scheduler reads a registered SID back as an account name, such as
+# "tester" or "PC\tester", so compare the account it resolves to.
+function Test-TaskAccount([string]$Account,[string]$Sid) {
+    if ($Account -ceq $Sid) { return $true }
+    try { return ([Security.Principal.NTAccount]$Account).Translate([Security.Principal.SecurityIdentifier]).Value -ceq $Sid } catch { return $false }
+}
 function Register-EncryptionReminder($Facts,[string]$Mode) {
     Get-EncryptionEligibility $Facts $Mode
     $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -163,7 +169,7 @@ function Register-EncryptionReminder($Facts,[string]$Mode) {
         # administrator/SYSTEM DACL instead of adding an account-specific ACE.
         [void]$folder.RegisterTask($name,$xml,0x12,$sid,$null,3,'D:P(A;;FA;;;SY)(A;;FA;;;BA)')
         $task=$folder.GetTask($name)
-        if (-not $task.Enabled -or $task.Definition.Principal.UserId -ne $sid -or $task.Definition.Principal.LogonType -ne 3 -or $task.Definition.Principal.RunLevel -ne 1 -or $task.Definition.Triggers.Count -ne 1 -or $task.Definition.Triggers.Item(1).UserId -ne $sid -or $task.Definition.Actions.Count -ne 1 -or $task.Definition.Actions.Item(1).Path -ine $exe -or $task.Definition.Actions.Item(1).Arguments -cne $arguments) { throw 'The reminder task did not verify.' }
+        if (-not $task.Enabled -or -not (Test-TaskAccount $task.Definition.Principal.UserId $sid) -or $task.Definition.Principal.LogonType -ne 3 -or $task.Definition.Principal.RunLevel -ne 1 -or $task.Definition.Triggers.Count -ne 1 -or -not (Test-TaskAccount $task.Definition.Triggers.Item(1).UserId $sid) -or $task.Definition.Actions.Count -ne 1 -or $task.Definition.Actions.Item(1).Path -ine $exe -or $task.Definition.Actions.Item(1).Arguments -cne $arguments) { throw 'The reminder task did not verify.' }
         $security=New-Object Security.AccessControl.RawSecurityDescriptor($task.GetSecurityDescriptor(4))
         foreach ($ace in $security.DiscretionaryAcl) {
             if ($ace.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and $ace.SecurityIdentifier.Value -notin @('S-1-5-18','S-1-5-32-544')) { throw 'The reminder task grants an unexpected identity access.' }
