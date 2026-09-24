@@ -149,6 +149,32 @@ namespace Omarchy.DirectX86 {
             Check(SetFirmwareEnvironmentVariableEx(name, EfiGlobal, option, (uint)option.Length, 7), "Cannot register temporary installer");
             if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || FirmwarePreflight() != expectedOrder) throw new InvalidDataException("Temporary entry readback failed; boot order was not changed by the installer");
         }
+        // Firmware may rewrite an entry's description or attributes, so an entry is
+        // ours when it still targets our EFI partition and loader.
+        public static bool SameStagingTarget(byte[] actual, byte[] option) {
+            byte[] a = LoadOptionPath(actual), b = LoadOptionPath(option);
+            return a != null && b != null && a.SequenceEqual(b);
+        }
+        static byte[] LoadOptionPath(byte[] option) {
+            if (option == null || option.Length < 8) return null;
+            int length = BitConverter.ToUInt16(option, 4), i = 6;
+            while (i + 1 < option.Length && (option[i] != 0 || option[i + 1] != 0)) i += 2;
+            i += 2;
+            return length == 0 || i + length > option.Length ? null : option.Skip(i).Take(length).ToArray();
+        }
+        // Firmware may drop, rewrite or reuse our entry: opening Hyper-V's settings
+        // replaced it with the firmware's own "FrontPage" entry. Rewrite the recorded
+        // slot while it is free or still ours; otherwise use a free slot. Returns the
+        // slot now holding the entry. The boot order is never changed.
+        public static string RestoreStagingBoot(string name, byte[] option) {
+            StagingIndex(name); FirmwarePrivilege();
+            byte[] existing = GetVariable(name);
+            if (existing != null && option.SequenceEqual(existing)) return name;
+            if (existing != null && !SameStagingTarget(existing, option)) name = ReserveStagingBootName();
+            Check(SetFirmwareEnvironmentVariableEx(name, EfiGlobal, option, (uint)option.Length, 7), "Cannot restore temporary installer entry");
+            if (!option.SequenceEqual(GetVariable(name) ?? new byte[0])) throw new InvalidDataException("Temporary entry readback failed");
+            return name;
+        }
         public static void ArmStagingBoot(string name, byte[] option) {
             ushort index = StagingIndex(name); FirmwarePrivilege();
             if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || GetVariable("BootNext") != null) throw new InvalidDataException("Firmware entry changed or another one-time boot is pending");
@@ -160,7 +186,8 @@ namespace Omarchy.DirectX86 {
             ushort index = StagingIndex(name); FirmwarePrivilege();
             byte[] current = GetVariable("BootCurrent"), existing = GetVariable(name);
             if (current == null || current.Length != 2 || BitConverter.ToUInt16(current, 0) == index) throw new InvalidDataException("Cannot remove the current boot source");
-            if (existing != null && !option.SequenceEqual(existing)) throw new InvalidDataException("Temporary firmware slot has been reused");
+            // Firmware reused the slot for its own entry, so ours no longer exists.
+            if (existing != null && !SameStagingTarget(existing, option)) return;
             byte[] next = GetVariable("BootNext");
             if (next != null && next.Length == 2 && BitConverter.ToUInt16(next, 0) == index)
                 Check(SetFirmwareEnvironmentVariableEx("BootNext", EfiGlobal, new byte[0], 0, 7), "Cannot clear owned one-time boot");

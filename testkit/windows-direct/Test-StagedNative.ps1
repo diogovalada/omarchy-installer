@@ -31,4 +31,10 @@ Assert ([Convert]::ToBase64String($before,48,144) -ceq [Convert]::ToBase64String
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingDeletion($after,$number,$esp,201GB,512MB,[guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b') } 'Cleanup accepted a moved partition.'
 Assert ([Text.Encoding]::Unicode.GetString($option).Contains('\EFI\BOOT\BOOTX64.EFI')) 'Firmware entry must target the temporary EFI loader.'
 Assert ([BitConverter]::ToInt32($option,0) -eq 1) 'Temporary firmware option must be active.'
+# Firmware renamed the entry: same target, so still ours. Another partition is not.
+$pathLength=[BitConverter]::ToUInt16($option,4); $pathBytes=[byte[]]$option[($option.Length-$pathLength)..($option.Length-1)]
+$renamed=[byte[]](@(0,0,0,0) + [BitConverter]::GetBytes([uint16]$pathLength) + [Text.Encoding]::Unicode.GetBytes("FrontPage`0") + $pathBytes)
+Assert ([Omarchy.DirectX86.NativeDisk]::SameStagingTarget($renamed,$option)) 'A renamed entry targeting the temporary loader must remain ours.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([Omarchy.DirectX86.NativeDisk]::StagingBootOption(5,200GB,$esp),$option)) 'An entry for another partition was treated as ours.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([byte[]](1,0,0,0),$option)) 'A truncated entry was treated as ours.'
 Write-Output 'Passed staged GPT and EFI binary tests. No host disks or firmware were accessed.'

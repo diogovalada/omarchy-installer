@@ -552,7 +552,10 @@ function Invoke-StagingArm($State) {
         } finally { Dismount-StagingPartition $State $owned $mount }
     }
     $State.status='arming'; Save-StagingState $State
-    [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,[Convert]::FromBase64String($State.boot.option))
+    $option=[Convert]::FromBase64String($State.boot.option)
+    $name=[Omarchy.DirectX86.NativeDisk]::RestoreStagingBoot($State.boot.name,$option)
+    if ($name -cne $State.boot.name) { $State.boot.name=$name; Save-StagingState $State }
+    [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,$option)
     $State.status='boot-scheduled'; Save-StagingState $State
     return @{operationId=$State.operationId;status=$State.status;message='Restart Windows when ready. The next startup selects the official installer once; the existing boot order is unchanged. Returning to Windows does not prove Linux installation completed.'}
 }
