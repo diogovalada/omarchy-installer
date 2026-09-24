@@ -188,7 +188,38 @@ fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
         uuid::Uuid::parse_str(error["operationId"].as_str()?).ok()?;
         error["message"].as_str()?;
     }
+    let mut summary = summary;
+    mark_restarts(&mut summary, current_boot_unix_seconds());
     Some(summary)
+}
+// Arming records the Windows boot it happened in. A later boot means the
+// selected restart has happened, so the card can move on to removal.
+#[cfg(any(windows, test))]
+fn mark_restarts(summary: &mut Value, current_boot: Option<u64>) {
+    let (Some(current_boot), Some(operations)) =
+        (current_boot, summary["operations"].as_array_mut())
+    else {
+        return;
+    };
+    for operation in operations {
+        if let Some(scheduled) = operation["scheduledBootUnixSeconds"].as_u64() {
+            // Both boot times are estimates; allow for clock adjustments.
+            operation["restartedSinceScheduled"] = Value::Bool(current_boot > scheduled + 120);
+        }
+    }
+}
+#[cfg(windows)]
+fn current_boot_unix_seconds() -> Option<u64> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let uptime = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
+    now.checked_sub(uptime)
+}
+#[cfg(all(test, not(windows)))]
+fn current_boot_unix_seconds() -> Option<u64> {
+    None
 }
 impl Setup {
     pub(crate) fn active_operation(&self) -> bool {
@@ -1510,6 +1541,31 @@ mod usb_review_tests {
         assert_eq!(read_staging_summary(&path), Some(summary));
         std::fs::write(&path, vec![b' '; 1_048_577]).unwrap();
         assert!(read_staging_summary(&path).is_none());
+    }
+    #[test]
+    fn scheduled_operations_are_marked_once_windows_restarts() {
+        let mut summary = json!({"operations":[
+            {"status":"boot-scheduled","scheduledBootUnixSeconds":1_000_u64},
+            {"status":"staged"}
+        ]});
+        mark_restarts(&mut summary, Some(1_060));
+        assert_eq!(
+            summary["operations"][0]["restartedSinceScheduled"],
+            json!(false)
+        );
+        mark_restarts(&mut summary, Some(5_000));
+        assert_eq!(
+            summary["operations"][0]["restartedSinceScheduled"],
+            json!(true)
+        );
+        assert!(summary["operations"][1]
+            .get("restartedSinceScheduled")
+            .is_none());
+        let mut unknown = json!({"operations":[{"status":"boot-scheduled","scheduledBootUnixSeconds":1_000_u64}]});
+        mark_restarts(&mut unknown, None);
+        assert!(unknown["operations"][0]
+            .get("restartedSinceScheduled")
+            .is_none());
     }
     fn request() -> OperationRequest {
         OperationRequest {

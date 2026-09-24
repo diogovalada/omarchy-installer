@@ -275,7 +275,9 @@ function Write-StagingSummary {
     # operations always re-read the protected ownership record in the helper.
     $status=Get-StagingStatus (ConvertFrom-Json '{}')
     $summary=@{operations=@($status.operations | Where-Object { $_.status -ne 'cleaned' } | ForEach-Object {
-        @{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
+        $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
+        if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
+        $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'
     $pending=$path+'.'+[guid]::NewGuid().ToString('N')+'.pending'
@@ -509,7 +511,9 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
     } finally { try { if ($mounted) { [void](Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop) } } finally { $lease.Dispose() } }
 }
 function Get-StagingSummary($State) {
-    return @{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
+    $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
+    if ($State.status -eq 'boot-scheduled' -and $State.PSObject.Properties['scheduledBootUnixSeconds']) { $summary.scheduledBootUnixSeconds=[long]$State.scheduledBootUnixSeconds }
+    return $summary
 }
 function Set-TestingBootPaths($Release,$Files) {
     if (-not $script:testingBuild) { throw 'Unqualified ISO staging requires a testing build.' }
@@ -556,6 +560,9 @@ function Invoke-StagingArm($State) {
     $name=[Omarchy.DirectX86.NativeDisk]::RestoreStagingBoot($State.boot.name,$option)
     if ($name -cne $State.boot.name) { $State.boot.name=$name; Save-StagingState $State }
     [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,$option)
+    # The app compares this with the current boot to tell whether the selected restart happened.
+    $boot=(Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+    $State | Add-Member -NotePropertyName scheduledBootUnixSeconds -NotePropertyValue ([DateTimeOffset]$boot).ToUnixTimeSeconds() -Force
     $State.status='boot-scheduled'; Save-StagingState $State
     return @{operationId=$State.operationId;status=$State.status;message='Restart Windows when ready. The next startup selects the official installer once; the existing boot order is unchanged. Returning to Windows does not prove Linux installation completed.'}
 }
