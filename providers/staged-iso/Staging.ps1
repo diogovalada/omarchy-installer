@@ -56,7 +56,8 @@ function Get-StagingDisk([int]$Number,[string]$Identity) {
     $disk=Get-Disk -Number $Number -ErrorAction Stop
     if ([string]$disk.UniqueId -cne $Identity -or -not $Identity) { throw 'This disk changed. Refresh disks.' }
     if ($disk.IsOffline -or $disk.IsReadOnly) { throw 'This disk is offline or read-only in Windows.' }
-    if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { throw ('Only internal NVMe and SATA disks are supported, not '+[string]$disk.BusType+' disks. Use a USB installer instead.') }
+    # SAS is internal too; Hyper-V Generation 2 virtual machines report their disks as SAS.
+    if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI','SAS')) { throw ('Only internal NVMe and SATA disks are supported, not '+[string]$disk.BusType+' disks. Use a USB installer instead.') }
     if ($disk.PartitionStyle -eq 'MBR') { throw 'This disk uses the older MBR layout (legacy BIOS). Installing without USB needs a GPT disk; use a USB installer instead.' }
     if ($disk.PartitionStyle -ne 'GPT') { throw 'This disk is not initialized with a GPT partition table.' }
     if ($disk.LogicalSectorSize -ne 512) { throw 'Disks with 4K logical sectors are not supported yet. Use a USB installer instead.' }

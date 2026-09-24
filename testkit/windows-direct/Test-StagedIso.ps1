@@ -265,6 +265,15 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 }
 
 $script:disk=[pscustomobject]@{Number=7;UniqueId='disk-identity';Size=[long]500GB;SerialNumber='serial';PartitionStyle='GPT';IsOffline=$false;IsReadOnly=$false;LogicalSectorSize=512;PhysicalSectorSize=4096;BusType='NVMe'}
+& {
+    function Get-Disk { return $script:disk }
+    function Get-InspectedPartitions($Disk) { return @() }
+    $script:disk.BusType='SAS'
+    Assert ($null -ne (Get-StagingDisk 7 'disk-identity')) 'Internal SAS disks, as in Hyper-V virtual machines, must be accepted.'
+    $script:disk.BusType='USB'
+    Reject { Get-StagingDisk 7 'disk-identity' } 'USB disks must be rejected.'
+    $script:disk.BusType='NVMe'
+}
 $esp=[guid]::NewGuid().ToString(); $data=[guid]::NewGuid().ToString()
 $owned=@([pscustomobject]@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=[long]200GB;sizeBytes=[long]512MB},[pscustomobject]@{role='source';guid=$data;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=[long](200GB+512MB);sizeBytes=[long]8GB})
 $script:parts=@(foreach ($p in $owned) { [pscustomobject]@{DiskNumber=7;PartitionNumber=$(if($p.role -eq 'efi'){4}else{5});Guid=$p.guid;GptType=$p.gptType;Offset=$p.offsetBytes;Size=$p.sizeBytes;IsBoot=$false;IsSystem=$false;AccessPaths=@()} })
