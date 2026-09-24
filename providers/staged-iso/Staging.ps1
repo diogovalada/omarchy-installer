@@ -324,7 +324,7 @@ function Get-StagingVolume($Part) {
     $paths=@($Part.AccessPaths | Where-Object { $_ -match '^\\\\\?\\Volume\{[0-9a-fA-F-]{36}\}\\$' })
     if ($paths.Count -ne 1) { throw 'Staging partition has no unique volume GUID path.' }
     # Get-Partition | Get-Volume omits ESPs on Windows. Win32_Volume includes
-    # their GUID paths and offers the same documented Format method.
+    # their GUID paths.
     $volumes=@(Get-CimInstance Win32_Volume -ErrorAction Stop | Where-Object { $_.DeviceID -ieq $paths[0] })
     if ($volumes.Count -ne 1) { throw 'Staging volume could not be identified.' }
     return $volumes[0]
@@ -467,7 +467,11 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
             $volume=Get-StagingVolume $part
             if ([string]$volume.FileSystem -notin @('','Unknown','RAW')) { throw 'New staging partition is not an empty raw volume.' }
             $fs=if ($owned.role -eq 'efi') { 'FAT32' } else { 'NTFS' }
-            $formatted=Invoke-CimMethod -InputObject $volume -MethodName Format -Arguments @{FileSystem=$fs;QuickFormat=$true;Label='OMARCHY_TMP'} -ErrorAction Stop
+            # Win32_Volume.Format fails with "unknown error" on EFI system
+            # partitions; the Storage module's volume formats both (quick by default).
+            $storageVolumes=@(Get-CimInstance -Namespace root/Microsoft/Windows/Storage -ClassName MSFT_Volume -ErrorAction Stop | Where-Object { $_.Path -ieq $volume.DeviceID })
+            if ($storageVolumes.Count -ne 1) { throw 'Staging volume could not be identified.' }
+            $formatted=Invoke-CimMethod -InputObject $storageVolumes[0] -MethodName Format -Arguments @{FileSystem=$fs;FileSystemLabel='OMARCHY_TMP'} -ErrorAction Stop
             if ($formatted.ReturnValue -ne 0 -or (Get-StagingVolume (Get-OwnedStagingPartition $Plan $owned)).FileSystem -cne $fs) { throw 'Staging filesystem format failed or did not verify.' }
             $mount=Mount-StagingPartition $Plan $owned
             try {
