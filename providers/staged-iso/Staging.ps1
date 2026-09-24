@@ -565,8 +565,10 @@ function Invoke-StagingFirmware($State) {
         return @{operationId=$State.operationId;status=$State.status;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
-    & $shutdown /r /fw /t 0
-    if ($LASTEXITCODE -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
+    # Read the exit code from the process: in the elevated helper, calling
+    # shutdown.exe directly left $LASTEXITCODE unset and did not restart.
+    $process=Start-Process -FilePath $shutdown -ArgumentList '/r /fw /t 0' -WindowStyle Hidden -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
     return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }
 function Invoke-StagingCleanup($State) {
