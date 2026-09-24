@@ -71,6 +71,10 @@ namespace Omarchy.DirectX86 {
                 byte[] before = Layout(h);
                 if (Hash(before) != expectedHash) throw new InvalidDataException("GPT changed before staging allocation");
                 byte[] next = PlanStagingLayout(before, start, dataSize, esp, data); int returned;
+                // The planned range is free space, which keeps any old boot sectors: a
+                // previous temporary installer at the same offsets would reappear as its
+                // old filesystems instead of the raw volumes that are formatted next.
+                ClearStagingStart(h, start); ClearStagingStart(h, start + 536870912);
                 Check(DeviceIoControl(h, SET_LAYOUT, next, next.Length, null, 0, out returned, IntPtr.Zero), "Cannot allocate staging partitions");
                 Check(FlushFileBuffers(h), "Cannot flush staging GPT");
                 Check(DeviceIoControl(h, UPDATE_PROPERTIES, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot refresh staging partitions");
@@ -84,6 +88,18 @@ namespace Omarchy.DirectX86 {
                 }
                 return new[] { FindPartition(after, esp, start, 536870912, EspType), FindPartition(after, data, start + 536870912, dataSize, StageDataType) };
             }
+        }
+        static void ClearStagingStart(Microsoft.Win32.SafeHandles.SafeFileHandle h, long offset) {
+            const int length = 1048576;
+            IntPtr allocation = System.Runtime.InteropServices.Marshal.AllocHGlobal(length + 4095);
+            try {
+                IntPtr zeros = new IntPtr((allocation.ToInt64() + 4095) & ~4095L);
+                System.Runtime.InteropServices.Marshal.Copy(new byte[length], 0, zeros, length);
+                long position; int written;
+                Check(SetFilePointerEx(h, offset, out position, 0) && position == offset, "Cannot seek to the new staging space");
+                Check(WriteFile(h, zeros, length, out written, IntPtr.Zero), "Cannot clear the new staging space");
+                if (written != length) throw new IOException("Short staging space clear");
+            } finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(allocation); }
         }
         static int FindEntry(byte[] layout, Guid id) {
             for (int i = 0; i < BitConverter.ToInt32(layout, 4); i++) { int p = Header + i * Entry; if (GuidAt(layout, p + 48) == id) return p; }
