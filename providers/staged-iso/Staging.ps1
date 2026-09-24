@@ -356,7 +356,8 @@ function Get-IsoInventory([string]$Root) {
         Assert-StagingRelativePath $relative
         if (-not $seen.Add($relative) -or $items.Count -ge 10000) { throw 'Duplicate or excessive ISO files.' }
         # Hashes are recorded while copying; the whole ISO was verified already.
-        $items.Add(@{path=$relative;sizeBytes=[long]$item.Length;sha256=''})
+        # Objects, not hashtables: Windows PowerShell's Measure-Object cannot read hashtable keys.
+        $items.Add([pscustomobject]@{path=$relative;sizeBytes=[long]$item.Length;sha256=''})
     }
     return $items.ToArray()
 }

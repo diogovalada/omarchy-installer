@@ -435,6 +435,10 @@ if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
         Reject { Copy-StagedFile $src (Join-Path $dir 'cancelled') '' { param($Count) throw 'Preparation was cancelled.' } } 'A cancelled copy completed.'
         $config=Get-StagingConfig ([pscustomobject]@{partitions=@(@{},@{guid=[guid]::NewGuid().ToString()});release=[pscustomobject]@{kernelPath='arch/boot/x86_64/vmlinuz-linux';initrdPath='arch/boot/x86_64/initramfs-linux.img'}})
         Assert ($config -notmatch 'checksum=' -and $config -match 'set timeout=0') 'The staged boot entry rereads the image or waits on a one-entry menu.'
+        # Staging sums the inventory with Measure-Object, which Windows PowerShell only supports on objects.
+        $inventory=@(Get-IsoInventory ($dir+'\'))
+        $expected=@(Get-ChildItem -LiteralPath $dir -File)
+        Assert ((($inventory | Measure-Object sizeBytes -Sum).Sum -eq ($expected | Measure-Object Length -Sum).Sum) -and $inventory.Count -eq $expected.Count) 'The ISO inventory cannot be measured.'
     } finally {
         foreach ($name in @('source','copy','cancelled')) { $path=Join-Path $dir $name; if (Test-Path -LiteralPath $path) { [IO.File]::Delete($path) } }
         [IO.Directory]::Delete($dir)
