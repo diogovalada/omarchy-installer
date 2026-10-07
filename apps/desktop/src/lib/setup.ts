@@ -11,7 +11,7 @@ export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
   stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
-  stagedReview?:{summary:string}|null;
+  stagedReview?:{summary:string;review?:StagedReviewPlan|null}|null;
   usbReview?:UsbReview|null;
   bitLocker?:{message:string;reminderRegistered:boolean}|null;
   kind: 'usb' | 'direct' | null; status: string; stage: string; message: string;
@@ -26,8 +26,12 @@ export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBy
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
 export interface StagedResizeQuery { diskNumber:number;diskUniqueId:string;partitionNumber:number;partitionGuid:string }
-export interface StagedRegion { kind:'free'|'partition';offsetBytes:number;sizeBytes:number;label:string;partitionNumber?:number;partitionGuid?:string;fileSystem?:string;freeBytes?:number|null;resizeState?:'unchecked'|'checked'|'failed'|'insufficient'|'unavailable';resizeReason?:string;maximumReleaseBytes?:number|null;reserveBytes?:number|null }
+export interface StagedRegion { kind:'free'|'partition';offsetBytes:number;sizeBytes:number;label:string;partitionNumber?:number;partitionGuid?:string;fileSystem?:string;freeBytes?:number|null;resizeState?:'unchecked'|'checked'|'failed'|'insufficient'|'unavailable';resizeReason?:string;maximumReleaseBytes?:number|null;reserveBytes?:number|null;isWindows?:boolean }
 export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes:number;unallocatedBytes:number;largestFreeBytes:number;regions:StagedRegion[];encryption?:StagedEncryption[] }
+// The review payload the helper will build from the same plan as the review
+// summary (see the disk map plan). It sits outside the confirmation binding, so
+// it is display-only.
+export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
 let epoch = 0; let reading = false;

@@ -147,7 +147,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 # bound to the exact selected disk/partition. All OS calls here are mocked.
 & {
     $disk=[pscustomobject]@{Number=0;UniqueId='small-data';Size=[long](22GB+2MB)}
-    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=5;Guid='55555555-5555-5555-5555-555555555555';Offset=[long]1MB;Size=[long]22GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=5;Guid='55555555-5555-5555-5555-555555555555';Offset=[long]1MB;Size=[long]22GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsBoot=$false}
     function Emit { }
     function Get-Disk { return $disk }
     function Get-StagingDisk { return $disk }
@@ -161,7 +161,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 }
 & {
     $disk=[pscustomobject]@{Number=0;UniqueId='disk';Size=[long]200GB}
-    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long](200GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long](200GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$false}
     $script:shrinkCalls=0; $script:shrinkLimit=[long]120GB
     $script:minimumBytes=[long]40GB
     function Emit { }
@@ -179,6 +179,10 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $region=$found.disks[0].regions[0]
     Assert ($region.freeBytes -eq 100GB -and $region.resizeState -eq 'unchecked') 'Unused filesystem space must remain distinct from unallocated space.'
     Assert ($found.disks[0].unallocatedBytes -eq 0) 'Filesystem free bytes became unallocated disk space.'
+    Assert ($region.isWindows -eq $false) 'A data partition was marked as the Windows partition.'
+    $part.IsBoot=$true
+    Assert ((Get-StagingChoices $release).disks[0].regions[0].isWindows -eq $true) 'The Windows boot partition was not marked.'
+    $part.IsBoot=$false
     $script:volumeLetter=''; $script:volumeLabel='RESTORE'
     $labeled=Get-StagingChoices $release
     Assert ($labeled.disks[0].regions[0].label -eq 'RESTORE (Partition 3)') 'A volume label without a drive letter was hidden.'
@@ -203,8 +207,8 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 & {
     $script:streamDisk=[pscustomobject]@{Number=0;UniqueId='stream-disk';Size=[long]400GB}
     $partitions=@(
-        [pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false},
-        [pscustomobject]@{DiskNumber=0;PartitionNumber=4;Guid='44444444-4444-4444-4444-444444444444';Offset=[long]181GB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$true},
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=4;Guid='44444444-4444-4444-4444-444444444444';Offset=[long]181GB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$false}
     )
     $script:minimumBytes=[long]40GB; $script:shrinkCalls=0; $script:partial=@(); $script:streamFree=[long]5GB
     function Emit($Type,$Stage,$Fields) {

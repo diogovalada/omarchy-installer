@@ -114,7 +114,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 if ($available -ge 0) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label=('Unallocated space ('+[Math]::Round($gap/1GB,1)+' GiB)');target=@{target_kind='free';start_offset_bytes=$cursor}} }
                 $cursor=Align-Up ([long]$p.Offset+[long]$p.Size)
                 if ($p.Size -eq 0) { continue }
-                $region=@{kind='partition';partitionNumber=[int]$p.PartitionNumber;partitionGuid=[string]$p.Guid;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size;label=('Partition '+$p.PartitionNumber);fileSystem='';freeBytes=$null;resizeState='unavailable';resizeReason='System or unsupported partition; kept unchanged.';maximumReleaseBytes=$null;reserveBytes=$null}
+                $region=@{kind='partition';partitionNumber=[int]$p.PartitionNumber;partitionGuid=[string]$p.Guid;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size;label=('Partition '+$p.PartitionNumber);fileSystem='';freeBytes=$null;resizeState='unavailable';resizeReason='System or unsupported partition; kept unchanged.';maximumReleaseBytes=$null;reserveBytes=$null;isWindows=[bool]$p.IsBoot}
                 switch ([string]$p.GptType) {
                     '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' { $region.label='EFI system' }
                     '{e3c9e316-0b5c-4db8-817d-f92df00215ae}' { $region.label='Microsoft reserved' }

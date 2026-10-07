@@ -2,34 +2,146 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staged installer partition preview</title></head>
 <body><div id="app"></div><script type="module">
 // In-memory desktop bridge: no host inspection or disk writes.
+// Scenarios: ?limited ?oem ?free ?two-ntfs ?two-disks ?failed ?replace-only
+// ?checking ?review, or ?layout=<name> for test-fixtures/staged-layouts/<name>.json
+// (a captured `stagedIso` value; see the README there).
+// Each check replays the provider's timeline: the layout first, then one
+// partition measured at a time. window.__fixtureSettled is true once it ends.
 import '/src/styles.css';
 import { mount } from 'svelte';
 import StagedInstaller from '/src/lib/StagedInstaller.svelte';
 import { setup } from '/src/lib/setup';
-const GiB=1024**3, MiB=1024**2;
-const limited=new URLSearchParams(location.search).has('limited');
-const review=new URLSearchParams(location.search).has('review');
-const partition={kind:'partition',partitionNumber:3,partitionGuid:'fixture-guid',offsetBytes:300*MiB,sizeBytes:953*GiB,label:'C:',fileSystem:'NTFS',freeBytes:180*GiB,resizeState:'unchecked'};
-const disk={diskNumber:0,diskUniqueId:'fixture-disk',diskSizeBytes:954*GiB,unallocatedBytes:0,largestFreeBytes:0,regions:[{kind:'partition',partitionNumber:1,offsetBytes:MiB,sizeBytes:260*MiB,label:'EFI system',resizeState:'unavailable',resizeReason:'System partition; kept unchanged.'},partition,{kind:'partition',partitionNumber:4,offsetBytes:954*GiB-GiB,sizeBytes:GiB,label:'Windows recovery',resizeState:'unavailable',resizeReason:'System partition; kept unchanged.'}]};
-const snapshot={status:'running',stage:'inspecting',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[disk],minimumLinuxBytes:32*GiB,temporaryBytes:7.5*GiB,secureBoot:true}};
+const GiB=1024**3, MiB=1024**2, temporaryBytes=7.5*GiB, minimumLinuxBytes=32*GiB, stepMs=500;
+const query=new URLSearchParams(location.search);
+const scenario=['limited','oem','free','two-ntfs','two-disks','failed','replace-only','checking'].find(name=>query.has(name)) ?? 'ready';
+const kept='System or unsupported partition; kept unchanged.';
+const encryption=[{driveLetter:'C',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}];
+const alignUp=bytes=>Math.ceil(bytes/MiB)*MiB;
+// Get-ShrinkCandidate keeps max(20 GiB, 10% of the volume) free.
+const reserve=sizeBytes=>alignUp(Math.max(20*GiB,sizeBytes/10));
+let guid=0;
+const partition=(label,sizeBytes,extra={})=>({kind:'partition',label,sizeBytes,fileSystem:'',freeBytes:null,resizeState:'unavailable',resizeReason:kept,maximumReleaseBytes:null,reserveBytes:null,isWindows:false,...extra});
+const efi=(sizeBytes=260*MiB)=>partition('EFI system',sizeBytes);
+const msr=()=>partition('Microsoft reserved',16*MiB);
+const recovery=()=>partition('Windows recovery',GiB);
+const free=sizeBytes=>({kind:'free',label:'Unallocated space',sizeBytes});
+// NTFS starts as the provider's quick precheck leaves it; `measured` is the
+// result of Windows' shrink check, which can't release into the reserve.
+function ntfs(label,sizeBytes,freeBytes,measured,extra={}) {
+  const reserveBytes=reserve(sizeBytes);
+  if(measured?.maximumReleaseBytes>freeBytes-reserveBytes) throw new Error(`${label} releases more than the provider allows.`);
+  const precheck=freeBytes<temporaryBytes+reserveBytes
+    ? {resizeState:'insufficient',reserveBytes,resizeReason:'Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'}
+    : {resizeState:'unchecked',resizeReason:''};
+  return partition(label,sizeBytes,{fileSystem:'NTFS',freeBytes,...precheck,measured:measured && {reserveBytes,...measured},...extra});
+}
+const checked=maximumReleaseBytes=>({resizeState:'checked',resizeReason:'',maximumReleaseBytes});
+const failed={resizeState:'failed',resizeReason:'Windows returned unsupported NTFS shrink limits.',maximumReleaseBytes:null};
+function layout(diskNumber,specs) {
+  let offsetBytes=MiB, partitionNumber=0;
+  const regions=specs.map(spec=>{
+    const region={...spec,offsetBytes};
+    offsetBytes+=spec.sizeBytes;
+    return region.kind==='free' ? region : {...region,partitionNumber:++partitionNumber,partitionGuid:`fixture-guid-${++guid}`};
+  });
+  return {diskNumber,diskUniqueId:`fixture-disk-${diskNumber}`,diskSizeBytes:offsetBytes+MiB,regions};
+}
+const windows=(sizeBytes,freeBytes,measured)=>ntfs('C:',sizeBytes,freeBytes,measured,{isWindows:true});
+const scenarios={
+  ready:()=>[layout(0,[efi(),windows(953*GiB,200*GiB,checked(100*GiB)),recovery()])],
+  limited:()=>[layout(0,[efi(),windows(953*GiB,200*GiB,checked(3*GiB)),recovery()])],
+  oem:()=>[layout(0,[efi(100*MiB),msr(),free(MiB),windows(460*GiB,210*GiB,checked(150*GiB)),recovery(),ntfs('IMAGE (Partition 5)',14*GiB,1.2*GiB,null),partition('Partition 6',900*MiB)])],
+  free:()=>[layout(0,[efi(),msr(),windows(700*GiB,150*GiB,checked(45*GiB)),free(120*GiB),recovery()])],
+  'two-ntfs':()=>[layout(0,[efi(),msr(),windows(476*GiB,150*GiB,checked(80*GiB)),ntfs('Data (D:)',1386*GiB,900*GiB,checked(700*GiB)),recovery()])],
+  'two-disks':()=>[layout(0,[efi(),windows(953*GiB,200*GiB,checked(100*GiB)),recovery()])],
+  failed:()=>[layout(0,[efi(),windows(953*GiB,200*GiB,failed),recovery()])],
+  'replace-only':()=>[layout(0,[efi(),windows(238*GiB,60*GiB,checked(30*GiB)),recovery()])],
+  checking:()=>[layout(0,[efi(),windows(953*GiB,200*GiB,checked(100*GiB)),recovery()])]
+};
+const blocked=scenario==='two-disks'?[{diskNumber:1,diskUniqueId:'fixture-disk-1',diskSizeBytes:2000*1000**3,reason:'This disk uses the older MBR layout (legacy BIOS). Installing without USB needs a GPT disk; use a USB installer instead.',encryption:[]}]:[];
+const disks=scenarios[scenario]();
+const initial=structuredClone(disks);
+const regions=()=>disks.flatMap(disk=>disk.regions.map(region=>({disk,region})));
+// Same rules as Get-StagingChoices: free space that fits the installer, then
+// measured shrinks that release it (appended after free space, as the provider merges them).
+function choices() {
+  const choice=(disk,target,label)=>{
+    const remaining=disk.regions.filter(r=>r.kind==='free').map(r=>r.sizeBytes-(target.start_offset_bytes===r.offsetBytes?temporaryBytes:0));
+    return {diskNumber:disk.diskNumber,diskUniqueId:disk.diskUniqueId,label,target,diskSizeBytes:disk.diskSizeBytes,encryption,largestFreeAfterStagingBytes:Math.max(0,...remaining)};
+  };
+  return [
+    ...regions().filter(({region})=>region.kind==='free' && region.sizeBytes>=temporaryBytes)
+      .map(({disk,region})=>choice(disk,{target_kind:'free',start_offset_bytes:region.offsetBytes},`Unallocated space (${Math.round(region.sizeBytes/GiB*10)/10} GiB)`)),
+    ...regions().filter(({region})=>region.resizeState==='checked' && region.maximumReleaseBytes>=temporaryBytes)
+      .map(({disk,region})=>choice(disk,{target_kind:'shrink',partition_number:region.partitionNumber,partition_guid:region.partitionGuid},`Resize ${region.label}`))
+  ];
+}
+function inventory() {
+  const listed=disks.map(({regions,...disk})=>{
+    const shown=regions.map(({measured,...region})=>region);
+    const unallocated=shown.filter(r=>r.kind==='free').map(r=>r.sizeBytes);
+    return {...disk,regions:shown,unallocatedBytes:unallocated.reduce((a,b)=>a+b,0),largestFreeBytes:Math.max(0,...unallocated),encryption};
+  });
+  return {choices:choices(),blocked,disks:listed,minimumLinuxBytes,temporaryBytes,secureBoot:true};
+}
+// A reviewed plan for keeping Windows with 64 GiB for Omarchy, placed as Get-StagingPlan does.
+function reviewFor() {
+  const disk=disks[0], c=disk.regions.find(r=>r.isWindows && r.resizeState==='checked');
+  if(!c || c.maximumReleaseBytes<temporaryBytes+64*GiB) return null;
+  const start=Math.floor((c.offsetBytes+c.sizeBytes)/MiB)*MiB-temporaryBytes-64*GiB, size=bytes=>(bytes/GiB).toFixed(1);
+  const review={diskNumber:disk.diskNumber,diskSizeBytes:disk.diskSizeBytes,targetKind:'shrink',
+    shrink:{label:c.label,partitionGuid:c.partitionGuid,offsetBytes:c.offsetBytes,beforeSizeBytes:c.sizeBytes,afterSizeBytes:start-c.offsetBytes},
+    temporary:{offsetBytes:start,sizeBytes:temporaryBytes},omarchy:{offsetBytes:start+temporaryBytes,sizeBytes:64*GiB},
+    largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:minimumLinuxBytes,bitLocker:['C:'],warning:'experimental'};
+  const summary=`EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk ${disk.diskNumber}?\n\nShrink ${c.label} from ${size(c.sizeBytes)} to ${size(start-c.offsetBytes)} GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.\n\nSuspend BitLocker protection on C: without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.`;
+  return {summary,review};
+}
+const captured=query.get('layout');
+let capturedLayout=null;
+if(captured) {
+  const response=await fetch(`/test-fixtures/staged-layouts/${encodeURIComponent(captured)}.json`);
+  if(!response.ok || !response.headers.get('content-type')?.includes('json')) throw new Error(`No captured layout named ${captured}.`);
+  capturedLayout=await response.json();
+}
+const snapshot={status:'idle',stage:'',stagedTesting:true,stagedIso:null};
+let timers=[];
+// The helper clears stagedIso and runs. Progress publishes the layout, then
+// each measurement (stage analyzing-resize). A resize query returns only at
+// the end, and the UI merges it into what it already shows.
+function check(resize) {
+  timers.forEach(clearTimeout); timers=[]; window.__fixtureSettled=false;
+  Object.assign(snapshot,{status:'running',stage:resize?'analyzing-resize':'inspecting',stagedIso:null,stagedReview:null});
+  const steps=[];
+  if(capturedLayout) steps.push(()=>{snapshot.stagedIso=structuredClone(capturedLayout);});
+  else {
+    let targets;
+    if(resize) {
+      targets=regions().map(({region})=>region).filter(r=>r.partitionGuid===resize.partitionGuid && r.measured);
+      for(const r of targets) Object.assign(r,{resizeState:'unchecked',resizeReason:'',maximumReleaseBytes:null,reserveBytes:null});
+    } else {
+      disks.forEach((disk,index)=>{disk.regions=structuredClone(initial[index].regions);});
+      targets=regions().map(({region})=>region).filter(r=>r.resizeState==='unchecked' && r.measured);
+      steps.push(()=>{snapshot.stagedIso=inventory();});
+    }
+    if(scenario==='checking') targets=[];
+    for(const region of targets) steps.push(()=>{Object.assign(region,region.measured);snapshot.stage='analyzing-resize';if(!resize)snapshot.stagedIso=inventory();});
+  }
+  if(scenario!=='checking') steps.push(()=>{
+    Object.assign(snapshot,{status:'complete',stage:'complete',stagedIso:capturedLayout?structuredClone(capturedLayout):inventory()});
+    if(query.has('review') && !resize) snapshot.stagedReview=reviewFor();
+  });
+  steps.forEach((step,index)=>timers.push(setTimeout(async()=>{
+    step(); await setup.refresh();
+    if(index===steps.length-1) window.__fixtureSettled=true;
+  },(index+1)*stepMs)));
+}
 window.isTauri=true;
 window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
   if(command==='setup_status')return structuredClone(snapshot);
-  if(command==='staged_iso' && args.action==='inspect'){
-    partition.resizeState=args.resize?'checked':'unchecked';
-    partition.maximumReleaseBytes=args.resize?(limited?3:100)*GiB:null;
-    partition.reserveBytes=args.resize?20*GiB:null;
-    snapshot.stagedIso.choices=args.resize&&!limited?[{diskNumber:0,diskUniqueId:disk.diskUniqueId,diskSizeBytes:disk.diskSizeBytes,label:'Resize C:',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:partition.partitionGuid},encryption:[{protectionStatus:1}]}]:[];
-    return structuredClone(snapshot);
-  }
+  if(command==='staged_iso' && args.action==='inspect'){check(args.resize);return structuredClone(snapshot);}
   throw new Error('Preview only: this action is not implemented.');
 }};
+check(null);
 await setup.refresh();
 mount(StagedInstaller,{target:document.getElementById('app'),props:{sourceReady:true}});
-setTimeout(()=>{
-  partition.resizeState='checked';partition.maximumReleaseBytes=(limited?3:100)*GiB;partition.reserveBytes=20*GiB;
-  snapshot.stagedIso.choices=limited?[]:[{diskNumber:0,diskUniqueId:disk.diskUniqueId,diskSizeBytes:disk.diskSizeBytes,label:'Resize C:',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:partition.partitionGuid},encryption:[{protectionStatus:1}]}];
-  snapshot.stage='analyzing-resize';void setup.refresh();
-},1000);
-setTimeout(()=>{snapshot.status='complete';snapshot.stage='complete';if(review)snapshot.stagedReview={summary:'EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk 0?\n\nShrink C: from 953.0 to 881.5 GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.\n\nSuspend BitLocker protection on C: without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.'};void setup.refresh();},2000);
 </script><style>body{overflow:auto}#app{max-width:880px;padding:24px;margin:auto}</style></body></html>

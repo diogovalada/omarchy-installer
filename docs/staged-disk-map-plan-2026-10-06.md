@@ -115,14 +115,14 @@ Measure all numbers with the fixture script described under Testing.
 Install without USB
 Make room for Omarchy on this computer.
 
-Disk 0 · 954 GiB     Disk 1 · 2 TB · can't use                  Refresh
+Disk 0 · 954 GiB     Disk 1 · 1.8 TiB · can't use               Refresh
 ┌─┬────────────────────────────────────────────────────────────────┬─┐
 │▪│ C:  Windows · 953 GiB                                           │▪│
 └─┴────────────────────────────────────────────────────────────────┴─┘
 C: · NTFS · can give Omarchy up to 92 GiB
 
 ┌──────────┬//┬───────────────────┬──────────┃──┬────────────────────┐
-│ 773 used │  │ ╳ can't release 80│ free 28.5┃▒▒│ Omarchy 64 GiB      │
+│ 753 used │  │╳ can't release 100│ free 28.5┃▒▒│ Omarchy 64 GiB      │
 └──────────┴//┴───────────────────┴──────────┃──┴────────────────────┘
  Windows 881.5 GiB                     drag ◀▶  installer 7.5 GiB · temporary
 
@@ -132,8 +132,10 @@ C: · NTFS · can give Omarchy up to 92 GiB
 ```
 
 Example numbers come from the fixture: a 954 GiB disk with C: at 953 GiB,
-180 GiB free inside C:, a 100 GiB release limit, a 20 GiB reserve and a
-7.5 GiB temporary installer.
+200 GiB free inside C:, a 100 GiB release limit, a 95.3 GiB reserve and a
+7.5 GiB temporary installer. The reserve follows `Get-ShrinkCandidate`:
+`max(20 GiB, 10% of the volume)`, so the release limit is at most the free
+space minus the reserve.
 
 ### Before the disk check
 
@@ -174,7 +176,7 @@ progress appears here, not at the bottom of the page.
 
 The editor covers only the selected partition:
 
-- **Used space** collapses to a fixed-width stub (`773 used //`), about 15% of
+- **Used space** collapses to a fixed-width stub (`753 used //`), about 15% of
   the bar. The adjustable range gets the rest.
 - **Order follows the provider:** shrunk partition, temporary installer
   (512 MiB EFI plus installer files), then Omarchy's unallocated space, then
@@ -182,8 +184,8 @@ The editor covers only the selected partition:
   `alignDown(partitionEnd) − (temporary + Omarchy)`.
 - **Can't-release zone.** The hatched area is `freeBytes − maximumReleaseBytes`.
   Selecting it shows one line built from `reserveBytes`:
-  - "Windows keeps 20 GiB free." when the rest is under 1 GiB;
-  - "Windows keeps 20 GiB free and can't move some files near the end of C:."
+  - "Windows keeps 95.3 GiB free." when the rest is under 1 GiB;
+  - "Windows keeps 95.3 GiB free and can't move some files near the end of C:."
     otherwise.
 
   This replaces the "Why can't all unused space be used?" disclosure.
@@ -361,7 +363,9 @@ sit in a secondary text row.
 ## Copy
 
 Final English strings. Sizes drop a trailing `.0`: "953 GiB", "881.5 GiB",
-"7.5 GiB", "260 MiB".
+"7.5 GiB", "260 MiB". Available space rounds down and needed space rounds up,
+so a shortfall never reads "only 7.5 GiB" or "0 MiB more". Disk headings use
+whole GiB, or TiB with one decimal from 1 TiB.
 
 ### Choose space
 
@@ -373,7 +377,7 @@ Final English strings. Sizes drop a trailing `.0`: "953 GiB", "881.5 GiB",
 | Before ISO | Download the image above first. |
 | Check button / line | Check available space / Windows will ask for administrator access. Nothing is changed. |
 | First read | Reading disks… |
-| Disk button | Disk 0 · 954 GiB; Disk 1 · 2 TB · can't use |
+| Disk button | Disk 0 · 954 GiB; Disk 1 · 1.8 TiB · can't use |
 | No disks | No internal disks found. Check Disk Management, then refresh. |
 | Editor labels | Windows 881.5 GiB · installer 7.5 GiB · temporary · Omarchy 64 GiB · can't release · free |
 | Toggle | Keep Windows / Replace Windows (or Keep D: / Replace D:) |
@@ -537,24 +541,29 @@ New files, flat in `apps/desktop/src/lib/` to match the existing layout:
 
 `stagedLayout.ts` functions:
 
-- `formatSize(bytes)`: MiB below 1 GiB; otherwise GiB with one decimal and no
-  trailing `.0`.
+- `formatSize(bytes, rounding)`: MiB below 1 GiB; otherwise GiB with one
+  decimal and no trailing `.0`. Rounds to nearest, down or up.
+- `formatDiskSize(bytes)`: disk headings.
 - `regionKey(region)`: partition GUID, or `free:<offset>`.
 - `choiceFor(region, choices)`: the `StagedChoice` whose target matches the
   region.
 - `overviewSegments(disk)`: grouping, minimum widths and hidden gaps; widths in
-  percent.
+  percent. `barWidths(sizes)` applies the same width rule to Review's bars.
 - `limits(region, temporaryBytes, minimumBytes)`: `{minGiB, maxGiB, canKeep}`.
 - `editorSegments(region, {temporaryBytes, omarchyBytes, mode})`: used stub,
   can't-release zone, remaining free, temporary installer and Omarchy, in
-  provider order.
+  provider order. `windowsAfterBytes` gives Windows' size after the shrink.
+- `cantReleaseLine(region)` and `freeTargetLine(bytes, minimumBytes)`: the
+  editor lines for the can't-release zone and free-space targets.
 - `afterLayout(disk, review)`: the projected regions, or `null` when the
-  matching rule fails.
+  matching rule fails. Free space under 5 MiB is left out, as in the overview.
 - `defaultRegion(disk, choices, temporaryBytes, minimumBytes)`: the order from
   Default selection.
 - `regionStatus(region, context)`: `{tone, text, action}` from the state table.
   All region-state copy lives here.
-- `reviewBullets(review, secureBoot)`: Review bullet texts.
+- `reviewBullets(review, secureBoot, windows)`: Review bullet texts; `windows`
+  is false when the shrunk partition isn't Windows. `reviewWarning(review)`:
+  the test-build warning.
 
 `StagedInstaller.svelte` keeps the inspection merge, polling, actions and
 recovery handling, and composes the new components:
@@ -678,10 +687,13 @@ Real layouts:
 
 ### Screenshots and measurements
 
-- Extend `artifacts/staged-partition-ux/check.cjs` to:
-  - capture each fixture scenario at 1180, 820 and 390 px;
-  - assert no horizontal overflow;
-  - print word count, number of sizes and the choose-screen height.
+- `scripts/staged-screenshots.cjs` (tracked, replacing the ignored
+  `artifacts/staged-partition-ux/check.cjs`):
+  - captures each fixture scenario at 1180, 820 and 390 px into
+    `artifacts/staged-disk-map/<label>/`;
+  - asserts no horizontal overflow and no page errors;
+  - prints word count, number of sizes, the choose-screen height and the
+    distance from the first heading to the last primary button.
 - It uses `playwright-core` with the installed Edge channel. Install it in a
   temporary folder rather than adding it to the workspace, to avoid
   dependency-policy work.

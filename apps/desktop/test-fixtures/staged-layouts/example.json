@@ -1,0 +1,99 @@
+{
+  "choices": [
+    {
+      "diskNumber": 0,
+      "diskUniqueId": "anonymized-disk-0",
+      "diskSizeBytes": 512090963968,
+      "label": "Resize Windows (C:)",
+      "largestFreeAfterStagingBytes": 838860800,
+      "target": {
+        "target_kind": "shrink",
+        "partition_number": 3,
+        "partition_guid": "00000000-0000-0000-0000-000000000003"
+      },
+      "encryption": []
+    }
+  ],
+  "blocked": [],
+  "disks": [
+    {
+      "diskNumber": 0,
+      "diskUniqueId": "anonymized-disk-0",
+      "diskSizeBytes": 512090963968,
+      "unallocatedBytes": 838860800,
+      "largestFreeBytes": 838860800,
+      "regions": [
+        {
+          "kind": "partition",
+          "partitionNumber": 1,
+          "partitionGuid": "00000000-0000-0000-0000-000000000001",
+          "offsetBytes": 1048576,
+          "fileSystem": "",
+          "freeBytes": null,
+          "maximumReleaseBytes": null,
+          "reserveBytes": null,
+          "isWindows": false,
+          "label": "EFI system",
+          "sizeBytes": 104857600,
+          "resizeState": "unavailable",
+          "resizeReason": "System or unsupported partition; kept unchanged."
+        },
+        {
+          "kind": "partition",
+          "partitionNumber": 2,
+          "partitionGuid": "00000000-0000-0000-0000-000000000002",
+          "offsetBytes": 105906176,
+          "fileSystem": "",
+          "freeBytes": null,
+          "maximumReleaseBytes": null,
+          "reserveBytes": null,
+          "isWindows": false,
+          "label": "Microsoft reserved",
+          "sizeBytes": 16777216,
+          "resizeState": "unavailable",
+          "resizeReason": "System or unsupported partition; kept unchanged."
+        },
+        {
+          "kind": "partition",
+          "partitionNumber": 3,
+          "partitionGuid": "00000000-0000-0000-0000-000000000003",
+          "offsetBytes": 122683392,
+          "fileSystem": "NTFS",
+          "freeBytes": 228052697088,
+          "maximumReleaseBytes": 173606436864,
+          "reserveBytes": 51034193920,
+          "isWindows": true,
+          "label": "Windows (C:)",
+          "sizeBytes": 510341939200,
+          "resizeState": "checked",
+          "resizeReason": ""
+        },
+        {
+          "kind": "partition",
+          "partitionNumber": 4,
+          "partitionGuid": "00000000-0000-0000-0000-000000000004",
+          "offsetBytes": 510464622592,
+          "fileSystem": "",
+          "freeBytes": null,
+          "maximumReleaseBytes": null,
+          "reserveBytes": null,
+          "isWindows": false,
+          "label": "Windows recovery",
+          "sizeBytes": 786432000,
+          "resizeState": "unavailable",
+          "resizeReason": "System or unsupported partition; kept unchanged."
+        },
+        {
+          "kind": "free",
+          "offsetBytes": 511251054592,
+          "sizeBytes": 838860800,
+          "label": "Unallocated space"
+        }
+      ],
+      "encryption": []
+    }
+  ],
+  "minimumLinuxBytes": 34359738368,
+  "temporaryBytes": 8053063680,
+  "secureBoot": false
+}

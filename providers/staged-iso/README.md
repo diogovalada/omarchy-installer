@@ -47,9 +47,11 @@ warn that booting and same-disk installation may fail in the official ISO.
 1. Select existing free space or explicitly review an NTFS shrink. Existing
    Windows sizing/reserve checks are reused; no existing partition is deleted.
    The target must be a basic GPT disk with 512-byte logical sectors on native
-   x64 UEFI. Disks that cannot be used report a specific reason. Inspection does
-   not require BitLocker suspension, and preparation does not require Secure Boot
-   off: it is checked when selecting the installer startup, after suspension.
+   x64 UEFI. Disks that cannot be used report a specific reason. Inspection marks
+   the partition the running Windows booted from (`isWindows`) so the app can
+   name it. Inspection does not require BitLocker suspension, and preparation
+   does not require Secure Boot off: it is checked when selecting the installer
+   startup, after suspension.
    Planning accepts unlocked, fully encrypted or decrypted volumes; incomplete
    conversion and unknown status block preparation.
 2. Allocate only a 512 MiB FAT32 EFI partition and an NTFS source partition
