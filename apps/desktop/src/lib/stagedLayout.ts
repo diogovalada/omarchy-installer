@@ -226,9 +226,16 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         const {maxGiB,canKeep}=limits(region,context.temporaryBytes,context.minimumBytes);
         return status('normal',`${[name,region.fileSystem].filter(Boolean).join(' · ')} · ${canKeep ? `can give Omarchy up to ${maxGiB} GiB` : 'room for the installer only'}`);
       }
-      const needed=formatSize(context.temporaryBytes-release,'up');
-      if(release<MiB) return status('hatched',`Windows can't release space from ${name}. ${needed} is needed.`,'recheck');
-      if(release<context.temporaryBytes) return status('hatched',`Windows can release only ${formatSize(release,'down')} from ${name}. ${needed} more is needed.`,'recheck');
+      if(release<context.temporaryBytes) {
+        // Freeing space helps only when the reserve is the limit. Otherwise
+        // free space minus the reserve fits the installer, and the limit is
+        // files Windows can't move near the end of the partition.
+        const room=region.freeBytes!=null && region.reserveBytes!=null ? region.freeBytes-region.reserveBytes : null;
+        if(room!=null && room<context.temporaryBytes) return status('hatched',`${name} needs ${formatSize(context.temporaryBytes-room,'up')} more free space. Free up space in Windows, then recheck.`,'recheck');
+        if(room!=null) return status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? 'cannot shrink it' : `can release only ${formatSize(release,'down')}`}.`,'recheck');
+        const needed=formatSize(context.temporaryBytes-release,'up');
+        return status('hatched',release<MiB ? `Windows can't release space from ${name}. ${needed} is needed.` : `Windows can release only ${formatSize(release,'down')} from ${name}. ${needed} more is needed.`,'recheck');
+      }
       return status('hatched',region.resizeReason || `Windows can't shrink ${name}.`,'recheck');
     }
     case 'failed':

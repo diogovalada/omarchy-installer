@@ -197,6 +197,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $script:shrinkLimit=195GB
     $found=Get-StagingChoices $release $query
     Assert ($found.choices.Count -eq 0 -and $found.disks[0].regions[0].resizeState -eq 'checked' -and $found.disks[0].regions[0].maximumReleaseBytes -eq 5GB-2MB) 'Insufficient shrink space must retain the measured limit and partition.'
+    Assert ($found.disks[0].regions[0].resizeReason -like 'Windows cannot move some files*') 'A Windows shrink limit was blamed on the free-space reserve.'
     $query.partitionGuid='44444444-4444-4444-4444-444444444444'
     Reject { Get-StagingChoices $release $query } 'Resize query accepted a replaced partition.'
     Assert ($script:shrinkCalls -eq 2) 'Changed partition reached shrink analysis.'

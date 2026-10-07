@@ -224,8 +224,9 @@ The editor covers only the selected partition:
 
 ### No usable space
 
-Where the editor would be: "No space can be used yet. Free up space in Windows,
-then refresh." **Review changes** is hidden, as today.
+Where the editor would be: "No space can be used yet." The selected-partition
+line says why and what helps; freeing space doesn't help when Windows can't move
+files (see the captured laptop layout). **Review changes** is hidden, as today.
 
 ### Segment states
 
@@ -237,7 +238,8 @@ then refresh." **Review changes** is hidden, as today.
 | `unchecked` while checking | shimmer (static under reduced motion) | "Checking how much C: can shrink. This can take a few minutes." | none |
 | `unchecked`, not checking | dimmed | "C: wasn't checked. Refresh to try again." | Refresh |
 | `checked`, enough | normal | "C: · NTFS · can give Omarchy up to 92 GiB" | editor |
-| `checked`, short | hatched | "Windows can release only 3 GiB from C:. 4.5 GiB more is needed." | Recheck |
+| `checked`, short because of the reserve | hatched | "C: needs 2.5 GiB more free space. Free up space in Windows, then recheck." | Recheck |
+| `checked`, short because Windows can't move files | hatched | "Windows can't move some files near the end of C:, so it can release only 3 GiB." (or "…so it cannot shrink it.") | Recheck |
 | `failed` | hatched | provider reason, or "Windows couldn't measure C:." | Recheck |
 | free, enough | outlined | "Free space · 120 GiB" | editor |
 | free, too small | dimmed, outlined | "Free space · 2 GiB · too small" | none |
@@ -386,7 +388,7 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | Can't keep | Windows can't give enough space to keep it. You can replace it in the installer. |
 | Free target | Omarchy can use the remaining 112 GiB. |
 | Free target, short | Only 20 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room. |
-| No usable space | No space can be used yet. Free up space in Windows, then refresh. |
+| No usable space | No space can be used yet. |
 | Secure Boot (PR 1 and 2 only) | Secure Boot is on. Leave it on; you'll turn it off after preparing. |
 | Button | Review changes |
 | Table | All partitions (n) |
@@ -678,12 +680,15 @@ parameters:
 
 Real layouts:
 
-- Capture 2–4 disk-check results from the test VM and a physical PC with a
-  testing debug build. After the check, run
-  `await window.__TAURI_INTERNALS__.invoke('setup_status')` in devtools and
-  copy `stagedIso`.
-- Anonymize disk IDs, GUIDs and volume labels, then save them in
+- Capture 2–4 disk-check results from the test VM and physical PCs with
+  `scripts/capture-staged-layout.ps1`. It runs the provider's read-only disk
+  check without the app or an ISO and replaces disk IDs and GUIDs. A testing
+  debug build's `setup_status` works too.
+- Replace personal volume labels, then save them in
   `test-fixtures/staged-layouts/`.
+- `laptop.json` (captured 2026-10-07): Windows can't shrink C: at all although
+  free space minus the reserve is about 23 GiB, and an OEM RESTORE partition
+  fails the precheck. No space is usable.
 
 ### Screenshots and measurements
 

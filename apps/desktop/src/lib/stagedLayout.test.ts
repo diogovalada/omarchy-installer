@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StagedChoice, StagedDisk, StagedRegion, StagedReviewPlan } from './setup';
 import { GiB, MiB, afterLayout, barWidths, cantReleaseLine, choiceFor, defaultRegion, editorSegments, formatDiskSize, formatSize, freeTargetLine, limits, overviewSegments, regionKey, regionStatus, reviewBullets, reviewWarning, windowsAfterBytes } from './stagedLayout';
+import laptop from '../../test-fixtures/staged-layouts/laptop.json';
 
 const temporaryBytes=7.5*GiB, minimumBytes=32*GiB, reserveBytes=Math.ceil(95.3*GiB/MiB)*MiB;
 const efi:StagedRegion={kind:'partition',partitionNumber:1,partitionGuid:'efi',offsetBytes:MiB,sizeBytes:260*MiB,label:'EFI system',resizeState:'unavailable',resizeReason:'System or unsupported partition; kept unchanged.'};
@@ -195,9 +196,11 @@ describe('staged region status', () => {
   it('shows measured limits, shortfalls and failures', () => {
     expect(regionStatus(windows,{...context,usable:true})).toEqual({tone:'normal',text:'C: · NTFS · can give Omarchy up to 92 GiB',action:null});
     expect(regionStatus({...windows,maximumReleaseBytes:20*GiB},{...context,usable:true}).text).toBe('C: · NTFS · room for the installer only');
-    expect(regionStatus({...windows,maximumReleaseBytes:3*GiB},context)).toEqual({tone:'hatched',text:'Windows can release only 3 GiB from C:. 4.5 GiB more is needed.',action:'recheck'});
-    expect(regionStatus({...windows,maximumReleaseBytes:7.46*GiB},context).text).toBe('Windows can release only 7.4 GiB from C:. 41 MiB more is needed.');
-    expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't release space from C:. 7.5 GiB is needed.");
+    expect(regionStatus({...windows,maximumReleaseBytes:3*GiB},context)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of C:, so it can release only 3 GiB.",action:'recheck'});
+    expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't move some files near the end of C:, so it cannot shrink it.");
+    expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:4*GiB},context)).toEqual({tone:'hatched',text:'C: needs 2.5 GiB more free space. Free up space in Windows, then recheck.',action:'recheck'});
+    expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:7.46*GiB},context).text).toBe('Windows can release only 7.4 GiB from C:. 41 MiB more is needed.');
+    expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:0},context).text).toBe("Windows can't release space from C:. 7.5 GiB is needed.");
     expect(regionStatus(windows,context)).toEqual({tone:'hatched',text:"Windows can't shrink C:.",action:'recheck'});
     expect(regionStatus({...windows,resizeReason:'NTFS volume must be writable, healthy and operational.'},context).text).toBe('NTFS volume must be writable, healthy and operational.');
     expect(regionStatus({...windows,resizeState:'failed',maximumReleaseBytes:null},context)).toEqual({tone:'hatched',text:"Windows couldn't measure C:.",action:'recheck'});
@@ -269,5 +272,30 @@ describe('staged review', () => {
     expect(reviewWarning(keepReview)).toBe('Test build: real disk changes. This ISO may not start, or may refuse this disk.');
     expect(reviewWarning({...keepReview,warning:'unsigned'})).toBe('Unsigned test image: real disk changes. It may not start or install.');
     expect(reviewWarning({...keepReview,warning:null})).toBeNull();
+  });
+});
+
+describe('captured laptop layout', () => {
+  // A real disk check (test-fixtures/staged-layouts/laptop.json): Windows
+  // can't shrink C: at all, and the OEM RESTORE partition fails the precheck.
+  const captured=laptop as unknown as {disks:StagedDisk[];choices:StagedChoice[];temporaryBytes:number;minimumLinuxBytes:number};
+  const disk=captured.disks[0];
+  const c=disk.regions.find(r=>r.isWindows)!;
+  const restore=disk.regions.find(r=>r.label.startsWith('RESTORE'))!;
+  const statusContext={temporaryBytes:captured.temporaryBytes,minimumBytes:captured.minimumLinuxBytes,usable:false};
+
+  it('groups the small system partitions and hides the alignment gap', () => {
+    expect(overviewSegments(disk).map(s=>s.label)).toEqual(['2 small partitions','OS (C:)','Windows recovery','RESTORE (Partition 5)','Windows recovery']);
+  });
+
+  it('selects C: to explain why no space can be used', () => {
+    expect(captured.choices).toEqual([]);
+    expect(defaultRegion(disk,captured.choices,captured.temporaryBytes,captured.minimumLinuxBytes)).toBe(c);
+  });
+
+  it('explains both partitions', () => {
+    expect(regionStatus(c,statusContext)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of OS (C:), so it cannot shrink it.",action:'recheck'});
+    expect(cantReleaseLine(c)).toBe("Windows keeps 93 GiB free and can't move some files near the end of OS (C:).");
+    expect(regionStatus(restore,statusContext)).toEqual({tone:'hatched',text:'RESTORE (Partition 5) needs 18.9 GiB more free space. Free up space in Windows, then refresh.',action:'refresh'});
   });
 });

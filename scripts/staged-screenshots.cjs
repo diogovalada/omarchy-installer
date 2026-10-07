@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 const [label = 'current', base = 'http://localhost:1420'] = process.argv.slice(2);
-const scenarios = ['ready', 'limited', 'oem', 'free', 'two-ntfs', 'two-disks', 'failed', 'replace-only', 'checking', 'review', 'layout=example'];
+const scenarios = ['ready', 'limited', 'oem', 'free', 'two-ntfs', 'two-disks', 'failed', 'replace-only', 'checking', 'review', 'layout=example', 'layout=laptop'];
 const widths = [1180, 820, 390];
 const output = path.join(__dirname, '..', 'artifacts', 'staged-disk-map', label);
 
