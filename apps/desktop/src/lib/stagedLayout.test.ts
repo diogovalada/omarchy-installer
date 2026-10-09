@@ -98,7 +98,7 @@ describe('staged space editor', () => {
   it('lays out a kept Windows in provider order', () => {
     const segments=editorSegments(windows,{temporaryBytes,omarchyBytes:64*GiB,mode:'keep'});
     expect(segments.map(s=>[s.kind,s.label])).toEqual([
-      ['used','753 GiB used'],['cant-release',"can't release 100 GiB"],['free','free 28.5 GiB'],
+      ['used',''],['cant-release',"can't release"],['free','free'],
       ['temporary','installer 7.5 GiB · temporary'],['omarchy','Omarchy 64 GiB']
     ]);
     expect(segments[3].offsetBytes).toBe(300*MiB+881.5*GiB);
@@ -107,6 +107,18 @@ describe('staged space editor', () => {
     expect(segments.reduce((total,s)=>total+s.widthPercent,0)).toBeCloseTo(100);
     expect(segments[4].widthPercent/segments[3].widthPercent).toBeCloseTo(64/7.5);
     expect(windowsAfterBytes(windows,temporaryBytes,64*GiB)).toBe(881.5*GiB);
+  });
+
+  it('keeps a small installer visible without bending the handle scale', () => {
+    const large={...windows,sizeBytes:4000*GiB,freeBytes:3000*GiB,maximumReleaseBytes:2500*GiB,reserveBytes:400*GiB};
+    const start=(omarchy:number) => {
+      const segments=editorSegments(large,{temporaryBytes,omarchyBytes:omarchy*GiB,mode:'keep',barPx:700});
+      const index=segments.findIndex(s=>s.kind==='temporary');
+      expect(segments[index].widthPercent).toBeCloseTo(24/700*100);
+      expect(segments.reduce((total,s)=>total+s.widthPercent,0)).toBeCloseTo(100);
+      return segments.slice(0,index).reduce((total,s)=>total+s.widthPercent,0);
+    };
+    expect(start(32)-start(64)).toBeCloseTo(start(64)-start(96));
   });
 
   it('aligns the installer to the MiB below the partition end', () => {
@@ -118,7 +130,7 @@ describe('staged space editor', () => {
 
   it('shrinks only for the installer when replacing Windows', () => {
     const segments=editorSegments(windows,{temporaryBytes,omarchyBytes:64*GiB,mode:'replace'});
-    expect(segments.map(s=>s.label)).toEqual(['753 GiB used',"can't release 100 GiB",'free 92.5 GiB','installer 7.5 GiB · temporary']);
+    expect(segments.map(s=>[s.kind,s.sizeBytes])).toEqual([['used',753*GiB],['cant-release',100*GiB],['free',92.5*GiB],['temporary',temporaryBytes]]);
   });
 
   it("explains the space Windows can't release", () => {
@@ -138,16 +150,17 @@ describe('staged space editor', () => {
     const free:StagedRegion={kind:'free',offsetBytes:500*GiB,sizeBytes:120*GiB,label:'Unallocated space'};
     const segments=editorSegments(free,{temporaryBytes,omarchyBytes:64*GiB,mode:'keep'});
     expect(segments.map(s=>[s.kind,s.offsetBytes,s.label])).toEqual([
-      ['temporary',500*GiB,'installer 7.5 GiB · temporary'],['omarchy',507.5*GiB,'Omarchy 112.5 GiB']
+      ['temporary',500*GiB,'installer 7.5 GiB · temporary'],['omarchy',507.5*GiB,'Omarchy']
     ]);
   });
 
   it('rounds available space down and the installer up, as the lines do', () => {
     const free:StagedRegion={kind:'free',offsetBytes:500*GiB,sizeBytes:119.96*GiB,label:'Unallocated space'};
     const temporary=7.46*GiB;
-    expect(editorSegments(free,{temporaryBytes:temporary,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.5 GiB · temporary','Omarchy 112.5 GiB']);
+    expect(editorSegments(free,{temporaryBytes:temporary,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.5 GiB · temporary','Omarchy']);
     expect(freeTargetLine(free.sizeBytes-temporary,minimumBytes)).toBe('Omarchy can use 112.5 GiB.');
-    expect(editorSegments({...free,sizeBytes:120*GiB},{temporaryBytes:7.54*GiB,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.6 GiB · temporary','Omarchy 112.4 GiB']);
+    expect(editorSegments({...free,sizeBytes:120*GiB},{temporaryBytes:7.54*GiB,mode:'keep'})[0].label).toBe('installer 7.6 GiB · temporary');
+    expect(freeTargetLine(120*GiB-7.54*GiB,minimumBytes)).toBe('Omarchy can use 112.4 GiB.');
   });
 });
 

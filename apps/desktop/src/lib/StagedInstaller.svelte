@@ -2,8 +2,9 @@
   import { ArrowLeft, ArrowRight, HardDrive, RefreshCw } from 'lucide-svelte';
   import StagedDiskMap from './StagedDiskMap.svelte';
   import StagedPartitionTable from './StagedPartitionTable.svelte';
+  import StagedSpaceEditor from './StagedSpaceEditor.svelte';
   import { setup, setupActive, type SetupSnapshot, type StagedBlockedDisk, type StagedChoice, type StagedDisk, type StagedOperation, type StagedRegion, type StagedResizeQuery } from './setup';
-  import { choiceFor, defaultRegion, formatDiskSize, freeTargetLine, GiB, limits, overviewSegments, regionKey, regionStatus, type OverviewSegment, type RegionStatus } from './stagedLayout';
+  import { choiceFor, defaultRegion, formatDiskSize, GiB, limits, overviewSegments, regionKey, regionStatus, type OverviewSegment, type RegionStatus } from './stagedLayout';
   export let recoveryOnly=false;
   export let close:()=>void=()=>{};
   export let sourceReady=false;
@@ -141,6 +142,12 @@
     const source=segment?.regions.length===1 && choiceFor(segment.regions[0],spaces) ? segment.regions[0] : sourceRegion;
     chosenSegment=key; chosenSource=source ? regionKey(source) : '';
   }
+  // Editing the space also fixes the selection and source, so a default
+  // found later can't move the space being edited.
+  function pin() {
+    if(!chosenSegment && selectedSegment) chosenSegment=selectedSegment.key;
+    if(!chosenSource && sourceRegion) chosenSource=regionKey(sourceRegion);
+  }
   function selectDisk(id:string) {
     selectedDisk=id; chosenSegment=''; chosenSource='';
   }
@@ -210,19 +217,9 @@
           <div class="allocation">
             {#if layout && sourceRegion && single(selectedSegment)!==sourceRegion}<p>Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</p>{/if}
             {#if !layout}<p>{choice.label}</p>{/if}
-            {#if choice.target.target_kind==='shrink'}
-              {#if canKeep}
-                <fieldset class="windows-choice" disabled={!browsing}>
-                  <legend class="visually-hidden">{targetName}</legend>
-                  <label><input type="radio" name="windows" value={true} bind:group={keepWindows}>Keep {targetName}</label>
-                  <label><input type="radio" name="windows" value={false} bind:group={keepWindows}>Replace {targetName}</label>
-                </fieldset>
-                {#if keepWindows}<label class="omarchy-size">Omarchy<input type="number" aria-label="Space for Omarchy" min={minimumGiB} max={keepMaximumGiB} step="1" bind:value={omarchyGiB} disabled={!browsing}><span>GiB · {minimumGiB}–{keepMaximumGiB}</span></label>
-                {:else}<p>In the installer, delete {targetName} to make room for Omarchy.</p>{/if}
-              {:else}
-                <p>{shrinkRegion ? `${targetName} can't give enough space to keep it. You can replace it in the installer.` : `In the installer, delete ${targetName} to make room for Omarchy.`}</p>
-              {/if}
-            {:else}<p>{freeTargetLine(choice.largestFreeAfterStagingBytes,installMinimum)}</p>{/if}
+            {#key sourceRegion ? regionKey(sourceRegion) : JSON.stringify(choice.target)}
+              <StagedSpaceEditor {choice} region={sourceRegion} {targetName} temporaryBytes={requiredBytes} minimumBytes={installMinimum} minGiB={minimumGiB} maxGiB={keepMaximumGiB} {canKeep} bind:keep={keepWindows} bind:omarchyGiB disabled={!browsing} edit={pin}/>
+            {/key}
             {#if inspection?.secureBoot}<p role="note">Secure Boot is on. Leave it on; you'll turn it off after preparing.</p>{/if}
           </div>
         {:else if layout && !checkingAny}<p class="no-space">No space can be used yet.</p>{/if}
@@ -282,8 +279,6 @@
   .line{margin:0;font-size:12px;color:var(--text)}.text-action{min-height:0;padding:0 0 0 6px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){border-color:transparent;background:transparent;color:var(--accent-hover)}
   .blocked{margin:14px 0 0;font-size:12px}
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
-  .windows-choice{display:flex;flex-wrap:wrap;gap:8px 24px;border:0;padding:0;margin:0 0 10px;font-size:12px;color:var(--text)}.windows-choice label{display:flex;align-items:center;gap:8px}
-  .omarchy-size{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px;color:var(--text)}.omarchy-size input{width:72px;padding:6px 8px;background:var(--surface-raised);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px}.omarchy-size span{color:var(--text-dim)}
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end}
   .review,article{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:22px;margin:16px 0}.review{border-color:var(--accent)}.review p{white-space:pre-line}.actions{display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);padding-top:18px}

@@ -218,6 +218,8 @@ it('chooses free space first and selects partitions with the keyboard',async()=>
   expect(freeSegment).toHaveAttribute('tabindex','0');
   expect(map).toContainElement(freeSegment);
   expect(screen.getByText('Omarchy can use 91.9 GiB.')).toBeInTheDocument();
+  expect(screen.getByText('installer 8 GiB · temporary')).toBeInTheDocument();
+  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
   await fireEvent.keyDown(freeSegment,{key:'ArrowLeft'});
   const windows=screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'});
   expect(windows).toBeChecked();
@@ -285,8 +287,78 @@ it('keeps Windows with a chosen Omarchy size or replaces it later',async()=>{
   await fireEvent.click(screen.getByRole('radio',{name:'Replace Windows'}));
   expect(screen.getByText('In the installer, delete Windows to make room for Omarchy.')).toBeInTheDocument();
   expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+  expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+  expect(screen.getByText('Windows 492 GiB')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
+});
+it('moves the handle in step with the size field',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const slider=screen.getByRole('slider',{name:'Space for Omarchy'}) as HTMLInputElement;
+  const field=screen.getByRole('spinbutton',{name:'Space for Omarchy'});
+  expect(slider).toHaveAttribute('min','32');
+  expect(slider).toHaveAttribute('max','100');
+  expect(slider).toHaveAttribute('dir','rtl');
+  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 64 GiB, Windows keeps 428 GiB');
+  await fireEvent.input(slider,{target:{value:'90'}});
+  expect(field).toHaveValue(90);
+  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 90 GiB, Windows keeps 402 GiB');
+  expect(screen.getByText('Windows 402 GiB')).toBeInTheDocument();
+  await fireEvent.keyDown(slider,{key:'PageUp'});
+  expect(field).toHaveValue(100);
+  expect(slider.value).toBe('100');
+  await fireEvent.keyDown(slider,{key:'PageDown'});
+  expect(field).toHaveValue(90);
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:90*GiB});
+});
+it('clamps a typed size when leaving the field, so the submitted size is the one shown',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const slider=screen.getByRole('slider',{name:'Space for Omarchy'}) as HTMLInputElement;
+  const field=screen.getByRole('spinbutton',{name:'Space for Omarchy'});
+  // Typing 40 passes through 4, which must not jump to the minimum.
+  await fireEvent.input(field,{target:{value:'4'}});
+  expect(field).toHaveValue(4);
+  expect(slider.value).toBe('64');
+  await fireEvent.change(field);
+  expect(field).toHaveValue(32);
+  expect(slider.value).toBe('32');
+  await fireEvent.input(field,{target:{value:'500'}});
+  await fireEvent.change(field);
+  expect(field).toHaveValue(100);
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:100*GiB});
+});
+it("explains the space Windows can't release when it is selected",async()=>{
+  const roomy={...checkedC,freeBytes:200*GiB};
+  state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[roomy]}]}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const zone=screen.getByRole('button',{name:"Can't release 92 GiB"});
+  const line=screen.getByText("50 GiB stays free for Windows, and some files near the end of C: can't be moved.");
+  expect(zone).toHaveAttribute('aria-expanded','false');
+  expect(line).not.toBeVisible();
+  await fireEvent.click(zone);
+  expect(zone).toHaveAttribute('aria-expanded','true');
+  expect(line).toBeVisible();
+});
+it('keeps the space being edited when a later measurement would move the default',async()=>{
+  const data={...fullDisk.regions[0],partitionNumber:4,partitionGuid:'data-guid',offsetBytes:101*MiB+400*GiB,sizeBytes:1000*GiB,label:'D:',freeBytes:900*GiB,isWindows:false};
+  const dataChoice={...encrypted,label:'Resize D:',target:{target_kind:'shrink',partition_number:4,partition_guid:'data-guid'}};
+  const disk=(d:object)=>({...fullDisk,diskSizeBytes:1500*GiB,regions:[efi,{...checkedC,offsetBytes:101*MiB,sizeBytes:400*GiB},d]});
+  state.set({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[disk(data)],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.input(screen.getByRole('spinbutton',{name:'Space for Omarchy'}),{target:{value:'40'}});
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted,dataChoice],blocked:[],disks:[disk({...data,resizeState:'checked',maximumReleaseBytes:700*GiB,reserveBytes:100*GiB})],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  await tick();
+  expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*GiB});
 });
 it('offers only replacing when Windows cannot give enough space to keep it',async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:30*GiB}]}]}}});

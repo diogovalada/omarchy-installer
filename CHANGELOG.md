@@ -9,6 +9,10 @@ downloads. Published versions and their artifacts are immutable.
   Selecting a partition explains it in one line; an "All partitions" table
   gives exact sizes. A non-Windows partition is named by its drive letter in
   the Keep and Replace choices.
+- Install without USB (testing builds): a zoomed bar shows how the chosen
+  space will be laid out, with a handle that sets Omarchy's size in step with
+  the size field. Keep and Replace are a two-way toggle, and selecting the
+  space Windows can't release explains why.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

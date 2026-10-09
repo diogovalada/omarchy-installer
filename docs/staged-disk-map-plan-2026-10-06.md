@@ -127,9 +127,9 @@ Disk 0 · 954 GiB     Disk 1 · 1.8 TiB · can't use               Refresh
 C: · NTFS · can give Omarchy up to 92 GiB
 
 ┌──────────┬//┬───────────────────┬──────────┃──┬────────────────────┐
-│ 753 used │  │╳ can't release 100│ free 28.5┃▒▒│ Omarchy 64 GiB      │
+│        //│  │╳ can't release    │ free     ┃▒▒│ Omarchy 64 GiB      │
 └──────────┴//┴───────────────────┴──────────┃──┴────────────────────┘
- Windows 881.5 GiB                     drag ◀▶  installer 7.5 GiB · temporary
+ Windows 881.5 GiB                              ▒ installer 7.5 GiB · temporary
 
 [ Keep Windows | Replace Windows ]      Omarchy [ 64 ] GiB · 32–92
 
@@ -184,8 +184,13 @@ progress appears here, not at the bottom of the page.
 
 The editor covers only the selected partition:
 
-- **Used space** collapses to a fixed-width stub (`753 used //`), about 15% of
-  the bar. The adjustable range gets the rest.
+- **Used space** collapses to a fixed-width stub with a `//` break and no
+  label, about 15% of the bar. The adjustable range gets the rest. The
+  partition is named below the bar with its size after the shrink
+  (`Windows 881.5 GiB`), and the installer beside a striped swatch.
+- **Installer width.** The installer segment is at least 24 px wide, so it
+  stays visible on large partitions. Only it is raised, so where it starts
+  stays proportional to Omarchy's size and the handle stays on it.
 - **Order follows the provider:** shrunk partition, temporary installer
   (512 MiB EFI plus installer files), then Omarchy's unallocated space, then
   whatever followed the partition. `Get-StagingPlan` places the start at
@@ -205,10 +210,15 @@ The editor covers only the selected partition:
   - minimum: `ceil(minimumLinuxBytes / GiB)`;
   - maximum: `floor((maximumReleaseBytes − temporaryBytes) / GiB)`;
   - steps of 1 GiB;
-  - default 64 GiB, clamped to the limits, as today.
+  - default 64 GiB, clamped to the limits, as today;
+  - the number field applies whole sizes within the limits as they are typed
+    and clamps the rest when left, so typing 40 doesn't jump to the minimum
+    at "4".
 - **Control.** A native `<input type="range" dir="rtl">` spans the adjustable
-  range and stays in sync with the number field. If limits change while
-  dragging, apply them on release so the handle does not jump.
+  range and stays in sync with the number field. Editing the size, by handle,
+  field or toggle, fixes the selection and space source like a pick on the
+  map. A measured partition's limit then can't change until a recheck, so the
+  handle doesn't jump while dragging.
 
 ### Keep or replace
 
@@ -747,7 +757,8 @@ Real layouts:
   - captures each fixture scenario at 1180, 820 and 390 px into
     `artifacts/staged-disk-map/<label>/`;
   - asserts no horizontal overflow and no page errors;
-  - prints word count, number of sizes, the choose-screen height and the
+  - prints word count (words with a letter or digit, so separators such as
+    "·" don't count), number of sizes, the choose-screen height and the
     distance from the first heading to the last primary button.
 - It uses `playwright-core` with the installed Edge channel. Install it in a
   temporary folder rather than adding it to the workspace, to avoid
@@ -850,7 +861,7 @@ pass with unchanged button names.
 | Risk | Mitigation |
 | --- | --- |
 | Real layouts read worse than the fixture | Real layouts are required before PR 1 merges; tune grouping and minimum widths with them |
-| Limits arrive while dragging | Apply on release; clamp the number field immediately |
+| Limits arrive while dragging | Editing fixes the space source, whose measured limit stays fixed until a recheck; the number field clamps when left |
 | `dir="rtl"` range behaves oddly in WebView2 | Map the value manually and keep the native input for keyboard and screen readers |
 | Editor estimate and plan differ by rounding | Review always shows the plan's numbers |
 | Disk changes between check and Review | Matching rule hides the bars; the provider re-validates the plan |
