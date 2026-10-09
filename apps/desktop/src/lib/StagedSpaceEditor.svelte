@@ -28,6 +28,12 @@
   $: barPx=width || 760;
   $: segments=region ? placed(editorSegments(region,{temporaryBytes,omarchyBytes:omarchyGiB*GiB,mode:keeping ? 'keep' : 'replace',barPx})) : [];
   $: installer=segments.find(s=>s.kind==='temporary');
+  $: cantRelease=segments.find(s=>s.kind==='cant-release');
+  $: omarchy=segments.find(s=>s.kind==='omarchy');
+  // Labels that don't fit their segment move to the legend. Omarchy's is
+  // judged at its smallest size, so dragging doesn't move it in and out.
+  $: cantReleaseInside=!!cantRelease && fits(cantRelease.label,cantRelease.widthPercent,width);
+  $: omarchyInside=!!region && fits('Omarchy',placed(editorSegments(region,{temporaryBytes,omarchyBytes:minGiB*GiB,mode:keeping ? 'keep' : 'replace',barPx})).find(s=>s.kind==='omarchy')?.widthPercent ?? 0,width);
   // The handle moves between where the installer starts with the largest
   // and with the smallest Omarchy size.
   $: span=keeping && region ? [installerStart(region,maxGiB,barPx),installerStart(region,minGiB,barPx)] : null;
@@ -44,11 +50,12 @@
   function installerStart(source:StagedRegion,gibibytes:number,px:number) {
     return placed(editorSegments(source,{temporaryBytes,omarchyBytes:gibibytes*GiB,mode:'keep',barPx:px})).find(s=>s.kind==='temporary')?.leftPercent ?? 0;
   }
-  // A label sits inside its segment when it fits; Omarchy's drops the size
-  // first. The installer is always named in the legend below.
-  function inside(segment:EditorSegment,px:number) {
-    const labels=segment.kind==='temporary' ? [] : segment.kind==='omarchy' ? [segment.label,'Omarchy'] : [segment.label];
-    return labels.find(text=>text && text.length*CHAR_PX+PADDING_PX<=segment.widthPercent/100*px) ?? '';
+  const fits=(text:string,percent:number,px:number) => !!text && text.length*CHAR_PX+PADDING_PX<=percent/100*px;
+  // The label inside a segment: Omarchy's drops its size first, and "free"
+  // simply hides. The installer is always named in the legend.
+  function inside(segment:EditorSegment,px:number,omarchyFits:boolean) {
+    if(segment.kind==='omarchy') return omarchyFits ? [segment.label,'Omarchy'].find(text=>fits(text,segment.widthPercent,px)) ?? '' : '';
+    return segment.kind!=='temporary' && fits(segment.label,segment.widthPercent,px) ? segment.label : '';
   }
   function slide(event:Event) {
     omarchyGiB=Number((event.currentTarget as HTMLInputElement).value);
@@ -64,12 +71,11 @@
   }
   // Typing applies whole sizes within the limits. Leaving the field clamps
   // what was typed, so the field shows the size that will be submitted.
+  // Every keystroke counts as editing, including "4" on the way to "40".
   function type(event:Event) {
     const value=Number((event.currentTarget as HTMLInputElement).value);
-    if(Number.isInteger(value) && value>=minGiB && value<=maxGiB) {
-      omarchyGiB=value;
-      edit();
-    }
+    if(Number.isInteger(value) && value>=minGiB && value<=maxGiB) omarchyGiB=value;
+    edit();
   }
   function commit(event:Event) {
     const input=event.currentTarget as HTMLInputElement, value=Math.round(Number(input.value));
@@ -82,9 +88,10 @@
 {#if region}
   <div class="bar" bind:clientWidth={width}>
     {#each segments as segment,index (segment.kind)}
-      {@const text=inside(segment,width)}
+      {@const text=inside(segment,width,omarchyInside)}
       {#if segment.kind==='cant-release'}
-        <button type="button" class="segment cant-release" class:last={index===segments.length-1} style:left="{segment.leftPercent}%" style:width="{segment.widthPercent}%" aria-label={`Can't release ${formatSize(segment.sizeBytes)}`} aria-expanded={explaining} aria-controls={`cant-release-${id}`} onclick={()=>{explaining=!explaining;}}>{#if text}<span class="text" aria-hidden="true">{text}</span>{/if}</button>
+        <!-- With its label in the legend, the legend's button is the one in the tab order. -->
+        <button type="button" class="segment cant-release" class:last={index===segments.length-1} style:left="{segment.leftPercent}%" style:width="{segment.widthPercent}%" aria-label={`Can't release ${formatSize(segment.sizeBytes)}`} aria-expanded={explaining} aria-controls={`cant-release-${id}`} aria-hidden={cantReleaseInside ? undefined : 'true'} tabindex={cantReleaseInside ? undefined : -1} onclick={()=>{explaining=!explaining;}}>{#if text}<span class="text" aria-hidden="true">{text}</span>{/if}</button>
       {:else}
         <span class="segment {segment.kind}" class:last={index===segments.length-1} style:left="{segment.leftPercent}%" style:width="{segment.widthPercent}%" aria-hidden="true">{#if text}<span class="text">{text}</span>{/if}</span>
       {/if}
@@ -94,8 +101,14 @@
     {/if}
   </div>
   <div class="legend">
-    {#if region.kind==='partition'}<span>{targetName} {formatSize(windowsAfter)}</span>{/if}
-    {#if installer}<span><i class="swatch" aria-hidden="true"></i>{installer.label}</span>{/if}
+    <span class="group">
+      {#if region.kind==='partition'}<span>{targetName} {formatSize(windowsAfter)}</span>{/if}
+      {#if cantRelease && !cantReleaseInside}<button type="button" class="legend-action" aria-label={`Can't release ${formatSize(cantRelease.sizeBytes)}`} aria-expanded={explaining} aria-controls={`cant-release-${id}`} onclick={()=>{explaining=!explaining;}}><i class="swatch cant-release" aria-hidden="true"></i>{cantRelease.label}</button>{/if}
+    </span>
+    <span class="group">
+      {#if installer}<span><i class="swatch temporary" aria-hidden="true"></i>{installer.label}</span>{/if}
+      {#if omarchy && !omarchyInside}<span><i class="swatch omarchy" aria-hidden="true"></i>{omarchy.label}</span>{/if}
+    </span>
   </div>
 {/if}
 {#if shrink && canKeep}
@@ -129,7 +142,7 @@
   .cant-release:hover{filter:brightness(1.2)}.cant-release:focus-visible{outline:2px solid var(--accent-hover);outline-offset:2px;z-index:1}
   .cant-release[aria-expanded='true']{box-shadow:inset 0 0 0 2px var(--accent)}
   .free{background-color:var(--surface-raised)}
-  .temporary,.swatch{background:repeating-linear-gradient(45deg,var(--accent-hover) 0 3px,var(--surface-deep) 3px 7px);background-clip:padding-box}
+  .temporary{background:repeating-linear-gradient(45deg,var(--accent-hover) 0 3px,var(--surface-deep) 3px 7px);background-clip:padding-box}
   .omarchy{background-color:var(--accent)}
   .handle{position:absolute;top:-5px;height:66px;margin:0;padding:0;background:transparent;appearance:none;-webkit-appearance:none;cursor:ew-resize;z-index:2}
   .handle:disabled{cursor:default}
@@ -139,7 +152,11 @@
   .handle:focus-visible{outline:none}.handle:focus-visible::-webkit-slider-thumb{outline:2px solid var(--accent-hover);outline-offset:1px}
   .handle:disabled::-webkit-slider-thumb{opacity:.5}
   .legend{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 16px;margin-bottom:10px;font-size:11px;color:var(--text-dim)}
+  .group{display:flex;flex-wrap:wrap;align-items:center;gap:2px 14px}
   .swatch{display:inline-block;width:14px;height:10px;margin-right:6px;border-radius:2px;vertical-align:-1px}
+  .swatch.omarchy{background:var(--accent)}
+  .legend-action{display:inline-flex;align-items:center;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
+  .legend-action:hover,.legend-action[aria-expanded='true']{color:var(--text)}.legend-action:focus-visible{outline:2px solid var(--accent-hover);outline-offset:2px}
   .controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px;margin:0 0 8px}
   .toggle{display:inline-flex;gap:2px;margin:0;padding:2px;border:1px solid var(--border-strong);border-radius:5px}
   .toggle label{position:relative;display:flex;align-items:center;min-height:30px;padding:0 14px;border-radius:3px;font-size:12px;color:var(--text-muted);cursor:pointer}

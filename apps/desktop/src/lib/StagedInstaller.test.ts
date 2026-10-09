@@ -302,8 +302,11 @@ it('moves the handle in step with the size field',async()=>{
   expect(slider).toHaveAttribute('max','100');
   expect(slider).toHaveAttribute('dir','rtl');
   expect(slider).toHaveAttribute('aria-valuetext','Omarchy 64 GiB, Windows keeps 428 GiB');
+  // jsdom has no layout, so every bar label is in the legend.
+  expect(screen.getByText('Omarchy 64 GiB')).toBeInTheDocument();
   await fireEvent.input(slider,{target:{value:'90'}});
   expect(field).toHaveValue(90);
+  expect(screen.getByText('Omarchy 90 GiB')).toBeInTheDocument();
   expect(slider).toHaveAttribute('aria-valuetext','Omarchy 90 GiB, Windows keeps 402 GiB');
   expect(screen.getByText('Windows 402 GiB')).toBeInTheDocument();
   await fireEvent.keyDown(slider,{key:'PageUp'});
@@ -359,6 +362,40 @@ it('keeps the space being edited when a later measurement would move the default
   expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*GiB});
+});
+// C: measured and D: still being checked, or both measured, on one disk.
+const dataRegion={...fullDisk.regions[0],partitionNumber:4,partitionGuid:'data-guid',offsetBytes:101*MiB+400*GiB,sizeBytes:1000*GiB,label:'D:',freeBytes:900*GiB,isWindows:false};
+const dataMeasured={...dataRegion,resizeState:'checked',maximumReleaseBytes:700*GiB,reserveBytes:100*GiB};
+const dataChoice={...encrypted,label:'Resize D:',target:{target_kind:'shrink',partition_number:4,partition_guid:'data-guid'}};
+const twoPartitions=(data:object,status:'running'|'complete')=>({pending:false,snapshot:{status,stage:status==='running' ? 'analyzing-resize' : 'complete',stagedTesting:true,stagedIso:{choices:status==='running' ? [encrypted] : [encrypted,dataChoice],blocked:[],disks:[{...fullDisk,diskSizeBytes:1500*GiB,regions:[efi,{...checkedC,offsetBytes:101*MiB,sizeBytes:400*GiB},data]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+it('pins the source shown in the editor when it stands in for an earlier pick',async()=>{
+  state.set(twoPartitions(dataMeasured,'complete'));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('radio',{name:'D: · NTFS · can give Omarchy up to 692 GiB'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
+  state.set(twoPartitions(dataRegion,'running'));
+  await tick();
+  expect(screen.getByText('Space comes from C:.')).toBeInTheDocument();
+  await fireEvent.input(screen.getByRole('spinbutton',{name:'Space for Omarchy'}),{target:{value:'40'}});
+  state.set(twoPartitions(dataMeasured,'complete'));
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*GiB});
+});
+it('keeps a half-typed size when a measurement arrives',async()=>{
+  state.set(twoPartitions(dataRegion,'running'));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const field=screen.getByRole('spinbutton',{name:'Space for Omarchy'});
+  await fireEvent.input(field,{target:{value:'4'}});
+  state.set(twoPartitions(dataMeasured,'complete'));
+  await tick();
+  expect(screen.getByRole('spinbutton',{name:'Space for Omarchy'})).toBe(field);
+  expect(field).toHaveValue(4);
+  await fireEvent.change(field);
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:32*GiB});
 });
 it('offers only replacing when Windows cannot give enough space to keep it',async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:30*GiB}]}]}}});

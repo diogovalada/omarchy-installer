@@ -142,11 +142,13 @@
     const source=segment?.regions.length===1 && choiceFor(segment.regions[0],spaces) ? segment.regions[0] : sourceRegion;
     chosenSegment=key; chosenSource=source ? regionKey(source) : '';
   }
-  // Editing the space also fixes the selection and source, so a default
-  // found later can't move the space being edited.
+  // Editing the space fixes the source shown in the editor, even when it
+  // stands in for an earlier pick that can't be used yet, so a measurement
+  // can't move the space being edited. A selection the user hasn't made
+  // yet is fixed too.
   function pin() {
     if(!chosenSegment && selectedSegment) chosenSegment=selectedSegment.key;
-    if(!chosenSource && sourceRegion) chosenSource=regionKey(sourceRegion);
+    if(sourceRegion) chosenSource=regionKey(sourceRegion);
   }
   function selectDisk(id:string) {
     selectedDisk=id; chosenSegment=''; chosenSource='';
