@@ -2,6 +2,11 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $script:testingBuild=$false
+# Staging paths sit under ProgramData, which has no 8.3 short names; this test
+# uses TEMP instead. GitHub's Windows runners set TEMP to a short path
+# (C:\Users\RUNNER~1\...) while PowerShell lists files under the long one, so
+# use the long form here, as staging paths always are.
+$env:TEMP=(Get-Item -LiteralPath $env:TEMP).FullName
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 foreach ($file in @('providers/staged-iso/Invoke-StagedIso.ps1','providers/staged-iso/Staging.ps1','providers/direct-x86/StoragePlan.ps1','providers/direct-x86/BitLocker.ps1')) {
     $tokens=$null; $errors=$null
