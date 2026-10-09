@@ -476,6 +476,16 @@ JSON, so no Rust change is needed. Add `isWindows?:boolean` to `StagedRegion`
 in `setup.ts`, and a provider assertion to
 `testkit/windows-direct/Test-StagedIso.ps1`.
 
+Also add to each disk record the GPT layout fingerprint that `Get-StagingPlan`
+already stores in the plan and rechecks before writing:
+
+```powershell
+layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number)
+```
+
+An empty value (the hash couldn't be read) means Review draws no bars. Add
+`layoutSha256?:string` to `StagedDisk`.
+
 ### 2. Structured review payload (Rust)
 
 In `apps/desktop/src-tauri/src/setup_helper.rs`, move the staged summary
@@ -492,6 +502,7 @@ plan:
 {
   "diskNumber": 0,
   "diskSizeBytes": 1024349700096,
+  "layoutSha256": "…",
   "targetKind": "shrink",
   "shrink": { "label": "C:", "partitionGuid": "…", "offsetBytes": 314572800,
               "beforeSizeBytes": 1023275958272, "afterSizeBytes": 946503417856 },
@@ -506,6 +517,7 @@ plan:
 
 Field rules:
 
+- `layoutSha256` is `plan.layoutSha256`.
 - `temporary.offsetBytes` is `plan.partitions[0].offsetBytes`.
   `temporary.sizeBytes` is `512 MiB + plan.partitions[1].sizeBytes`.
 - `omarchy` is present only when `linuxBytes > 0`. It starts where the
@@ -535,13 +547,11 @@ Plumbing:
 **UI matching rule.** Draw the Now and After bars only when the plan matches
 the inspection the user saw:
 
+- the disk's `layoutSha256` from the check equals `review.layoutSha256`, so
+  no partition changed anywhere on the disk;
 - shrink targets: an inspected region has the same `partitionGuid`, offset and
   size as `review.shrink` before the shrink;
-- free targets: `review.temporary` starts inside an inspected free region;
-- both: the projection's largest free block (free space plus Omarchy's space)
-  equals `review.largestFreeAfterBytes`, within alignment. This catches
-  changes the target alone doesn't reveal, such as a new partition ending the
-  free region.
+- free targets: `review.temporary` starts inside an inspected free region.
 
 Otherwise the layout changed since the check: show the bullets without bars.
 
@@ -558,8 +568,9 @@ reports:
 Keep `staged_iso` (the inspection) so the choose screen returns intact.
 Reset the flag in `begin()`.
 
-No other protocol or helper changes. The provider changes only the two
-messages named in the Summary, in PR 0.
+No other protocol or helper changes. Besides `isWindows`, `layoutSha256` and
+the two messages named in the Summary, all in PR 0, the provider doesn't
+change.
 
 ## Front-end structure
 
@@ -756,7 +767,8 @@ Branch names have no tool prefix.
 Branch: `staged-disk-map-foundation`.
 
 - `stagedLayout.ts` and its tests.
-- Provider `isWindows`, its test assertion and the TS type.
+- Provider `isWindows` and `layoutSha256`, their test assertions and the TS
+  types.
 - Provider messages: shrink blockers name the reserve or unmovable files;
   the precheck names a partition too small for the installer. With tests.
 - Fixture scenarios, the `staged-layouts/` folder and the extended screenshot

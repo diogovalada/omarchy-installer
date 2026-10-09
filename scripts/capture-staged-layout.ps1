@@ -5,9 +5,11 @@
 # changes nothing. It relaunches itself elevated, as the app's check does.
 #
 # Run from the repo, or copy it to another PC in one folder with
-# Invoke-StagedIso.ps1, Staging.ps1, StoragePlan.ps1 and BitLocker.ps1:
+# Invoke-StagedIso.ps1, Staging.ps1, StoragePlan.ps1, BitLocker.ps1 and
+# NativeDisk.cs (read-only disk primitives; the check reads the GPT layout):
 #   powershell -ExecutionPolicy Bypass -File capture-staged-layout.ps1 -Out layout.json
-# Disk IDs and partition GUIDs are replaced unless -KeepIdentifiers is given.
+# Disk IDs, layout fingerprints and partition GUIDs are replaced unless
+# -KeepIdentifiers is given.
 # Volume labels are kept and printed; replace personal ones before committing.
 # A failure leaves -Out untouched and writes <Out>.error.txt instead.
 param([Parameter(Mandatory=$true)][string]$Out,[switch]$KeepIdentifiers,[switch]$Relaunched)
@@ -36,9 +38,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     return
 }
 try {
+    $find={ param($file) $path=@((Join-Path $PSScriptRoot "../$file"),(Join-Path $PSScriptRoot (Split-Path $file -Leaf))) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1; if (-not $path) { throw "Missing $(Split-Path $file -Leaf) next to this script." }; $path }
+    Add-Type -Path (& $find 'providers/direct-x86/NativeDisk.cs')
     foreach ($file in @('providers/staged-iso/Invoke-StagedIso.ps1','providers/staged-iso/Staging.ps1','providers/direct-x86/StoragePlan.ps1','providers/direct-x86/BitLocker.ps1')) {
-        $path=@((Join-Path $PSScriptRoot "../$file"),(Join-Path $PSScriptRoot (Split-Path $file -Leaf))) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if (-not $path) { throw "Missing $(Split-Path $file -Leaf) next to this script." }
+        $path=& $find $file
         $tokens=$null; $errors=$null
         $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
         if ($errors.Count) { throw ($errors | Out-String) }
@@ -55,6 +58,7 @@ try {
         $guid={ param($v) $k=([string]$v).ToLowerInvariant(); if (-not $guids.ContainsKey($k)) { $guids[$k]='00000000-0000-0000-0000-'+('{0:D12}' -f ($guids.Count+1)) }; $guids[$k] }
         foreach ($disk in @($result.disks)) {
             $disk.diskUniqueId=& $id $disk.diskUniqueId
+            if ($disk.layoutSha256) { $disk.layoutSha256='anonymized' }
             foreach ($region in @($disk.regions)) { if ($region.ContainsKey('partitionGuid')) { $region.partitionGuid=& $guid $region.partitionGuid } }
         }
         foreach ($disk in @($result.blocked)) { $disk.diskUniqueId=& $id $disk.diskUniqueId }

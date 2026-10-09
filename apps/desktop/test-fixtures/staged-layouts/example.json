@@ -17,6 +17,7 @@
   "blocked": [],
   "disks": [
     {
+      "layoutSha256": "anonymized",
       "diskNumber": 0,
       "diskUniqueId": "anonymized-disk-0",
       "diskSizeBytes": 512090963968,

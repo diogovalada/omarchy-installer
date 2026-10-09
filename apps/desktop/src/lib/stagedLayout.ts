@@ -167,21 +167,12 @@ export function windowsAfterBytes(region:StagedRegion,temporaryBytes:number,omar
 }
 
 // The reviewed plan drawn over the inspected disk, or null when the disk
-// changed since the user saw it. Free space under 5 MiB is left out, as in
-// the overview (a shrink always leaves an alignment sliver under 1 MiB).
+// changed since the user saw it: the plan records the same GPT layout
+// fingerprint as the check, so any partition change shows. Free space under
+// 5 MiB is left out, as in the overview (a shrink always leaves an alignment
+// sliver under 1 MiB).
 export function afterLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegion[]|null {
-  const projected=projectedLayout(disk,review);
-  if(!projected) return null;
-  // The plan measured the real disk. If the largest free block the projection
-  // shows differs, something changed that the target alone doesn't reveal.
-  let largest=0, block=0;
-  for(const region of projected) {
-    block=region.kind==='free' || region.kind==='omarchy' ? block+region.sizeBytes : 0;
-    largest=Math.max(largest,block);
-  }
-  return Math.abs(largest-review.largestFreeAfterBytes)<=ALIGNMENT_SLACK_BYTES ? drawn(projected) : null;
-}
-function projectedLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegion[]|null {
+  if(!disk.layoutSha256 || disk.layoutSha256!==review.layoutSha256) return null;
   if(disk.diskNumber!==review.diskNumber || disk.diskSizeBytes!==review.diskSizeBytes) return null;
   const project=(r:StagedRegion):ProjectedRegion => ({kind:r.kind,offsetBytes:r.offsetBytes,sizeBytes:r.sizeBytes,label:r.kind==='free' ? 'Free space' : r.label,...(r.partitionGuid ? {partitionGuid:r.partitionGuid} : {})});
   const temporary=review.temporary;
@@ -197,7 +188,7 @@ function projectedLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegio
     const region=disk.regions[index];
     const end=region.offsetBytes+region.sizeBytes;
     const tail:ProjectedRegion[]=end>addedEnd ? [{kind:'free',offsetBytes:addedEnd,sizeBytes:end-addedEnd,label:'Free space'}] : [];
-    return [...disk.regions.slice(0,index).map(project),{...project(region),sizeBytes:shrink.afterSizeBytes},...added,...tail,...disk.regions.slice(index+1).map(project)];
+    return drawn([...disk.regions.slice(0,index).map(project),{...project(region),sizeBytes:shrink.afterSizeBytes},...added,...tail,...disk.regions.slice(index+1).map(project)]);
   }
   const index=disk.regions.findIndex(r=>r.kind==='free' && temporary.offsetBytes>=r.offsetBytes && temporary.offsetBytes<r.offsetBytes+r.sizeBytes);
   if(index<0) return null;
@@ -205,7 +196,7 @@ function projectedLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegio
   const end=region.offsetBytes+region.sizeBytes;
   const before:ProjectedRegion[]=temporary.offsetBytes>region.offsetBytes ? [{kind:'free',offsetBytes:region.offsetBytes,sizeBytes:temporary.offsetBytes-region.offsetBytes,label:'Free space'}] : [];
   const after:ProjectedRegion[]=end>addedEnd ? [{kind:'free',offsetBytes:addedEnd,sizeBytes:end-addedEnd,label:'Free space'}] : [];
-  return [...disk.regions.slice(0,index).map(project),...before,...added,...after,...disk.regions.slice(index+1).map(project)];
+  return drawn([...disk.regions.slice(0,index).map(project),...before,...added,...after,...disk.regions.slice(index+1).map(project)]);
 }
 const drawn=(regions:ProjectedRegion[]) => regions.filter(r=>r.kind!=='free' || r.sizeBytes>=HIDDEN_GAP_BYTES);
 

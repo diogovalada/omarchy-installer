@@ -159,7 +159,10 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 }
                 $regions+=$region
             }
-            $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption}
+            # The fingerprint Get-StagingPlan records, so the app can tell
+            # whether a reviewed plan still matches the layout it showed.
+            $layout=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
+            $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption;layoutSha256=$layout}
             foreach ($choice in $diskChoices) {
                 $choice.diskSizeBytes=[long]$disk.Size; $choice.encryption=$encryption
                 $remaining=@(foreach ($region in $regions) {

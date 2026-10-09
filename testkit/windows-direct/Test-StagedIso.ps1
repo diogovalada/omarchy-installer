@@ -35,6 +35,10 @@ function Assert($Value,[string]$Message) { if (-not $Value) { throw $Message } }
     Assert (-not $legacy.volumes[0].supported) 'Retained image deployment lost its original protector checks.'
 }
 . (Join-Path $root 'providers/staged-iso/Staging.ps1')
+# Windows disk primitives, stubbed: inspection and planning read the layout fingerprint.
+if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
+    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return "layout"; } } }'
+}
 function Reject($Work,[string]$Message) { $failed=$false; try { & $Work | Out-Null } catch { $failed=$true }; Assert $failed $Message }
 Assert-Fields (ConvertFrom-Json '{}') @() @()
 Reject { Assert-Fields (ConvertFrom-Json '{"unexpected":true}') @() @() } 'Status accepted unknown fields.'
@@ -179,6 +183,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $region=$found.disks[0].regions[0]
     Assert ($region.freeBytes -eq 100GB -and $region.resizeState -eq 'unchecked') 'Unused filesystem space must remain distinct from unallocated space.'
     Assert ($found.disks[0].unallocatedBytes -eq 0) 'Filesystem free bytes became unallocated disk space.'
+    Assert ($found.disks[0].layoutSha256 -eq 'layout') 'Inspection did not record the layout fingerprint the plan checks.'
     Assert ($region.isWindows -eq $false) 'A data partition was marked as the Windows partition.'
     $part.IsBoot=$true
     Assert ((Get-StagingChoices $release).disks[0].regions[0].isWindows -eq $true) 'The Windows boot partition was not marked.'
@@ -402,9 +407,6 @@ try {
 }
 # Planning never consults Secure Boot, and a reviewed shrink can also leave
 # room for Omarchy right after the temporary installer.
-if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
-    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return "layout"; } } }'
-}
 & {
     $planDisk=[pscustomobject]@{Number=0;UniqueId='plan-disk';Size=[long]500GB;SerialNumber='serial'}
     $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='66666666-6666-6666-6666-666666666666';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}

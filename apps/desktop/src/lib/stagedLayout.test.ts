@@ -8,11 +8,11 @@ const efi:StagedRegion={kind:'partition',partitionNumber:1,partitionGuid:'efi',o
 const msr:StagedRegion={kind:'partition',partitionNumber:2,partitionGuid:'msr',offsetBytes:261*MiB,sizeBytes:16*MiB,label:'Microsoft reserved',resizeState:'unavailable',resizeReason:'System or unsupported partition; kept unchanged.'};
 const windows:StagedRegion={kind:'partition',partitionNumber:3,partitionGuid:'windows',offsetBytes:300*MiB,sizeBytes:953*GiB,label:'C:',fileSystem:'NTFS',freeBytes:200*GiB,resizeState:'checked',resizeReason:'',maximumReleaseBytes:100*GiB,reserveBytes,isWindows:true};
 const recovery:StagedRegion={kind:'partition',partitionNumber:4,partitionGuid:'recovery',offsetBytes:300*MiB+953*GiB,sizeBytes:GiB,label:'Windows recovery',resizeState:'unavailable',resizeReason:'System or unsupported partition; kept unchanged.'};
-const diskOf=(regions:StagedRegion[],diskSizeBytes=300*MiB+954*GiB+MiB):StagedDisk => ({diskNumber:0,diskUniqueId:'disk',diskSizeBytes,unallocatedBytes:0,largestFreeBytes:0,regions});
+const diskOf=(regions:StagedRegion[],diskSizeBytes=300*MiB+954*GiB+MiB):StagedDisk => ({diskNumber:0,diskUniqueId:'disk',diskSizeBytes,unallocatedBytes:0,largestFreeBytes:0,regions,layoutSha256:'layout'});
 const shrinkChoice=(region:StagedRegion):StagedChoice => ({diskNumber:0,diskUniqueId:'disk',label:`Resize ${region.label}`,largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:region.partitionNumber,partition_guid:region.partitionGuid}});
 const freeChoice=(region:StagedRegion):StagedChoice => ({diskNumber:0,diskUniqueId:'disk',label:'Unallocated space',largestFreeAfterStagingBytes:region.sizeBytes-temporaryBytes,target:{target_kind:'free',start_offset_bytes:region.offsetBytes}});
 const context={temporaryBytes,minimumBytes,usable:false};
-const keepReview:StagedReviewPlan={diskNumber:0,diskSizeBytes:300*MiB+954*GiB+MiB,targetKind:'shrink',
+const keepReview:StagedReviewPlan={diskNumber:0,diskSizeBytes:300*MiB+954*GiB+MiB,layoutSha256:'layout',targetKind:'shrink',
   shrink:{label:'C:',partitionGuid:'windows',offsetBytes:300*MiB,beforeSizeBytes:953*GiB,afterSizeBytes:881.5*GiB},
   temporary:{offsetBytes:300*MiB+881.5*GiB,sizeBytes:temporaryBytes},omarchy:{offsetBytes:300*MiB+889*GiB,sizeBytes:64*GiB},
   largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:minimumBytes,bitLocker:['C:'],warning:'experimental'};
@@ -269,13 +269,14 @@ describe('staged review', () => {
     expect(afterLayout(diskOf([efi,windows,recovery]),{...keepReview,targetKind:'free',shrink:null})).toBeNull();
   });
 
-  it('draws nothing when free space changed around the target', () => {
-    // The installer still starts in the inspected 120 GiB gap, but a 30 GiB
-    // partition now ends it, so the plan leaves 82.5 GiB instead of 112.5.
+  it('draws nothing when the layout fingerprint differs or is missing', () => {
+    // For example, a new partition now ends the free region the installer
+    // still starts in: the target looks the same, the fingerprint doesn't.
     const free:StagedRegion={kind:'free',offsetBytes:300*MiB+953*GiB,sizeBytes:120*GiB,label:'Unallocated space'};
     const review:StagedReviewPlan={...keepReview,diskSizeBytes:2000*GiB,targetKind:'free',shrink:null,omarchy:null,temporary:{offsetBytes:free.offsetBytes,sizeBytes:temporaryBytes},largestFreeAfterBytes:82.5*GiB};
-    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),review)).toBeNull();
-    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),{...review,largestFreeAfterBytes:112.5*GiB})).not.toBeNull();
+    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),review)).not.toBeNull();
+    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),{...review,layoutSha256:'changed'})).toBeNull();
+    expect(afterLayout({...diskOf([efi,windows,free],2000*GiB),layoutSha256:undefined},review)).toBeNull();
   });
 
   it('builds bullets for keeping Windows', () => {

@@ -3,6 +3,7 @@
   "minimumLinuxBytes": 34359738368,
   "disks": [
     {
+      "layoutSha256": "anonymized",
       "diskUniqueId": "anonymized-disk-0",
       "unallocatedBytes": 1048576,
       "largestFreeBytes": 1048576,

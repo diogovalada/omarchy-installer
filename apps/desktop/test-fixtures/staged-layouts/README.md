@@ -19,13 +19,15 @@ powershell -ExecutionPolicy Bypass -File scripts/capture-staged-layout.ps1 -Out 
 
 On a PC without the repo, copy `scripts/capture-staged-layout.ps1`,
 `providers/staged-iso/Invoke-StagedIso.ps1`, `providers/staged-iso/Staging.ps1`,
-`providers/direct-x86/StoragePlan.ps1` and `providers/direct-x86/BitLocker.ps1`
-into one folder and run the script there. It replaces disk IDs and partition
-GUIDs and prints the volume labels; replace personal labels before committing.
+`providers/direct-x86/StoragePlan.ps1`, `providers/direct-x86/BitLocker.ps1` and
+`providers/direct-x86/NativeDisk.cs` into one folder and run the script there.
+It replaces disk IDs, layout fingerprints and partition GUIDs and prints the
+volume labels; replace personal labels before committing.
 
 Prefer the script. A testing debug build works too: after the check, run
 `copy((await window.__TAURI_INTERNALS__.invoke('setup_status')).stagedIso)` in
 devtools. That copy is not anonymized: before committing, replace every
 `diskUniqueId` (it often contains the drive's serial number, and sometimes the
 computer name) and every partition GUID, consistently across `disks`,
-`choices` and `blocked`, as well as personal volume labels.
+`choices` and `blocked`, each `layoutSha256` with `anonymized`, and personal
+volume labels.

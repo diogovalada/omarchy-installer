@@ -27,11 +27,11 @@ export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conver
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
 export interface StagedResizeQuery { diskNumber:number;diskUniqueId:string;partitionNumber:number;partitionGuid:string }
 export interface StagedRegion { kind:'free'|'partition';offsetBytes:number;sizeBytes:number;label:string;partitionNumber?:number;partitionGuid?:string;fileSystem?:string;freeBytes?:number|null;resizeState?:'unchecked'|'checked'|'failed'|'insufficient'|'unavailable';resizeReason?:string;maximumReleaseBytes?:number|null;reserveBytes?:number|null;isWindows?:boolean }
-export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes:number;unallocatedBytes:number;largestFreeBytes:number;regions:StagedRegion[];encryption?:StagedEncryption[] }
+export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes:number;unallocatedBytes:number;largestFreeBytes:number;regions:StagedRegion[];encryption?:StagedEncryption[];layoutSha256?:string }
 // The review payload the helper will build from the same plan as the review
 // summary (see the disk map plan). It sits outside the confirmation binding, so
 // it is display-only.
-export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
+export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
 let epoch = 0; let reading = false;
