@@ -97,6 +97,8 @@ struct Inner {
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
     cancel: Arc<AtomicBool>,
     staged_review: Option<std::sync::mpsc::Sender<bool>>,
+    // The user declined the staged write's review in this operation.
+    staged_review_declined: bool,
 }
 #[derive(Clone)]
 pub struct Setup {
@@ -133,9 +135,34 @@ impl Default for Setup {
                 writer: None,
                 cancel: Arc::new(AtomicBool::new(false)),
                 staged_review: None,
+                staged_review_declined: false,
             })),
         }
     }
+}
+// Declining the staged review isn't a failure: the helper stops before
+// changing anything, and the inspection stays so the choose screen returns.
+fn record_failure(inner: &mut Inner, error: String) {
+    if inner.staged_review_declined && error == crate::setup_helper::NOT_CONFIRMED {
+        inner.snapshot.status = "cancelled".into();
+        inner.snapshot.error = None;
+        inner.snapshot.message = "Nothing was changed.".into();
+    } else {
+        inner.snapshot.status = if inner.cancel.load(Ordering::Relaxed) {
+            "cancelled"
+        } else {
+            "failed"
+        }
+        .into();
+        inner.snapshot.error = Some(error);
+    }
+    inner.snapshot.cancel_available = false;
+    if inner.snapshot.kind.as_deref() == Some("usb") {
+        for choice in &mut inner.snapshot.choices {
+            choice.usb = None;
+        }
+    }
+    inner.writer = None;
 }
 fn active(status: &str) -> bool {
     matches!(status, "inspecting" | "running")
@@ -274,6 +301,7 @@ impl Setup {
         inner.snapshot.total_bytes = 0;
         inner.snapshot.cancel_requested = false;
         inner.snapshot.cancel_available = false;
+        inner.staged_review_declined = false;
         inner.snapshot.stage = status.into();
         inner.snapshot.message = if status == "inspecting" {
             "Checking this computer…"
@@ -291,22 +319,7 @@ impl Setup {
         Ok(())
     }
     fn fail(&self, app: &tauri::AppHandle, error: String) {
-        self.update(app, |inner| {
-            inner.snapshot.status = if inner.cancel.load(Ordering::Relaxed) {
-                "cancelled"
-            } else {
-                "failed"
-            }
-            .into();
-            inner.snapshot.error = Some(error);
-            inner.snapshot.cancel_available = false;
-            if inner.snapshot.kind.as_deref() == Some("usb") {
-                for choice in &mut inner.snapshot.choices {
-                    choice.usb = None;
-                }
-            }
-            inner.writer = None;
-        });
+        self.update(app, |inner| record_failure(inner, error));
     }
     fn inventory(
         &self,
@@ -1242,11 +1255,17 @@ pub fn start_setup(
 
 /// Show the staging plan in the app, like the USB review, and wait for the
 /// user's answer. The helper gives up after 15 minutes, so the wait does too.
-fn review_staged_write(service: &Setup, app: &tauri::AppHandle, summary: &str) -> bool {
+/// `review` is the helper's structured review, drawn beside the summary.
+fn review_staged_write(
+    service: &Setup,
+    app: &tauri::AppHandle,
+    summary: &str,
+    review: &Value,
+) -> bool {
     let (sender, receiver) = std::sync::mpsc::channel();
     service.update(app, |inner| {
         inner.staged_review = Some(sender);
-        inner.snapshot.staged_review = Some(json!({"summary": summary}));
+        inner.snapshot.staged_review = Some(json!({"summary": summary, "review": review}));
         inner.snapshot.cancel_available = false;
     });
     let approved = receiver
@@ -1255,6 +1274,7 @@ fn review_staged_write(service: &Setup, app: &tauri::AppHandle, summary: &str) -
     service.update(app, |inner| {
         inner.staged_review = None;
         inner.snapshot.staged_review = None;
+        inner.staged_review_declined = !approved;
     });
     approved
 }
@@ -1401,7 +1421,7 @@ fn run_elevated(
                         }
                     }
                 } else if operation == "staged_write" {
-                    review_staged_write(service, app, summary)
+                    review_staged_write(service, app, summary, &value["review"])
                 } else if let Some(expected) = &usb_approval {
                     consume_usb_confirmation(expected, &value["plan"], &mut usb_approval_used)?;
                     !service
@@ -1529,6 +1549,31 @@ fn run_elevated(
 #[cfg(test)]
 mod usb_review_tests {
     use super::*;
+    #[test]
+    fn a_declined_staged_review_is_cancelled_without_an_error() {
+        let setup = Setup::default();
+        {
+            let mut inner = setup.inner.lock().unwrap();
+            inner.snapshot.status = "running".into();
+            inner.snapshot.staged_iso = Some(json!({"disks":[]}));
+            inner.staged_review_declined = true;
+            record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());
+            assert_eq!(inner.snapshot.status, "cancelled");
+            assert_eq!(inner.snapshot.error, None);
+            assert_eq!(inner.snapshot.message, "Nothing was changed.");
+            assert_eq!(inner.snapshot.staged_iso, Some(json!({"disks":[]})));
+            // Any other error after a declined review is still a failure.
+            record_failure(&mut inner, "Disk changed".into());
+            assert_eq!(inner.snapshot.status, "failed");
+            assert_eq!(inner.snapshot.error.as_deref(), Some("Disk changed"));
+        }
+        // A new operation forgets the declined review.
+        setup.begin("direct", "running").unwrap();
+        let mut inner = setup.inner.lock().unwrap();
+        assert!(!inner.staged_review_declined);
+        record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());
+        assert_eq!(inner.snapshot.status, "failed");
+    }
     #[test]
     fn passive_staging_discovery_handles_absent_and_malformed_summaries() {
         let directory = tempfile::tempdir().unwrap();

@@ -76,7 +76,13 @@ warn that booting and same-disk installation may fail in the official ISO.
 3. Hold the source against replacement, hash it against the qualified release,
    mount it read-only and list its files. Reject unsafe paths, missing boot
    files and an extraction that exceeds capacity before allocating partitions.
-   The app shows the plan for review before any change.
+   The app shows the plan for review before any change: the helper sends the
+   summary text and, beside the confirmed plan, a structured review built from
+   the same plan (disk, shrink before and after, temporary installer and
+   Omarchy offsets and sizes, protected BitLocker volumes, the layout
+   fingerprint). The review is display-only; only the plan is bound to the
+   confirmation. Declining the review changes nothing: the step ends as
+   cancelled with "Nothing was changed.", not as a failure.
    After confirmation and source checks, suspend active protection on the reviewed
    Windows/target volumes, without decrypting. Register a per-volume sign-in
    reminder first; existing suspensions are not adopted. OS suspension is

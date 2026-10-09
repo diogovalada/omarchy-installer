@@ -2,6 +2,7 @@
   import { ArrowLeft, ArrowRight, HardDrive, RefreshCw } from 'lucide-svelte';
   import StagedDiskMap from './StagedDiskMap.svelte';
   import StagedPartitionTable from './StagedPartitionTable.svelte';
+  import StagedReview from './StagedReview.svelte';
   import StagedSpaceEditor from './StagedSpaceEditor.svelte';
   import { setup, setupActive, type SetupSnapshot, type StagedBlockedDisk, type StagedChoice, type StagedDisk, type StagedOperation, type StagedRegion, type StagedResizeQuery } from './setup';
   import { choiceFor, defaultRegion, formatDiskSize, GiB, limits, overviewSegments, regionKey, regionStatus, type OverviewSegment, type RegionStatus } from './stagedLayout';
@@ -77,6 +78,14 @@
   $: if(quiet && busy) checkStatus=$setup.snapshot?.message || 'Checking disks…';
   $: if(!busy && checkStatus) checkStatus=inspection ? 'Disk check finished.' : '';
   $: review=$setup.snapshot?.stagedReview;
+  // From approving the review until preparation ends, a panel shows its
+  // progress where the review was.
+  let preparing=false;
+  $: if(!busy) preparing=false;
+  function respond(approved:boolean) {
+    if(approved) preparing=true;
+    void setup.respondStagedReview(approved);
+  }
   $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;
   // Unknown until disks are checked; the provider reports when it is already off.
   $: secureBootMaybeOn=inspection?.secureBoot!==false;
@@ -178,7 +187,16 @@
     <h2>Install without USB</h2>
     <p class="intro">Make room for Omarchy on this computer.</p>
     <p class="visually-hidden" role="status">{checkStatus}</p>
-    {#if !inspection}
+    {#if review}
+      <StagedReview summary={review.summary} plan={review.review} disk={inspection?.disks?.find(d=>d.diskNumber===review?.review?.diskNumber)} secureBoot={inspection?.secureBoot} pending={$setup.pending} {respond}/>
+    {:else if preparing}
+      <div class="preparing" role="region" aria-label="Preparing the installer">
+        <h3>Preparing the installer</h3>
+        <p role="status">{$setup.snapshot?.message || 'Preparing…'}</p>
+        {#if copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
+        {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
+      </div>
+    {:else if !inspection}
       {#if reading && busy}
         <div class="map-placeholder" aria-hidden="true"></div>
         <p class="line">Reading disks…</p>
@@ -208,13 +226,7 @@
           </p>
         {/if}
       {/if}
-      {#if review}
-        <div class="review" role="region" aria-label="Review changes">
-          <h3>Review changes</h3>
-          {#each review.summary.split('\n\n') as paragraph}<p>{paragraph}</p>{/each}
-          <div class="actions"><button disabled={$setup.pending} onclick={()=>{void setup.respondStagedReview(false);}}>Cancel</button><button class="primary" disabled={$setup.pending} onclick={()=>{void setup.respondStagedReview(true);}}>Prepare installer</button></div>
-        </div>
-      {:else if !disk?.blocked && (layout || choice)}
+      {#if !disk?.blocked && (layout || choice)}
         {#if choice}
           <div class="allocation">
             {#if layout && sourceRegion && single(selectedSegment)!==sourceRegion}<p>Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</p>{/if}
@@ -222,7 +234,6 @@
             {#key sourceRegion ? regionKey(sourceRegion) : JSON.stringify(choice.target)}
               <StagedSpaceEditor {choice} region={sourceRegion} {targetName} temporaryBytes={requiredBytes} minimumBytes={installMinimum} minGiB={minimumGiB} maxGiB={keepMaximumGiB} {canKeep} bind:keep={keepWindows} bind:omarchyGiB disabled={!browsing} edit={pin}/>
             {/key}
-            {#if inspection?.secureBoot}<p role="note">Secure Boot is on. Leave it on; you'll turn it off after preparing.</p>{/if}
           </div>
         {:else if layout && !checkingAny}<p class="no-space">No space can be used yet.</p>{/if}
         <div class="continue">
@@ -259,9 +270,9 @@
       {#if testing && sourceReady}<button disabled={busy} onclick={()=>{restarting=op.operationId;void setup.stagedIso('cleanup',null,op.operationId);}}>Prepare again</button>{/if}</div>
     </article>
   {/each}
-  {#if busy && !quiet}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
-  {#if busy && copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
-  {#if busy && $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
+  {#if busy && !quiet && !review && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
+  {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
+  {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
   {#if !busy && result?.message}<p role="status">{result.message}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}
@@ -283,11 +294,11 @@
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end}
-  .review,article{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:22px;margin:16px 0}.review{border-color:var(--accent)}.review p{white-space:pre-line}.actions{display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);padding-top:18px}
+  .preparing,article{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:22px;margin:16px 0}.preparing{margin-top:24px;border-color:var(--accent)}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
   .operation-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
   .next-steps ol{margin:6px 0 0;padding-left:18px;font-size:11px;line-height:1.8;color:var(--text-muted)}
   progress{width:100%;height:6px;margin:4px 0 12px;accent-color:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
-  @media(max-width:550px){h2{font-size:20px}.review,article{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch}.actions{flex-direction:column-reverse;align-items:stretch}}
+  @media(max-width:550px){h2{font-size:20px}.preparing,article{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch}}
 </style>

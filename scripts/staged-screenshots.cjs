@@ -9,16 +9,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 const [label = 'current', base = 'http://localhost:1420'] = process.argv.slice(2);
-const scenarios = ['ready', 'replace', 'limited', 'oem', 'free', 'two-ntfs', 'two-disks', 'failed', 'replace-only', 'checking', 'review', 'layout=example', 'layout=laptop'];
-// States reached by choosing a radio after a fixture scenario settles.
-const variants = { replace: { scenario: 'ready', radio: 'Replace Windows' } };
+const scenarios = ['ready', 'replace', 'limited', 'oem', 'free', 'two-ntfs', 'two-disks', 'failed', 'replace-only', 'checking', 'review', 'review=stale', 'declined', 'preparing', 'layout=example', 'layout=laptop'];
+// States reached by an action after a fixture scenario settles.
+const variants = {
+  replace: { scenario: 'ready', act: page => page.getByRole('radio', { name: 'Replace Windows' }).check() },
+  declined: { scenario: 'review', act: page => page.getByRole('button', { name: 'Cancel' }).click() },
+  preparing: { scenario: 'review', act: page => page.getByRole('button', { name: 'Prepare installer' }).click() }
+};
 const widths = [1180, 820, 390];
 const output = path.join(__dirname, '..', 'artifacts', 'staged-disk-map', label);
 
 // Words and size mentions in the whole visible section (navigation included;
 // closed disclosures don't count). A word has a letter or digit, so separators
 // such as "·" don't count. Height to button runs from the disk row (or the
-// first section heading) to the last primary button.
+// first section heading) to the last primary button. Review words count the
+// Review region alone, without the page heading.
 function measure() {
   const root = document.querySelector('.staged');
   if (!root) return null;
@@ -26,12 +31,15 @@ function measure() {
   const hidden = [...root.querySelectorAll('.visually-hidden')];
   hidden.forEach(el => { el.style.display = 'none'; });
   const text = root.innerText;
+  const review = root.querySelector('[aria-label="Review changes"]')?.innerText;
   hidden.forEach(el => { el.style.display = ''; });
+  const count = value => value.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length;
   const visible = [...root.querySelectorAll('[data-measure-start], h3, button.primary')].filter(el => el.offsetParent);
   const heading = visible.find(el => el.matches('[data-measure-start]')) ?? visible.find(el => el.tagName === 'H3');
   const button = visible.filter(el => el.matches('button.primary')).at(-1);
   return {
-    words: text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length,
+    words: count(text),
+    reviewWords: review === undefined ? null : count(review),
     sizes: (text.match(/\d+(?:\.\d+)?\s?(?:MiB|GiB|TiB|MB|GB|TB)\b/g) ?? []).length,
     height: Math.round(root.getBoundingClientRect().height),
     headingToButton: heading && button ? Math.round(button.getBoundingClientRect().bottom - heading.getBoundingClientRect().top) : null,
@@ -53,7 +61,7 @@ function measure() {
       const variant = variants[scenario];
       await page.goto(`${base}/test-fixtures/staged-partitions.html?${variant?.scenario ?? scenario}`);
       await page.waitForFunction(() => window.__fixtureSettled === true, null, { timeout: 15000 });
-      if (variant) await page.getByRole('radio', { name: variant.radio }).check();
+      if (variant) await variant.act(page);
       await page.waitForTimeout(200);
       for (const width of widths) {
         await page.setViewportSize({ width, height: 790 });
@@ -71,8 +79,8 @@ function measure() {
   }
   await browser.close();
   fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(rows, null, 2) + '\n');
-  console.log('| Scenario | Width | Words | Sizes | Height | Heading to button | Overflow |\n| --- | ---: | ---: | ---: | ---: | ---: | --- |');
-  for (const row of rows) console.log(`| ${row.scenario} | ${row.width} | ${row.words} | ${row.sizes} | ${row.height} | ${row.headingToButton ?? '-'} | ${row.overflow ? 'yes' : 'no'} |`);
+  console.log('| Scenario | Width | Words | Review words | Sizes | Height | Heading to button | Overflow |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
+  for (const row of rows) console.log(`| ${row.scenario} | ${row.width} | ${row.words} | ${row.reviewWords ?? '-'} | ${row.sizes} | ${row.height} | ${row.headingToButton ?? '-'} | ${row.overflow ? 'yes' : 'no'} |`);
   console.log(`\nScreenshots: ${output}`);
   if (failures.length) throw new Error(failures.join('\n'));
 })().catch(error => { console.error(error.message ?? error); process.exitCode = 1; });

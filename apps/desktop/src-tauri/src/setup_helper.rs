@@ -146,6 +146,9 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     }
 }
 
+/// The helper's error when the user declines a confirmation.
+pub(crate) const NOT_CONFIRMED: &str = "Operation was not confirmed";
+
 fn confirm(
     output: &Emitter,
     receiver: &mpsc::Receiver<Value>,
@@ -153,15 +156,29 @@ fn confirm(
     summary: &str,
     plan: &Value,
 ) -> Result<(), String> {
+    confirm_reviewed(output, receiver, cancel, summary, plan, None)
+}
+
+/// Like `confirm`, with a display-only `review` sent beside the plan. Only
+/// the plan is bound, so the review can't change what is approved.
+fn confirm_reviewed(
+    output: &Emitter,
+    receiver: &mpsc::Receiver<Value>,
+    cancel: &AtomicBool,
+    summary: &str,
+    plan: &Value,
+    review: Option<&Value>,
+) -> Result<(), String> {
     cancelled(cancel)?;
     let binding = format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(plan).map_err(|e| e.to_string())?)
     );
-    emit(
-        output,
-        json!({"protocol":1,"type":"confirmation_required","binding":binding,"summary":summary,"plan":plan}),
-    );
+    let mut event = json!({"protocol":1,"type":"confirmation_required","binding":binding,"summary":summary,"plan":plan});
+    if let Some(review) = review {
+        event["review"] = review.clone();
+    }
+    emit(output, event);
     let deadline = std::time::Instant::now() + Duration::from_secs(900);
     loop {
         cancelled(cancel)?;
@@ -172,7 +189,7 @@ fn confirm(
                 return if response.get("approved").and_then(Value::as_bool) == Some(true) {
                     Ok(())
                 } else {
-                    Err("Operation was not confirmed".into())
+                    Err(NOT_CONFIRMED.into())
                 };
             }
             Ok(_) => return Err("Operation confirmation did not match the plan".into()),
@@ -185,6 +202,132 @@ fn confirm(
             return Err("Operation confirmation expired".into());
         }
     }
+}
+
+/// The staged write's confirmation summary and, from the same plan, the
+/// structured review the app draws (see the disk map plan's review payload).
+/// `warning` is "experimental" or "unsigned" in testing builds.
+fn staged_review(
+    plan: &Value,
+    linux_bytes: u64,
+    warning: Option<&str>,
+) -> Result<(String, Value), String> {
+    const GIB: f64 = 1073741824.0;
+    let bytes = |value: &Value, name: &str| {
+        value
+            .as_u64()
+            .ok_or_else(|| format!("The staging plan is missing {name}"))
+    };
+    let gib = |value: &Value| value.as_u64().unwrap_or(0) as f64 / GIB;
+    let target = &plan["shrink"];
+    let (shrink, shrink_review) = if target.is_null() {
+        ("Use existing unallocated space.".to_owned(), Value::Null)
+    } else {
+        let letter = target["driveLetter"]
+            .as_str()
+            .filter(|letter| !letter.is_empty());
+        let number = &target["partitionNumber"];
+        let volume = letter.map_or_else(|| format!("partition {number}"), |l| format!("{l}:"));
+        (
+            format!(
+                "Shrink {volume} from {:.1} to {:.1} GiB.",
+                gib(&target["beforeSizeBytes"]),
+                gib(&target["afterSizeBytes"])
+            ),
+            json!({
+                "label": letter.map_or_else(|| format!("Partition {number}"), |l| format!("{l}:")),
+                "partitionGuid": target["partitionGuid"],
+                "offsetBytes": bytes(&target["offsetBytes"], "the shrink offset")?,
+                "beforeSizeBytes": bytes(&target["beforeSizeBytes"], "the size before shrinking")?,
+                "afterSizeBytes": bytes(&target["afterSizeBytes"], "the size after shrinking")?,
+            }),
+        )
+    };
+    let omarchy_space = if linux_bytes > 0 {
+        format!(
+            " Leave {:.0} GiB unallocated for Omarchy after it.",
+            gib(&plan["linuxBytes"])
+        )
+    } else {
+        String::new()
+    };
+    let volumes = plan["bitLocker"]
+        .as_array()
+        .ok_or("Missing encryption review")?;
+    let active: Vec<&Value> = volumes
+        .iter()
+        .filter(|volume| volume["protectionStatus"] == 1)
+        .collect();
+    let letter = |volume: &Value| {
+        volume["driveLetter"]
+            .as_str()
+            .filter(|letter| !letter.is_empty())
+            .map(str::to_owned)
+    };
+    let encryption = if active.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<&str> = active
+            .iter()
+            .map(|volume| {
+                volume["driveLetter"]
+                    .as_str()
+                    .filter(|letter| !letter.is_empty())
+                    .or_else(|| volume["volumeId"].as_str())
+                    .unwrap_or("unnamed volume")
+            })
+            .collect();
+        format!("\n\nSuspend BitLocker protection on {} without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.", names.join(", "))
+    };
+    let largest = plan["largestFreeAfterStagingBytes"]
+        .as_u64()
+        .ok_or("Missing free-space estimate after staging")?;
+    let required = plan["release"]["minimumLinuxBytes"]
+        .as_u64()
+        .ok_or("Missing official installation minimum")?;
+    let space_note = if largest < required {
+        format!("Afterwards, the largest free space is {:.1} GiB, but Omarchy needs at least {:.0} GiB. In the installer, delete a partition you no longer need, such as Windows, to make room.", largest as f64 / GIB, required as f64 / GIB)
+    } else {
+        format!(
+            "Afterwards, the largest free space is {:.1} GiB.",
+            largest as f64 / GIB
+        )
+    };
+    let disk_number = bytes(&plan["diskNumber"], "the disk number")?;
+    let prefix = match warning {
+        Some("unsigned") => "LOCAL UNSIGNED TEST ISO: real disk changes. This image has no verified official signature and may fail to boot or install.\n\n",
+        Some(_) => "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n",
+        None => "",
+    };
+    let summary = format!("{prefix}Prepare the installer on Disk {disk_number}?\n\n{shrink}{omarchy_space} Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. {space_note}{encryption}\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.");
+    // The two temporary partitions are adjacent: the EFI loader, then the
+    // installer files. Omarchy's space, if kept, starts where they end.
+    let efi = &plan["partitions"][0];
+    let files = &plan["partitions"][1];
+    let files_end = bytes(&files["offsetBytes"], "the installer offset")?
+        + bytes(&files["sizeBytes"], "the installer size")?;
+    let omarchy = if linux_bytes > 0 {
+        json!({"offsetBytes": files_end, "sizeBytes": bytes(&plan["linuxBytes"], "Omarchy's space")?})
+    } else {
+        Value::Null
+    };
+    let review = json!({
+        "diskNumber": disk_number,
+        "diskSizeBytes": bytes(&plan["diskSizeBytes"], "the disk size")?,
+        "layoutSha256": plan["layoutSha256"].as_str().ok_or("The staging plan is missing the layout fingerprint")?,
+        "targetKind": if target.is_null() { "free" } else { "shrink" },
+        "shrink": shrink_review,
+        "temporary": {
+            "offsetBytes": bytes(&efi["offsetBytes"], "the EFI offset")?,
+            "sizeBytes": bytes(&efi["sizeBytes"], "the EFI size")? + bytes(&files["sizeBytes"], "the installer size")?,
+        },
+        "omarchy": omarchy,
+        "largestFreeAfterBytes": largest,
+        "minimumOmarchyBytes": required,
+        "bitLocker": active.iter().map(|volume| letter(volume).unwrap_or_else(|| "a volume without a drive letter".to_owned())).collect::<Vec<_>>(),
+        "warning": warning,
+    });
+    Ok((summary, review))
 }
 
 struct PreparedSource {
@@ -395,6 +538,184 @@ fn safe_label(value: Option<&Value>) -> String {
         })
         .take(160)
         .collect()
+}
+
+#[cfg(test)]
+mod staged_review_tests {
+    use super::*;
+    const MIB: u64 = 1 << 20;
+    const GIB: u64 = 1 << 30;
+    // As Get-StagingPlan lays it out: C: at 300 MiB, 953 GiB, a 7 GiB
+    // installer partition after the 512 MiB EFI loader, then Omarchy.
+    fn plan(shrink: bool, linux: u64) -> Value {
+        let start = 300 * MIB + 953 * GIB - 7 * GIB - 512 * MIB - linux;
+        json!({
+            "diskNumber": 0,
+            "diskSizeBytes": 954 * GIB,
+            "layoutSha256": "layout",
+            "targetKind": if shrink { "shrink" } else { "free" },
+            "shrink": if shrink { json!({"partitionNumber":3,"partitionGuid":"guid","driveLetter":"C","offsetBytes":300 * MIB,"beforeSizeBytes":953 * GIB,"afterSizeBytes":start - 300 * MIB}) } else { Value::Null },
+            "linuxBytes": linux,
+            "largestFreeAfterStagingBytes": 64 * GIB,
+            "release": {"minimumLinuxBytes": 32 * GIB},
+            "bitLocker": [
+                {"driveLetter":"C:","volumeId":"\\\\?\\Volume{c}\\","protectionStatus":1},
+                {"driveLetter":"","volumeId":"\\\\?\\Volume{x}\\","protectionStatus":1},
+                {"driveLetter":"D:","volumeId":"\\\\?\\Volume{d}\\","protectionStatus":0}
+            ],
+            "partitions": [
+                {"role":"efi","offsetBytes":start,"sizeBytes":512 * MIB},
+                {"role":"source","offsetBytes":start + 512 * MIB,"sizeBytes":7 * GIB}
+            ]
+        })
+    }
+
+    #[test]
+    fn shrinking_and_keeping_windows_reviews_the_plan_layout() {
+        let plan = plan(true, 64 * GIB);
+        let (summary, review) = staged_review(&plan, 64 * GIB, Some("experimental")).unwrap();
+        let start = 300 * MIB + 881 * GIB + 512 * MIB;
+        assert_eq!(review["targetKind"], "shrink");
+        assert_eq!(review["layoutSha256"], "layout");
+        assert_eq!(
+            review["shrink"],
+            json!({"label":"C:","partitionGuid":"guid","offsetBytes":300 * MIB,"beforeSizeBytes":953 * GIB,"afterSizeBytes":start - 300 * MIB})
+        );
+        assert_eq!(
+            review["temporary"],
+            json!({"offsetBytes":start,"sizeBytes":7 * GIB + 512 * MIB})
+        );
+        assert_eq!(
+            review["omarchy"],
+            json!({"offsetBytes":start + 7 * GIB + 512 * MIB,"sizeBytes":64 * GIB})
+        );
+        assert_eq!(review["largestFreeAfterBytes"], 64 * GIB);
+        assert_eq!(review["minimumOmarchyBytes"], 32 * GIB);
+        // Only protected volumes, never by their volume path.
+        assert_eq!(
+            review["bitLocker"],
+            json!(["C:", "a volume without a drive letter"])
+        );
+        assert_eq!(review["warning"], "experimental");
+        // The summary states the same sizes.
+        assert!(summary.starts_with("EXPERIMENTAL TESTING BUILD: real disk changes."));
+        assert!(summary.contains("Prepare the installer on Disk 0?\n\nShrink C: from 953.0 to 881.5 GiB. Leave 64 GiB unallocated for Omarchy after it."));
+        assert!(summary.contains("Afterwards, the largest free space is 64.0 GiB."));
+        assert!(summary.contains(
+            "Suspend BitLocker protection on C:, \\\\?\\Volume{x}\\ without decrypting."
+        ));
+    }
+
+    #[test]
+    fn replacing_windows_reviews_only_the_installer() {
+        let plan = plan(true, 0);
+        let (summary, review) = staged_review(&plan, 0, None).unwrap();
+        assert!(review["omarchy"].is_null());
+        assert_eq!(review["shrink"]["afterSizeBytes"], 945 * GIB + 512 * MIB);
+        assert_eq!(review["warning"], Value::Null);
+        assert!(summary.starts_with(
+            "Prepare the installer on Disk 0?\n\nShrink C: from 953.0 to 945.5 GiB. Create two"
+        ));
+    }
+
+    #[test]
+    fn free_space_reviews_no_shrink() {
+        let plan = plan(false, 0);
+        let (summary, review) = staged_review(&plan, 0, None).unwrap();
+        assert_eq!(review["targetKind"], "free");
+        assert!(review["shrink"].is_null());
+        assert_eq!(
+            review["temporary"]["offsetBytes"],
+            plan["partitions"][0]["offsetBytes"]
+        );
+        assert!(summary.contains(
+            "\n\nUse existing unallocated space. Create two temporary installer partitions."
+        ));
+    }
+
+    #[test]
+    fn unsigned_images_and_unlettered_partitions_are_named_plainly() {
+        let mut plan = plan(true, 0);
+        plan["shrink"]["driveLetter"] = json!("");
+        let (summary, review) = staged_review(&plan, 0, Some("unsigned")).unwrap();
+        assert_eq!(review["shrink"]["label"], "Partition 3");
+        assert_eq!(review["warning"], "unsigned");
+        assert!(summary.starts_with("LOCAL UNSIGNED TEST ISO: real disk changes."));
+        assert!(summary.contains("Shrink partition 3 from"));
+        plan["layoutSha256"] = Value::Null;
+        assert!(staged_review(&plan, 0, None).is_err());
+    }
+
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_review_travels_beside_the_plan_without_changing_the_binding() {
+        let plan = json!({"kind":"staged_write","inspection":{"plan":plan(true, 64 * GIB)}});
+        let binding = format!("{:x}", Sha256::digest(serde_json::to_vec(&plan).unwrap()));
+        let review = json!({"diskNumber":0});
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let output: Emitter = Arc::new(Mutex::new(Box::new(Capture(Arc::clone(&captured)))));
+        for reviewed in [false, true] {
+            let (sender, receiver) = mpsc::channel();
+            sender
+                .send(json!({"binding":binding,"approved":true}))
+                .unwrap();
+            let result = if reviewed {
+                confirm_reviewed(
+                    &output,
+                    &receiver,
+                    &AtomicBool::new(false),
+                    "Prepare?",
+                    &plan,
+                    Some(&review),
+                )
+            } else {
+                confirm(
+                    &output,
+                    &receiver,
+                    &AtomicBool::new(false),
+                    "Prepare?",
+                    &plan,
+                )
+            };
+            assert!(result.is_ok());
+        }
+        let events: Vec<Value> = String::from_utf8(captured.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|event| event["binding"] == binding && event["plan"] == plan));
+        assert!(events[0].get("review").is_none());
+        assert_eq!(events[1]["review"], review);
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(json!({"binding":binding,"approved":false}))
+            .unwrap();
+        assert_eq!(
+            confirm_reviewed(
+                &output,
+                &receiver,
+                &AtomicBool::new(false),
+                "Prepare?",
+                &plan,
+                Some(&review)
+            ),
+            Err(NOT_CONFIRMED.to_owned())
+        );
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -895,83 +1216,21 @@ fn execute(
                 {
                     return Err("The staging plan changed the requested allocation or ISO".into());
                 }
-                let gib = |bytes: &Value| bytes.as_u64().unwrap_or(0) as f64 / 1073741824.0;
-                let shrink = if plan["shrink"].is_null() {
-                    "Use existing unallocated space.".to_owned()
-                } else {
-                    let volume = plan["shrink"]["driveLetter"]
-                        .as_str()
-                        .filter(|letter| !letter.is_empty())
-                        .map(|letter| format!("{letter}:"))
-                        .unwrap_or_else(|| {
-                            format!("partition {}", plan["shrink"]["partitionNumber"])
-                        });
-                    format!(
-                        "Shrink {volume} from {:.1} to {:.1} GiB.",
-                        gib(&plan["shrink"]["beforeSizeBytes"]),
-                        gib(&plan["shrink"]["afterSizeBytes"])
-                    )
-                };
-                let omarchy_space = if choice.linux_bytes > 0 {
-                    format!(
-                        " Leave {:.0} GiB unallocated for Omarchy after it.",
-                        gib(&plan["linuxBytes"])
-                    )
-                } else {
-                    String::new()
-                };
-                let volumes = plan["bitLocker"]
-                    .as_array()
-                    .ok_or("Missing encryption review")?;
-                let active: Vec<&str> = volumes
-                    .iter()
-                    .filter(|volume| volume["protectionStatus"] == 1)
-                    .map(|volume| {
-                        volume["driveLetter"]
-                            .as_str()
-                            .filter(|letter| !letter.is_empty())
-                            .or_else(|| volume["volumeId"].as_str())
-                            .unwrap_or("unnamed volume")
-                    })
-                    .collect();
-                let encryption = if active.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n\nSuspend BitLocker protection on {} without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.", active.join(", "))
-                };
-                let largest = plan["largestFreeAfterStagingBytes"]
-                    .as_u64()
-                    .ok_or("Missing free-space estimate after staging")?;
-                let required = plan["release"]["minimumLinuxBytes"]
-                    .as_u64()
-                    .ok_or("Missing official installation minimum")?;
-                let space_note = if largest < required {
-                    format!("Afterwards, the largest free space is {:.1} GiB, but Omarchy needs at least {:.0} GiB. In the installer, delete a partition you no longer need, such as Windows, to make room.", largest as f64 / 1073741824.0, required as f64 / 1073741824.0)
-                } else {
-                    format!(
-                        "Afterwards, the largest free space is {:.1} GiB.",
-                        largest as f64 / 1073741824.0
-                    )
-                };
-                let summary = format!("Prepare the installer on Disk {}?\n\n{}{} Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. {}{}\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.", choice.disk_number, shrink, omarchy_space, space_note, encryption);
-                confirm(
+                let warning = crate::direct_install_policy::STAGED_ISO_TESTING.then_some(
+                    if request.source.signature.is_empty() {
+                        "unsigned"
+                    } else {
+                        "experimental"
+                    },
+                );
+                let (summary, review) = staged_review(plan, choice.linux_bytes, warning)?;
+                confirm_reviewed(
                     output,
                     confirmations,
                     &cancel,
-                    &format!(
-                        "{}{}",
-                        if crate::direct_install_policy::STAGED_ISO_TESTING {
-                            if request.source.signature.is_empty() {
-                                "LOCAL UNSIGNED TEST ISO: real disk changes. This image has no verified official signature and may fail to boot or install.\n\n"
-                            } else {
-                                "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n"
-                            }
-                        } else {
-                            ""
-                        },
-                        summary
-                    ),
+                    &summary,
                     &json!({"kind":"staged_write","inspection":planned}),
+                    Some(&review),
                 )?;
                 cancelled(&cancel)?;
                 stage(
