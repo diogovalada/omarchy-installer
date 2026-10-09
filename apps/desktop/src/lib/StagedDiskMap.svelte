@@ -15,7 +15,7 @@
   // The longest label that fits inside the segment; small segments show
   // theirs in the selected-partition line instead.
   function fitting(segment:OverviewSegment,px:number) {
-    const region=segment.regions[0], size=formatSize(segment.sizeBytes);
+    const region=segment.regions[0], size=formatSize(segment.sizeBytes,region.kind==='free' ? 'down' : 'nearest');
     const labels=segment.regions.length>1 ? [segment.label] : region.kind==='free' ? [`Free · ${size}`,'Free'] : [`${region.label}${region.isWindows ? ' Windows' : ''} · ${size}`,region.label];
     return labels.find(text=>text.length*CHAR_PX+PADDING_PX<=segment.widthPercent/100*px) ?? '';
   }
