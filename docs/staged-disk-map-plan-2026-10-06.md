@@ -18,7 +18,10 @@ and cut the text to what each step needs:
 3. **After preparing:** a step-by-step guide that shows only the current step.
 
 The work is split into five PRs (0–4). Provider safety checks, plan math and
-staging behavior do not change.
+staging behavior do not change. Two provider messages do: a shrink blocker
+names the limit that applies (the free-space reserve, or files Windows can't
+move), and the precheck says when a partition is too small for the installer
+even if empty. `Get-ShrinkCandidate` is shared with the direct-x86 provider.
 
 **In scope:** `apps/desktop/src/lib/StagedInstaller.svelte` and new components
 beside it, two small backend additions, one bug fix, tests, fixtures and docs.
@@ -40,7 +43,9 @@ All settled on 2026-10-07:
 
 ## Problems being fixed
 
-Measured in `test-fixtures/staged-partitions.html` at 1000 px wide:
+Measured in `test-fixtures/staged-partitions.html` at 1000 px wide, with an
+earlier ad hoc script. The screenshot script's baselines (1180, 820 and
+390 px) are recorded in the PR 0 description:
 
 | Screen | Words | Sizes shown | Text blocks | Decisions |
 | --- | --- | --- | --- | --- |
@@ -156,8 +161,11 @@ space minus the reserve.
 ### Overview map
 
 - **Scale.** Draw to scale, with a minimum width of 10 px for each segment.
-- **Grouping.** Neighboring `unavailable` partitions that are each under 1% of
-  the disk are grouped into one segment, for example "2 small partitions".
+- **Grouping.** Neighboring system partitions kept as is (the provider's
+  "kept unchanged" reason) that are each under 1% of the disk are grouped into
+  one segment, for example "2 small partitions". A small partition with
+  another reason, such as an exFAT tools partition, stays on its own so its
+  reason shows.
 - **Gaps.** Free regions under 5 MiB are not drawn.
 - **Selection.** Segments form a radio group, and any segment can be selected.
   Selecting a usable segment also selects it as the space source (free region
@@ -184,9 +192,12 @@ The editor covers only the selected partition:
   `alignDown(partitionEnd) − (temporary + Omarchy)`.
 - **Can't-release zone.** The hatched area is `freeBytes − maximumReleaseBytes`.
   Selecting it shows one line built from `reserveBytes`:
-  - "Windows keeps 95.3 GiB free." when the rest is under 1 GiB;
-  - "Windows keeps 95.3 GiB free and can't move some files near the end of C:."
-    otherwise.
+  - "95.3 GiB stays free for Windows." when the rest is under 1 GiB;
+  - "95.3 GiB stays free for Windows, and some files near the end of C: can't
+    be moved." otherwise.
+
+  The reserve is this app's rule (`max(20 GiB, 10% of the volume)`), not
+  Windows', so the line doesn't attribute it to Windows.
 
   This replaces the "Why can't all unused space be used?" disclosure.
 - **Handle.** It sits between the partition and the temporary installer.
@@ -234,12 +245,13 @@ files (see the captured laptop layout). **Review changes** is hidden, as today.
 | --- | --- | --- | --- |
 | `unavailable`, system partition | dimmed | "EFI system · 260 MiB · kept as is" | none |
 | `unavailable`, other reason | hatched | label, size and provider reason | none |
-| `insufficient` | hatched | "C: needs 5.4 GiB more free space. Free up space in Windows, then refresh." | Refresh |
+| `insufficient`, too small even if empty (size under installer plus reserve) | hatched | "RESTORE (Partition 5) is too small for the installer." | none |
+| `insufficient`, otherwise | hatched | "C: needs 5.4 GiB more free space. Free up space in Windows, then refresh." | Refresh |
 | `unchecked` while checking | shimmer (static under reduced motion) | "Checking how much C: can shrink. This can take a few minutes." | none |
 | `unchecked`, not checking | dimmed | "C: wasn't checked. Refresh to try again." | Refresh |
 | `checked`, enough | normal | "C: · NTFS · can give Omarchy up to 92 GiB" | editor |
-| `checked`, short because of the reserve | hatched | "C: needs 2.5 GiB more free space. Free up space in Windows, then recheck." | Recheck |
-| `checked`, short because Windows can't move files | hatched | "Windows can't move some files near the end of C:, so it can release only 3 GiB." (or "…so it cannot shrink it.") | Recheck |
+| `checked`, short by alignment only (free minus reserve fits, release within a few MiB of it) | hatched | "C: needs 2 MiB more free space. Free up space in Windows, then recheck." | Recheck |
+| `checked`, short because Windows can't move files | hatched | "Windows can't move some files near the end of C:, so it can release only 3 GiB." (or "…so it can't shrink it.") | Recheck |
 | `failed` | hatched | provider reason, or "Windows couldn't measure C:." | Recheck |
 | free, enough | outlined | "Free space · 120 GiB" | editor |
 | free, too small | dimmed, outlined | "Free space · 2 GiB · too small" | none |
@@ -247,14 +259,20 @@ files (see the captured laptop layout). **Review changes** is hidden, as today.
 
 ### Default selection
 
-Keep the current selection while it still exists, as today. Otherwise choose,
-in order:
+Until the user picks a segment, the default is recomputed as the check
+progresses, so it can move to C: once C: is measured. After a pick, keep the
+user's selection while it still exists, including across polling and
+**Refresh**. The default, in order:
 
 1. the largest free region whose space after the installer meets the minimum;
 2. the shrink target with the highest release limit that can keep Windows;
 3. the first usable target;
-4. with no usable target, the largest NTFS partition, so the selected-partition
-   line explains why.
+4. with no usable target, the Windows partition, else the largest partition
+   still being checked, else the largest NTFS partition, so the
+   selected-partition line explains why.
+
+Selecting a segment that can't be used keeps the current space source; the
+source keeps an accent marker on the map.
 
 ### All partitions table
 
@@ -491,6 +509,15 @@ Field rules:
 - `omarchy` is present only when `linuxBytes > 0`. It starts where the
   temporary partitions end.
 - `shrink` is `null` for free-space targets.
+- `shrink.label` is the drive letter with a colon (`C:`); without one,
+  `Partition N`. Don't reuse the summary's lowercase "partition N".
+- `bitLocker` lists only volumes whose protection is on
+  (`protectionStatus == 1`, the summary's filter), named by drive letter; a
+  volume without one is "a volume without a drive letter", never its
+  `\\?\Volume{…}\` path.
+- `plan.linuxOffsetBytes` is where the temporary installer starts, not where
+  Omarchy's space starts; `omarchy.offsetBytes` is
+  `plan.partitions[1].offsetBytes + plan.partitions[1].sizeBytes`.
 - `warning` is `"experimental"`, `"unsigned"` or `null`, chosen by the same
   conditions as today's prefix.
 
@@ -525,7 +552,8 @@ reports:
 Keep `staged_iso` (the inspection) so the choose screen returns intact.
 Reset the flag in `begin()`.
 
-No other provider, protocol or helper changes.
+No other protocol or helper changes. The provider changes only the two
+messages named in the Summary, in PR 0.
 
 ## Front-end structure
 
@@ -683,12 +711,14 @@ Real layouts:
 - Capture 2–4 disk-check results from the test VM and physical PCs with
   `scripts/capture-staged-layout.ps1`. It runs the provider's read-only disk
   check without the app or an ISO and replaces disk IDs and GUIDs. A testing
-  debug build's `setup_status` works too.
+  debug build's `setup_status` works too, but isn't anonymized: replace every
+  `diskUniqueId` (it often holds the drive's serial number) and partition
+  GUID by hand.
 - Replace personal volume labels, then save them in
   `test-fixtures/staged-layouts/`.
 - `laptop.json` (captured 2026-10-07): Windows can't shrink C: at all although
   free space minus the reserve is about 23 GiB, and an OEM RESTORE partition
-  fails the precheck. No space is usable.
+  is too small for the installer. No space is usable.
 
 ### Screenshots and measurements
 
@@ -721,6 +751,8 @@ Branch: `staged-disk-map-foundation`.
 
 - `stagedLayout.ts` and its tests.
 - Provider `isWindows`, its test assertion and the TS type.
+- Provider messages: shrink blockers name the reserve or unmovable files;
+  the precheck names a partition too small for the installer. With tests.
 - Fixture scenarios, the `staged-layouts/` folder and the extended screenshot
   script.
 - Baseline measurements recorded in the PR.

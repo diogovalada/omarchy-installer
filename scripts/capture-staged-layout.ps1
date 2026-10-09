@@ -8,18 +8,31 @@
 # Invoke-StagedIso.ps1, Staging.ps1, StoragePlan.ps1 and BitLocker.ps1:
 #   powershell -ExecutionPolicy Bypass -File capture-staged-layout.ps1 -Out layout.json
 # Disk IDs and partition GUIDs are replaced unless -KeepIdentifiers is given.
-# Volume labels are kept; replace personal ones before committing.
-param([Parameter(Mandatory=$true)][string]$Out,[switch]$KeepIdentifiers)
+# Volume labels are kept and printed; replace personal ones before committing.
+# A failure leaves -Out untouched and writes <Out>.error.txt instead.
+param([Parameter(Mandatory=$true)][string]$Out,[switch]$KeepIdentifiers,[switch]$Relaunched)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
-$Out=[IO.Path]::GetFullPath($Out)
+# Resolve against PowerShell's location, which .NET's current directory may not follow.
+$Out=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
+$errorPath="$Out.error.txt"
+function Show-Labels([string]$Path) {
+    $layout=[IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    $labels=@(@($layout.disks) | ForEach-Object { @($_.regions) | ForEach-Object { $_.label } })
+    Write-Host "Saved $Path"
+    Write-Host ('Labels: '+($labels -join ', '))
+}
 $principal=[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $arguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"",'-Out',"`"$Out`"")
+    if (Test-Path -LiteralPath $errorPath) { Remove-Item -LiteralPath $errorPath }
+    $arguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"",'-Out',"`"$Out`"",'-Relaunched')
     if ($KeepIdentifiers) { $arguments+='-KeepIdentifiers' }
     $process=Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList $arguments
-    if ($process.ExitCode -ne 0) { throw "The elevated disk check failed. See $Out." }
-    Write-Host "Saved $Out"
+    if ($process.ExitCode -ne 0) {
+        $detail=if (Test-Path -LiteralPath $errorPath) { [IO.File]::ReadAllText($errorPath) } else { 'No details were written.' }
+        throw "The elevated disk check failed: $detail"
+    }
+    Show-Labels $Out
     return
 }
 try {
@@ -51,10 +64,10 @@ try {
         }
     }
     [IO.File]::WriteAllText($Out,($result | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding $false))
-    Write-Host ('Labels: '+((@($result.disks) | ForEach-Object { @($_.regions) | ForEach-Object { $_.label } }) -join ', '))
+    if (-not $Relaunched) { Show-Labels $Out }
 } catch {
-    [IO.File]::WriteAllText($Out,'ERROR: '+$_.Exception.Message,(New-Object Text.UTF8Encoding $false))
-    Write-Host $_.Exception.Message
-    Start-Sleep -Seconds 10
+    $message=$_.Exception.Message
+    try { [IO.File]::WriteAllText($errorPath,$message,(New-Object Text.UTF8Encoding $false)) } catch { }
+    Write-Host $message
     exit 1
 }

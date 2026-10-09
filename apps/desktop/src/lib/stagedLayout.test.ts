@@ -39,6 +39,7 @@ describe('staged layout sizes', () => {
     expect(formatDiskSize(954.26*GiB)).toBe('954 GiB');
     expect(formatDiskSize(2000*1000**3)).toBe('1.8 TiB');
     expect(formatDiskSize(1024*GiB)).toBe('1 TiB');
+    expect(formatDiskSize(1023.6*GiB)).toBe('1 TiB');
   });
 
   it('keys partitions by GUID and free space by offset', () => {
@@ -91,6 +92,7 @@ describe('staged space editor', () => {
     expect(limits(windows,temporaryBytes,minimumBytes)).toEqual({minGiB:32,maxGiB:92,canKeep:true});
     expect(limits({...windows,maximumReleaseBytes:39*GiB},temporaryBytes,minimumBytes)).toEqual({minGiB:32,maxGiB:31,canKeep:false});
     expect(limits({...windows,resizeState:'unchecked',maximumReleaseBytes:null},temporaryBytes,33.5*GiB)).toEqual({minGiB:34,maxGiB:0,canKeep:false});
+    expect(limits({...windows,maximumReleaseBytes:5*GiB},temporaryBytes,0)).toEqual({minGiB:0,maxGiB:0,canKeep:false});
   });
 
   it('lays out a kept Windows in provider order', () => {
@@ -120,9 +122,11 @@ describe('staged space editor', () => {
   });
 
   it("explains the space Windows can't release", () => {
-    expect(cantReleaseLine(windows)).toBe("Windows keeps 95.3 GiB free and can't move some files near the end of C:.");
-    expect(cantReleaseLine({...windows,maximumReleaseBytes:200*GiB-reserveBytes-512*MiB})).toBe('Windows keeps 95.3 GiB free.');
+    expect(cantReleaseLine(windows)).toBe("95.3 GiB stays free for Windows, and some files near the end of C: can't be moved.");
+    expect(cantReleaseLine({...windows,maximumReleaseBytes:200*GiB-reserveBytes-512*MiB})).toBe('95.3 GiB stays free for Windows.');
     expect(cantReleaseLine({...windows,reserveBytes:null})).toBe("Windows can't release this space from C:.");
+    expect(cantReleaseLine({...windows,reserveBytes:0})).toBe("Windows can't release this space from C:.");
+    expect(cantReleaseLine({...windows,resizeState:'insufficient'})).toBe("Windows can't release this space from C:.");
   });
 
   it('describes the space left in a free region', () => {
@@ -136,6 +140,14 @@ describe('staged space editor', () => {
     expect(segments.map(s=>[s.kind,s.offsetBytes,s.label])).toEqual([
       ['temporary',500*GiB,'installer 7.5 GiB · temporary'],['omarchy',507.5*GiB,'Omarchy 112.5 GiB']
     ]);
+  });
+
+  it('rounds available space down and the installer up, as the lines do', () => {
+    const free:StagedRegion={kind:'free',offsetBytes:500*GiB,sizeBytes:119.96*GiB,label:'Unallocated space'};
+    const temporary=7.46*GiB;
+    expect(editorSegments(free,{temporaryBytes:temporary,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.5 GiB · temporary','Omarchy 112.5 GiB']);
+    expect(freeTargetLine(free.sizeBytes-temporary,minimumBytes)).toBe('Omarchy can use the remaining 112.5 GiB.');
+    expect(editorSegments({...free,sizeBytes:120*GiB},{temporaryBytes:7.54*GiB,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.6 GiB · temporary','Omarchy 112.4 GiB']);
   });
 });
 
@@ -161,11 +173,14 @@ describe('staged default selection', () => {
     expect(defaultRegion(disk,[freeChoice(small),shrinkChoice(windows),shrinkChoice(data)],temporaryBytes,minimumBytes)).toBe(data);
   });
 
-  it('then the first usable target, then the largest NTFS partition', () => {
+  it('then the first usable target, then the partition that explains why not', () => {
     const tight={...windows,maximumReleaseBytes:10*GiB};
     const disk=diskOf([efi,tight,data],4000*GiB);
     expect(defaultRegion(disk,[shrinkChoice(tight)],temporaryBytes,minimumBytes)).toBe(tight);
-    expect(defaultRegion(disk,[],temporaryBytes,minimumBytes)).toBe(data);
+    expect(defaultRegion(disk,[],temporaryBytes,minimumBytes)).toBe(tight);
+    const checking={...windows,isWindows:undefined,resizeState:'unchecked' as const};
+    expect(defaultRegion(diskOf([efi,checking,data],4000*GiB),[],temporaryBytes,minimumBytes)).toBe(checking);
+    expect(defaultRegion(diskOf([efi,{...windows,isWindows:undefined},data],4000*GiB),[],temporaryBytes,minimumBytes)).toBe(data);
     expect(defaultRegion(diskOf([efi]),[],temporaryBytes,minimumBytes)).toBeUndefined();
   });
 });
@@ -187,6 +202,11 @@ describe('staged region status', () => {
     expect(regionStatus({...full,freeBytes:27.5*GiB-100},context).text).toBe('C: needs 1 MiB more free space. Free up space in Windows, then refresh.');
   });
 
+  it("says when a partition can't hold the installer even if empty", () => {
+    const small:StagedRegion={...windows,label:'RESTORE (Partition 5)',sizeBytes:22*GiB,freeBytes:8.6*GiB,resizeState:'insufficient',maximumReleaseBytes:null,reserveBytes:20*1000**3};
+    expect(regionStatus(small,context)).toEqual({tone:'hatched',text:'RESTORE (Partition 5) is too small for the installer.',action:null});
+  });
+
   it('shows checking and unchecked partitions', () => {
     const unchecked:StagedRegion={...windows,resizeState:'unchecked',maximumReleaseBytes:null};
     expect(regionStatus(unchecked,{...context,checking:true})).toEqual({tone:'checking',text:'Checking how much C: can shrink. This can take a few minutes.',action:null});
@@ -197,8 +217,10 @@ describe('staged region status', () => {
     expect(regionStatus(windows,{...context,usable:true})).toEqual({tone:'normal',text:'C: · NTFS · can give Omarchy up to 92 GiB',action:null});
     expect(regionStatus({...windows,maximumReleaseBytes:20*GiB},{...context,usable:true}).text).toBe('C: · NTFS · room for the installer only');
     expect(regionStatus({...windows,maximumReleaseBytes:3*GiB},context)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of C:, so it can release only 3 GiB.",action:'recheck'});
-    expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't move some files near the end of C:, so it cannot shrink it.");
+    expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't move some files near the end of C:, so it can't shrink it.");
     expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:4*GiB},context)).toEqual({tone:'hatched',text:'C: needs 2.5 GiB more free space. Free up space in Windows, then recheck.',action:'recheck'});
+    expect(regionStatus({...windows,freeBytes:reserveBytes+temporaryBytes+MiB,maximumReleaseBytes:temporaryBytes-MiB},context).text).toBe('C: needs 1 MiB more free space. Free up space in Windows, then recheck.');
+    expect(regionStatus({...windows,reserveBytes:0,maximumReleaseBytes:0,resizeReason:'Windows returned unsupported NTFS shrink limits.'},context).text).toBe('Windows returned unsupported NTFS shrink limits.');
     expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:7.46*GiB},context).text).toBe('Windows can release only 7.4 GiB from C:. 41 MiB more is needed.');
     expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:0},context).text).toBe("Windows can't release space from C:. 7.5 GiB is needed.");
     expect(regionStatus(windows,context)).toEqual({tone:'hatched',text:"Windows can't shrink C:.",action:'recheck'});
@@ -211,6 +233,7 @@ describe('staged region status', () => {
     const free:StagedRegion={kind:'free',offsetBytes:0,sizeBytes:120*GiB,label:'Unallocated space'};
     expect(regionStatus(free,{...context,usable:true})).toEqual({tone:'outlined',text:'Free space · 120 GiB',action:null});
     expect(regionStatus({...free,sizeBytes:2*GiB},context)).toEqual({tone:'outlined-dimmed',text:'Free space · 2 GiB · too small',action:null});
+    expect(regionStatus({...free,sizeBytes:7.46*GiB},context).text).toBe('Free space · 7.4 GiB · too small');
   });
 });
 
@@ -266,6 +289,7 @@ describe('staged review', () => {
     const free={...replace,targetKind:'free' as const,shrink:null,largestFreeAfterBytes:112*GiB};
     expect(reviewBullets(free,undefined,true).slice(0,2)).toEqual(['Uses free space. Existing partitions stay.','Omarchy can use 112 GiB.']);
     expect(reviewBullets({...free,largestFreeAfterBytes:20*GiB},false,true)[1]).toBe('Only 20 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room.');
+    expect(reviewBullets({...keepReview,bitLocker:['C:','D:','E:']},false,true)[2]).toBe('BitLocker on C:, D: and E: pauses until you resume it. Files stay encrypted.');
   });
 
   it('names the test-build warning', () => {
@@ -277,7 +301,7 @@ describe('staged review', () => {
 
 describe('captured laptop layout', () => {
   // A real disk check (test-fixtures/staged-layouts/laptop.json): Windows
-  // can't shrink C: at all, and the OEM RESTORE partition fails the precheck.
+  // can't shrink C: at all, and the OEM RESTORE partition is too small.
   const captured=laptop as unknown as {disks:StagedDisk[];choices:StagedChoice[];temporaryBytes:number;minimumLinuxBytes:number};
   const disk=captured.disks[0];
   const c=disk.regions.find(r=>r.isWindows)!;
@@ -294,8 +318,8 @@ describe('captured laptop layout', () => {
   });
 
   it('explains both partitions', () => {
-    expect(regionStatus(c,statusContext)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of OS (C:), so it cannot shrink it.",action:'recheck'});
-    expect(cantReleaseLine(c)).toBe("Windows keeps 93 GiB free and can't move some files near the end of OS (C:).");
-    expect(regionStatus(restore,statusContext)).toEqual({tone:'hatched',text:'RESTORE (Partition 5) needs 18.9 GiB more free space. Free up space in Windows, then refresh.',action:'refresh'});
+    expect(regionStatus(c,statusContext)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of OS (C:), so it can't shrink it.",action:'recheck'});
+    expect(cantReleaseLine(c)).toBe("93 GiB stays free for Windows, and some files near the end of OS (C:) can't be moved.");
+    expect(regionStatus(restore,statusContext)).toEqual({tone:'hatched',text:'RESTORE (Partition 5) is too small for the installer.',action:null});
   });
 });

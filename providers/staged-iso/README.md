@@ -48,8 +48,12 @@ warn that booting and same-disk installation may fail in the official ISO.
    Windows sizing/reserve checks are reused; no existing partition is deleted.
    The target must be a basic GPT disk with 512-byte logical sectors on native
    x64 UEFI. Disks that cannot be used report a specific reason. Inspection marks
-   the partition the running Windows booted from (`isWindows`) so the app can
-   name it. Inspection does not require BitLocker suspension, and preparation
+   the partition that holds the running Windows (`IsBoot`, reported as
+   `isWindows`; not the EFI partition) so the app can name it. A partition too
+   small to hold the installer plus the free-space reserve, even when empty, is
+   reported as too small rather than asking to free space. Shrink blockers name
+   the limit that applies: the reserve, or files Windows can't move.
+   Inspection does not require BitLocker suspension, and preparation
    does not require Secure Boot off: it is checked when selecting the installer
    startup, after suspension.
    Planning accepts unlocked, fully encrypted or decrypted volumes; incomplete

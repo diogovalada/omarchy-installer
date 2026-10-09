@@ -5,8 +5,10 @@
 // Scenarios: ?limited ?oem ?free ?two-ntfs ?two-disks ?failed ?replace-only
 // ?checking ?review, or ?layout=<name> for test-fixtures/staged-layouts/<name>.json
 // (a captured `stagedIso` value; see the README there).
-// Each check replays the provider's timeline: the layout first, then one
-// partition measured at a time. window.__fixtureSettled is true once it ends.
+// Each check replays the provider's timeline and progress messages: the
+// layout first, then one partition measured at a time. A Recheck returns only
+// at the end, as the real resize query does. Captured layouts are published as
+// captured, in one step. window.__fixtureSettled is true once it ends.
 import '/src/styles.css';
 import { mount } from 'svelte';
 import StagedInstaller from '/src/lib/StagedInstaller.svelte';
@@ -15,7 +17,7 @@ const GiB=1024**3, MiB=1024**2, temporaryBytes=7.5*GiB, minimumLinuxBytes=32*GiB
 const query=new URLSearchParams(location.search);
 const scenario=['limited','oem','free','two-ntfs','two-disks','failed','replace-only','checking'].find(name=>query.has(name)) ?? 'ready';
 const kept='System or unsupported partition; kept unchanged.';
-const encryption=[{driveLetter:'C',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}];
+const encryption=[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}];
 const alignUp=bytes=>Math.ceil(bytes/MiB)*MiB;
 // Get-ShrinkCandidate keeps max(20 GiB, 10% of the volume) free.
 const reserve=sizeBytes=>alignUp(Math.max(20*GiB,sizeBytes/10));
@@ -30,13 +32,15 @@ const free=sizeBytes=>({kind:'free',label:'Unallocated space',sizeBytes});
 function ntfs(label,sizeBytes,freeBytes,measured,extra={}) {
   const reserveBytes=reserve(sizeBytes);
   if(measured?.maximumReleaseBytes>freeBytes-reserveBytes) throw new Error(`${label} releases more than the provider allows.`);
+  const tooSmall=sizeBytes<temporaryBytes+reserveBytes;
   const precheck=freeBytes<temporaryBytes+reserveBytes
-    ? {resizeState:'insufficient',reserveBytes,resizeReason:'Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'}
+    ? {resizeState:'insufficient',reserveBytes,resizeReason:tooSmall ? 'This partition is too small for the temporary installer.' : 'Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'}
     : {resizeState:'unchecked',resizeReason:''};
   return partition(label,sizeBytes,{fileSystem:'NTFS',freeBytes,...precheck,measured:measured && {reserveBytes,...measured},...extra});
 }
 const checked=maximumReleaseBytes=>({resizeState:'checked',resizeReason:'',maximumReleaseBytes});
-const failed={resizeState:'failed',resizeReason:'Windows returned unsupported NTFS shrink limits.',maximumReleaseBytes:null};
+// The provider has no reserve without a valid Windows limit, and reports 0.
+const failed={resizeState:'failed',resizeReason:'Windows returned unsupported NTFS shrink limits.',maximumReleaseBytes:null,reserveBytes:0};
 function layout(diskNumber,specs) {
   let offsetBytes=MiB, partitionNumber=0;
   const regions=specs.map(spec=>{
@@ -61,32 +65,33 @@ const scenarios={
 const blocked=scenario==='two-disks'?[{diskNumber:1,diskUniqueId:'fixture-disk-1',diskSizeBytes:2000*1000**3,reason:'This disk uses the older MBR layout (legacy BIOS). Installing without USB needs a GPT disk; use a USB installer instead.',encryption:[]}]:[];
 const disks=scenarios[scenario]();
 const initial=structuredClone(disks);
-const regions=()=>disks.flatMap(disk=>disk.regions.map(region=>({disk,region})));
+const regions=(view=disks)=>view.flatMap(disk=>disk.regions.map(region=>({disk,region})));
 // Same rules as Get-StagingChoices: free space that fits the installer, then
 // measured shrinks that release it (appended after free space, as the provider merges them).
-function choices() {
+function choices(view) {
   const choice=(disk,target,label)=>{
     const remaining=disk.regions.filter(r=>r.kind==='free').map(r=>r.sizeBytes-(target.start_offset_bytes===r.offsetBytes?temporaryBytes:0));
     return {diskNumber:disk.diskNumber,diskUniqueId:disk.diskUniqueId,label,target,diskSizeBytes:disk.diskSizeBytes,encryption,largestFreeAfterStagingBytes:Math.max(0,...remaining)};
   };
   return [
-    ...regions().filter(({region})=>region.kind==='free' && region.sizeBytes>=temporaryBytes)
+    ...regions(view).filter(({region})=>region.kind==='free' && region.sizeBytes>=temporaryBytes)
       .map(({disk,region})=>choice(disk,{target_kind:'free',start_offset_bytes:region.offsetBytes},`Unallocated space (${Math.round(region.sizeBytes/GiB*10)/10} GiB)`)),
-    ...regions().filter(({region})=>region.resizeState==='checked' && region.maximumReleaseBytes>=temporaryBytes)
+    ...regions(view).filter(({region})=>region.resizeState==='checked' && region.maximumReleaseBytes>=temporaryBytes)
       .map(({disk,region})=>choice(disk,{target_kind:'shrink',partition_number:region.partitionNumber,partition_guid:region.partitionGuid},`Resize ${region.label}`))
   ];
 }
-function inventory() {
-  const listed=disks.map(({regions,...disk})=>{
+function inventory(view=disks) {
+  const listed=view.map(({regions,...disk})=>{
     const shown=regions.map(({measured,...region})=>region);
     const unallocated=shown.filter(r=>r.kind==='free').map(r=>r.sizeBytes);
     return {...disk,regions:shown,unallocatedBytes:unallocated.reduce((a,b)=>a+b,0),largestFreeBytes:Math.max(0,...unallocated),encryption};
   });
-  return {choices:choices(),blocked,disks:listed,minimumLinuxBytes,temporaryBytes,secureBoot:true};
+  return {choices:choices(view),blocked,disks:listed,minimumLinuxBytes,temporaryBytes,secureBoot:true};
 }
-// A reviewed plan for keeping Windows with 64 GiB for Omarchy, placed as Get-StagingPlan does.
+// A reviewed plan for keeping Windows with 64 GiB for Omarchy, placed as
+// Get-StagingPlan does, on the disk shown (the captured one with ?layout).
 function reviewFor() {
-  const disk=disks[0], c=disk.regions.find(r=>r.isWindows && r.resizeState==='checked');
+  const disk=capturedLayout ? capturedLayout.disks[0] : disks[0], c=disk.regions.find(r=>r.isWindows && r.resizeState==='checked');
   if(!c || c.maximumReleaseBytes<temporaryBytes+64*GiB) return null;
   const start=Math.floor((c.offsetBytes+c.sizeBytes)/MiB)*MiB-temporaryBytes-64*GiB, size=bytes=>(bytes/GiB).toFixed(1);
   const review={diskNumber:disk.diskNumber,diskSizeBytes:disk.diskSizeBytes,targetKind:'shrink',
@@ -103,31 +108,42 @@ if(captured) {
   if(!response.ok || !response.headers.get('content-type')?.includes('json')) throw new Error(`No captured layout named ${captured}.`);
   capturedLayout=await response.json();
 }
-const snapshot={status:'idle',stage:'',stagedTesting:true,stagedIso:null};
+const snapshot={status:'idle',stage:'',message:'',stagedTesting:true,stagedIso:null};
 let timers=[];
-// The helper clears stagedIso and runs. Progress publishes the layout, then
-// each measurement (stage analyzing-resize). A resize query returns only at
-// the end, and the UI merges it into what it already shows.
+const progress=(stage,message)=>Object.assign(snapshot,{stage,message});
+const measuring=region=>`Checking how much ${region.label} can shrink. Windows may take several minutes; no partitions are being changed.`;
+// The helper clears stagedIso and runs (Staging.ps1, Get-StagingInspection).
+// A full check publishes the layout, then each measurement. A resize query
+// publishes nothing until it returns: the queried partition measured, the
+// others as the precheck left them, and only free-space and queried choices.
+// The UI merges that into what it already shows.
 function check(resize) {
   timers.forEach(clearTimeout); timers=[]; window.__fixtureSettled=false;
-  Object.assign(snapshot,{status:'running',stage:resize?'analyzing-resize':'inspecting',stagedIso:null,stagedReview:null});
+  Object.assign(snapshot,{status:'running',stagedIso:null,stagedReview:null});
+  progress('loading','Loading Windows disk tools...');
   const steps=[];
-  if(capturedLayout) steps.push(()=>{snapshot.stagedIso=structuredClone(capturedLayout);});
-  else {
-    let targets;
-    if(resize) {
-      targets=regions().map(({region})=>region).filter(r=>r.partitionGuid===resize.partitionGuid && r.measured);
-      for(const r of targets) Object.assign(r,{resizeState:'unchecked',resizeReason:'',maximumReleaseBytes:null,reserveBytes:null});
-    } else {
-      disks.forEach((disk,index)=>{disk.regions=structuredClone(initial[index].regions);});
-      targets=regions().map(({region})=>region).filter(r=>r.resizeState==='unchecked' && r.measured);
-      steps.push(()=>{snapshot.stagedIso=inventory();});
+  let result=()=>inventory();
+  if(capturedLayout) {
+    steps.push(()=>progress('inspecting','Reading disks and Windows encryption status...'));
+    result=()=>structuredClone(capturedLayout);
+  } else if(resize) {
+    const view=disks.map((disk,index)=>({...disk,regions:structuredClone(initial[index].regions).map(r=>r.partitionGuid===resize.partitionGuid && r.measured ? {...r,...r.measured} : r)}));
+    const region=view.flatMap(disk=>disk.regions).find(r=>r.partitionGuid===resize.partitionGuid);
+    steps.push(()=>progress('analyzing-resize',measuring(region)));
+    result=()=>inventory(view);
+  } else {
+    disks.forEach((disk,index)=>{disk.regions=structuredClone(initial[index].regions);});
+    const targets=regions().filter(({region})=>region.resizeState==='unchecked' && region.measured);
+    steps.push(()=>{progress('inspecting','Disks are ready. Checking Windows resize limits...');snapshot.stagedIso=inventory();});
+    for(const [index,{disk,region}] of targets.entries()) {
+      steps.push(()=>progress('analyzing-resize',measuring(region)));
+      // ?checking stays on the first measurement.
+      if(scenario==='checking' && index===0) break;
+      steps.push(()=>{Object.assign(region,region.measured);progress('analyzing-resize',`Checked resize limit for ${region.label} on Disk ${disk.diskNumber}.`);snapshot.stagedIso=inventory();});
     }
-    if(scenario==='checking') targets=[];
-    for(const region of targets) steps.push(()=>{Object.assign(region,region.measured);snapshot.stage='analyzing-resize';if(!resize)snapshot.stagedIso=inventory();});
   }
   if(scenario!=='checking') steps.push(()=>{
-    Object.assign(snapshot,{status:'complete',stage:'complete',stagedIso:capturedLayout?structuredClone(capturedLayout):inventory()});
+    Object.assign(snapshot,{status:'complete',stage:'complete',message:'Temporary installer updated.',stagedIso:result()});
     if(query.has('review') && !resize) snapshot.stagedReview=reviewFor();
   });
   steps.forEach((step,index)=>timers.push(setTimeout(async()=>{

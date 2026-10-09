@@ -169,8 +169,8 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     function Get-StagingDisk($Number,$Identity) { if ($Number -ne 0 -or $Identity -cne 'disk') { throw 'Changed disk' }; return $disk }
     function Get-InspectedPartitions { return @($part) }
     function Get-BitLockerSnapshot { return @{known=$true;volumes=@()} }
-    $script:volumeLetter='C'; $script:volumeLabel=''
-    function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter=$script:volumeLetter;FileSystemLabel=$script:volumeLabel;FileSystemType='NTFS';Size=$part.Size;SizeRemaining=[long]100GB;HealthStatus='Healthy';OperationalStatus=@('OK')} }
+    $script:volumeLetter='C'; $script:volumeLabel=''; $script:volumeFree=[long]100GB
+    function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter=$script:volumeLetter;FileSystemLabel=$script:volumeLabel;FileSystemType='NTFS';Size=$part.Size;SizeRemaining=$script:volumeFree;HealthStatus='Healthy';OperationalStatus=@('OK')} }
     function Get-PartitionSupportedSize { $script:shrinkCalls++; return @{SizeMin=$script:shrinkLimit} }
     $release=[pscustomobject]@{sizeBytes=6GB;minimumLinuxBytes=40GB}
     $found=Get-StagingChoices $release
@@ -190,6 +190,13 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $labeled=Get-StagingChoices $release
     Assert ($labeled.disks[0].regions[0].label -eq 'OS (C:)') 'The drive letter and filesystem label were not shown together.'
     $script:volumeLabel=''
+    $script:volumeFree=[long]20GB
+    $short=(Get-StagingChoices $release).disks[0].regions[0]
+    Assert ($short.resizeState -eq 'insufficient' -and $short.resizeReason -like 'Not enough space*Free up space*') 'A partition short of free space did not ask to free space.'
+    $size=$part.Size; $part.Size=[long]22GB; $script:volumeFree=[long]8GB
+    $short=(Get-StagingChoices $release).disks[0].regions[0]
+    Assert ($short.resizeState -eq 'insufficient' -and $short.resizeReason -eq 'This partition is too small for the temporary installer.') 'A partition too small for the installer asked to free space.'
+    $part.Size=$size; $script:volumeFree=[long]100GB
     $query=[pscustomobject]@{diskNumber=0;diskUniqueId='disk';partitionNumber=3;partitionGuid=$part.Guid}
     $found=Get-StagingChoices $release $query
     Assert ($script:shrinkCalls -eq 1 -and $found.choices.Count -eq 1) 'Selected resize analysis did not expose a usable allocation.'

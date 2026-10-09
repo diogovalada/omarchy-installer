@@ -140,7 +140,8 @@ function Get-StagingChoices($Release,$Resize=$null) {
                             if ($region.freeBytes -lt $overhead+$reserve) {
                                 $region.resizeState='insufficient'
                                 $region.reserveBytes=$reserve
-                                $region.resizeReason='Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'
+                                # Freeing space can't help when even an empty volume is too small.
+                                $region.resizeReason=if ([long]$v.Size -lt $overhead+$reserve) { 'This partition is too small for the temporary installer.' } else { 'Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.' }
                             } else { $region.resizeState='unchecked'; $region.resizeReason='' }
                         }
                         else { $region.resizeReason='Only NTFS partitions can be resized here.' }
