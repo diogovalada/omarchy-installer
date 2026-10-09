@@ -481,6 +481,15 @@ it('shows preparation progress where the review was',async()=>{
   expect(screen.getAllByRole('button',{name:'Stop preparing'})).toHaveLength(1);
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 });
+it('keeps progress and Stop on the home screen during preparation',async()=>{
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'copying',diskNumber:0,temporaryBytes:8*GiB,message:''};
+  state.set(reviewing({...reviewed(),approved:true},{kind:null,stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false,stagedRecovery:{operations:[op],recordErrors:[]}}));
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByText('Copying and verifying the installer...')).toBeInTheDocument();
+  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+});
 it('shows the preparing panel when opened during preparation',async()=>{
   state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false}));
   render(StagedInstaller,{sourceReady:true});

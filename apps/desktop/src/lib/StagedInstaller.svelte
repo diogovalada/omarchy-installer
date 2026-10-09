@@ -82,7 +82,9 @@
   $: review=$setup.snapshot?.stagedReview?.approved ? null : $setup.snapshot?.stagedReview;
   let approving=false;
   $: if(!busy) approving=false;
-  $: preparing=busy && (approving || !!$setup.snapshot?.stagedReview?.approved);
+  // Review and the preparing panel are part of the full flow; on the home
+  // screen (recoveryOnly) the status, progress and Stop below stand in.
+  $: preparing=!recoveryOnly && busy && (approving || !!$setup.snapshot?.stagedReview?.approved);
   function respond(approved:boolean) {
     if(approved) approving=true;
     void setup.respondStagedReview(approved);
@@ -271,7 +273,7 @@
       {#if testing && sourceReady}<button disabled={busy} onclick={()=>{restarting=op.operationId;void setup.stagedIso('cleanup',null,op.operationId);}}>Prepare again</button>{/if}</div>
     </article>
   {/each}
-  {#if busy && !quiet && !review && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
+  {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
   {#if !busy && result?.message}<p role="status">{result.message}</p>{/if}
