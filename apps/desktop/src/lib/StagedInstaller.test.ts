@@ -77,8 +77,9 @@ it('shows a placeholder map while the first disk read runs',async()=>{
   await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
   state.set({pending:false,snapshot:{status:'running',stage:'loading',message:'Loading Windows disk tools...',stagedTesting:true}});
   await tick();
-  expect(screen.getByRole('status')).toHaveTextContent('Reading disks…');
-  expect(screen.queryByText('Loading Windows disk tools...')).not.toBeInTheDocument();
+  expect(screen.getByText('Reading disks…')).toBeInTheDocument();
+  // The provider's progress stays out of sight but reaches screen readers.
+  expect(screen.getByRole('status')).toHaveTextContent('Loading Windows disk tools...');
 });
 const GiB=1024**3, MiB=1024**2;
 const encrypted={diskNumber:0,diskUniqueId:'windows-disk',label:'Shrink partition 3',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:'guid'},encryption:[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}]};
@@ -116,12 +117,13 @@ it('shows a full disk while Windows measures its resize limit',async()=>{
   expect(screen.getByRole('heading',{name:'Disk 0 · 500 GiB'})).toBeInTheDocument();
   expect(screen.getByRole('radio',{name:'Checking how much C: can shrink. This can take a few minutes.'})).toBeChecked();
   expect(screen.queryByText('No space can be used yet.')).not.toBeInTheDocument();
-  expect(screen.queryByText('Disks are ready. Checking Windows resize limits...')).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Disks are ready. Checking Windows resize limits...');
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
   expect(calls.stagedIso).not.toHaveBeenCalled();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:40*GiB,temporaryBytes:8*GiB}}});
   await tick();
   expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('status')).toHaveTextContent('Disk check finished.');
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*GiB});
 });
@@ -229,6 +231,27 @@ it('chooses free space first and selects partitions with the keyboard',async()=>
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:freeAtEnd.target});
 });
+it('keeps the space source when a later measurement would move the default',async()=>{
+  const data={...fullDisk.regions[0],partitionNumber:4,partitionGuid:'data-guid',offsetBytes:101*MiB+400*GiB,sizeBytes:1000*GiB,label:'D:',freeBytes:900*GiB,isWindows:false};
+  const dataChoice={...encrypted,label:'Resize D:',target:{target_kind:'shrink',partition_number:4,partition_guid:'data-guid'}};
+  const disk=(d:object)=>({...fullDisk,diskSizeBytes:1500*GiB,regions:[efi,{...checkedC,offsetBytes:101*MiB,sizeBytes:400*GiB},d]});
+  state.set({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[disk(data)],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('radio',{name:/EFI system/}));
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted,dataChoice],blocked:[],disks:[disk({...data,resizeState:'checked',maximumReleaseBytes:700*GiB,reserveBytes:100*GiB})],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  await tick();
+  expect(screen.getByRole('radio',{name:/EFI system/})).toBeChecked();
+  expect(screen.getByText('Space comes from C:.')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*GiB});
+});
+it('locks the map while a reviewed plan waits',async()=>{
+  state.set({pending:false,snapshot:{...measured().snapshot,status:'running',stage:'staged-installer',stagedReview:{summary:'Prepare the installer on Disk 0?'}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  for(const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled();
+});
 it('names a target that is not the Windows partition',async()=>{
   const data={...fullDisk,regions:[{...checkedC,label:'D:',isWindows:false}]};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[data],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
@@ -245,7 +268,7 @@ it('shows why a disk cannot be used in place of the map',async()=>{
   await tick();
   expect(screen.getByRole('button',{name:'Disk 0 · 500 GiB'})).toHaveAttribute('aria-pressed','true');
   await fireEvent.click(screen.getByRole('button',{name:"Disk 1 · 2 TiB · can't use"}));
-  expect(screen.getByRole('status')).toHaveTextContent(blocked.reason);
+  expect(screen.getByText(blocked.reason)).toBeInTheDocument();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
 });

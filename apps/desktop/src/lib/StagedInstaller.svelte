@@ -69,8 +69,13 @@
   $: freeLeft=choice?.target.target_kind==='free' ? (sourceRegion ? sourceRegion.sizeBytes-requiredBytes : choice.largestFreeAfterStagingBytes) : 0;
   $: checkingAny=busy && (!!analyzing || !!layout?.regions.some(r=>r.resizeState==='unchecked'));
   $: tableStatus=(region:StagedRegion) => statusFor([region],spaces,busy,analyzing,requiredBytes,installMinimum).text;
-  // The map and the selected-partition line show disk-check progress.
+  // The map and the selected-partition line show disk-check progress, so the
+  // page-bottom status is hidden then; a hidden status region keeps it for
+  // screen readers, and says when the check is over.
   $: quiet=!recoveryOnly && (inspection ? browsing || !!analyzing : reading);
+  let checkStatus='';
+  $: if(quiet && busy) checkStatus=$setup.snapshot?.message || 'Checking disks…';
+  $: if(!busy && checkStatus) checkStatus=inspection ? 'Disk check finished.' : '';
   $: review=$setup.snapshot?.stagedReview;
   $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;
   // Unknown until disks are checked; the provider reports when it is already off.
@@ -130,10 +135,12 @@
     const region=shown[0];
     return regionStatus(shown.length>1 ? shown : region,{temporaryBytes,minimumBytes,usable:!rechecking(regions[0]) && !!choiceFor(region,choices),checking:checking && region.resizeState==='unchecked'});
   }
+  // Any pick fixes the source: a usable segment becomes it, and any other
+  // keeps the current one, even if the default would move later.
   function selectSegment(key:string) {
-    chosenSegment=key;
     const segment=segments.find(s=>s.key===key);
-    if(segment?.regions.length===1 && choiceFor(segment.regions[0],spaces)) chosenSource=regionKey(segment.regions[0]);
+    const source=segment?.regions.length===1 && choiceFor(segment.regions[0],spaces) ? segment.regions[0] : sourceRegion;
+    chosenSegment=key; chosenSource=source ? regionKey(source) : '';
   }
   function selectDisk(id:string) {
     selectedDisk=id; chosenSegment=''; chosenSource='';
@@ -162,10 +169,11 @@
     <div class="navigation"><button class="back" disabled={busy} onclick={close}><ArrowLeft size={15}/>Back</button>{#if testing}<span class="badge">Test build</span>{/if}</div>
     <h2>Install without USB</h2>
     <p class="intro">Make room for Omarchy on this computer.</p>
+    <p class="visually-hidden" role="status">{checkStatus}</p>
     {#if !inspection}
       {#if reading && busy}
         <div class="map-placeholder" aria-hidden="true"></div>
-        <p class="line" role="status">Reading disks…</p>
+        <p class="line">Reading disks…</p>
       {:else}
         <div class="start">
           <button class="primary" disabled={busy || !testing || !sourceReady} onclick={inspect}><HardDrive size={16}/>Check available space</button>
@@ -180,9 +188,9 @@
         <button class="refresh" disabled={busy || !sourceReady || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
       </div>
       {#if disk?.blocked}
-        <p class="blocked" role="status">{disk.blocked.reason}</p>
+        <p class="blocked">{disk.blocked.reason}</p>
       {:else if layout}
-        <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} bind:width={mapWidth}/>
+        <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} disabled={!sourceReady || !(browsing || analyzing)} bind:width={mapWidth}/>
         {#if selectedSegment}
           {@const status=statuses[selectedSegment.key]}
           {@const region=single(selectedSegment)}

@@ -9,7 +9,11 @@
   export let source='';
   export let select:(key:string)=>void=()=>{};
   export let width=0;
-  const CHAR_PX=6.6, PADDING_PX=16, GAP_PX=2;
+  // Off while a reviewed plan or a disk change is in progress.
+  export let disabled=false;
+  // Label margin and backing padding sit inside the segment, so segment
+  // widths keep the scale exactly.
+  const CHAR_PX=6.6, PADDING_PX=20, GAP_PX=2;
   let buttons:HTMLButtonElement[]=[];
   $: drawnPx=Math.max(0,width-GAP_PX*Math.max(0,segments.length-1));
   // The longest label that fits inside the segment; small segments show
@@ -40,19 +44,21 @@
   {#each segments as segment,index (segment.key)}
     {@const status=statuses[segment.key]}
     {@const used=usedPercent(segment)}
-    <button type="button" role="radio" class="segment {status?.tone ?? 'normal'}" class:selected={segment.key===selected} class:source={segment.regions.length===1 && segment.key===source} class:used={used!=null && ['normal','dimmed'].includes(status?.tone ?? 'normal')} style:flex-grow={segment.widthPercent} style:--used={`${used ?? 0}%`} aria-checked={segment.key===selected} aria-label={status?.text || segment.label} tabindex={segment.key===selected ? 0 : -1} bind:this={buttons[index]} onclick={()=>select(segment.key)} onkeydown={event=>keydown(event,index)}>
-      <span class="text" aria-hidden="true">{fitting(segment,drawnPx)}</span>
+    {@const text=fitting(segment,drawnPx)}
+    <button type="button" role="radio" class="segment {status?.tone ?? 'normal'}" class:selected={segment.key===selected} class:source={segment.regions.length===1 && segment.key===source} class:used={used!=null && ['normal','dimmed'].includes(status?.tone ?? 'normal')} style:flex-grow={segment.widthPercent} style:--used={`${used ?? 0}%`} aria-checked={segment.key===selected} aria-label={status?.text || segment.label} tabindex={segment.key===selected ? 0 : -1} {disabled} bind:this={buttons[index]} onclick={()=>select(segment.key)} onkeydown={event=>keydown(event,index)}>
+      {#if text}<span class="text" aria-hidden="true">{text}</span>{/if}
     </button>
   {/each}
 </div>
 
 <style>
   .map{display:flex;gap:2px;height:40px;margin:14px 0 10px}
-  .segment{position:relative;flex:0 1 0;min-width:0;display:flex;align-items:center;padding:0 8px;border:0;border-radius:0;background:var(--surface-raised);color:var(--text);font:inherit;font-size:11px;white-space:nowrap;overflow:hidden;cursor:pointer;appearance:none}
+  .segment{position:relative;flex:0 1 0;min-width:0;display:flex;align-items:center;padding:0;border:0;border-radius:0;background:var(--surface-raised);color:var(--text);font:inherit;font-size:11px;white-space:nowrap;overflow:hidden;cursor:pointer;appearance:none}
   .segment:first-child{border-radius:3px 0 0 3px}.segment:last-child{border-radius:0 3px 3px 0}.segment:only-child{border-radius:3px}
-  .segment:hover{filter:brightness(1.15)}
+  .segment:hover:not(:disabled){filter:brightness(1.15)}.segment:disabled{cursor:default}
   .segment:focus-visible{outline:2px solid var(--accent-hover);outline-offset:2px;z-index:1}
-  .text{position:relative;overflow:hidden;text-overflow:clip}
+  /* A dark backing keeps labels readable on every fill (4.5:1 or more). */
+  .text{position:relative;margin:0 6px;padding:1px 4px;border-radius:2px;background:rgb(19 20 28/.75);overflow:hidden;text-overflow:clip}
   .used{background:linear-gradient(to right,var(--border-strong) var(--used),var(--surface-raised) var(--used))}
   .dimmed{box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--text-dim)}.outlined-dimmed{opacity:.6}
   .hatched{background:repeating-linear-gradient(135deg,var(--border) 0 2px,var(--surface-deep) 2px 8px)}
