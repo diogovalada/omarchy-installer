@@ -481,6 +481,14 @@ it('shows preparation progress where the review was',async()=>{
   expect(screen.getAllByRole('button',{name:'Stop preparing'})).toHaveLength(1);
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 });
+it('shows the preparing panel when opened during preparation',async()=>{
+  state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false}));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('region',{name:'Preparing the installer'})).toHaveTextContent('Copying and verifying the installer...');
+  expect(screen.queryByRole('region',{name:'Review changes'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+});
 it('reviews the staging plan in the app before any disk change',async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,status:'running',stagedReview:{summary:'Prepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB.'}}});
   render(StagedInstaller,{sourceReady:true});

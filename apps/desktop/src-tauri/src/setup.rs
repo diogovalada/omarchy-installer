@@ -143,7 +143,8 @@ impl Default for Setup {
 // Declining the staged review isn't a failure: the helper stops before
 // changing anything, and the inspection stays so the choose screen returns.
 fn record_failure(inner: &mut Inner, error: String) {
-    if inner.staged_review_declined && error == crate::setup_helper::NOT_CONFIRMED {
+    inner.snapshot.staged_review = None;
+    if inner.staged_review_declined && crate::setup_helper::declined(&error) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
@@ -302,6 +303,7 @@ impl Setup {
         inner.snapshot.cancel_requested = false;
         inner.snapshot.cancel_available = false;
         inner.staged_review_declined = false;
+        inner.snapshot.staged_review = None;
         inner.snapshot.stage = status.into();
         inner.snapshot.message = if status == "inspecting" {
             "Checking this computer…"
@@ -823,6 +825,7 @@ pub fn staged_iso(
                     .unwrap_or("Temporary installer updated.")
                     .into();
                 inner.snapshot.staged_iso = Some(result);
+                inner.snapshot.staged_review = None;
                 inner.snapshot.cancel_available = false;
                 inner.writer = None;
             }),
@@ -1271,9 +1274,12 @@ fn review_staged_write(
     let approved = receiver
         .recv_timeout(std::time::Duration::from_secs(900))
         .unwrap_or(false);
+    // An approved review stays, marked approved, until the operation ends, so
+    // the app shows preparation where the review was, even after a reload.
     service.update(app, |inner| {
         inner.staged_review = None;
-        inner.snapshot.staged_review = None;
+        inner.snapshot.staged_review =
+            approved.then(|| json!({"summary": summary, "review": review, "approved": true}));
         inner.staged_review_declined = !approved;
     });
     approved
@@ -1557,7 +1563,12 @@ mod usb_review_tests {
             inner.snapshot.status = "running".into();
             inner.snapshot.staged_iso = Some(json!({"disks":[]}));
             inner.staged_review_declined = true;
-            record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());
+            // As the helper reports it, with its operation files.
+            let reported = crate::setup_helper::operation_failure(
+                crate::setup_helper::NOT_CONFIRMED,
+                std::path::Path::new("C:\\ProgramData\\operation"),
+            );
+            record_failure(&mut inner, reported);
             assert_eq!(inner.snapshot.status, "cancelled");
             assert_eq!(inner.snapshot.error, None);
             assert_eq!(inner.snapshot.message, "Nothing was changed.");
@@ -1566,11 +1577,23 @@ mod usb_review_tests {
             record_failure(&mut inner, "Disk changed".into());
             assert_eq!(inner.snapshot.status, "failed");
             assert_eq!(inner.snapshot.error.as_deref(), Some("Disk changed"));
+            record_failure(
+                &mut inner,
+                "Copy failed\nOperation was not confirmed".into(),
+            );
+            assert_eq!(inner.snapshot.status, "failed");
+            // An approved review shown during preparation ends with the operation.
+            inner.snapshot.staged_review = Some(json!({"summary":"Prepare?","approved":true}));
+            record_failure(&mut inner, "Copy failed".into());
+            assert_eq!(inner.snapshot.staged_review, None);
+            inner.snapshot.staged_review = Some(json!({"summary":"Prepare?","approved":true}));
+            inner.snapshot.status = "failed".into();
         }
-        // A new operation forgets the declined review.
+        // A new operation forgets the declined and the approved review.
         setup.begin("direct", "running").unwrap();
         let mut inner = setup.inner.lock().unwrap();
         assert!(!inner.staged_review_declined);
+        assert_eq!(inner.snapshot.staged_review, None);
         record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());
         assert_eq!(inner.snapshot.status, "failed");
     }

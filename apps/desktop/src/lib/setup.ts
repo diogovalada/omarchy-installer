@@ -11,7 +11,8 @@ export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
   stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
-  stagedReview?:{summary:string;review?:StagedReviewPlan|null}|null;
+  // After approval, the review stays marked approved until the operation ends.
+  stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;
   bitLocker?:{message:string;reminderRegistered:boolean}|null;
   kind: 'usb' | 'direct' | null; status: string; stage: string; message: string;

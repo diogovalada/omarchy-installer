@@ -169,7 +169,7 @@ window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
   if(command==='setup_status')return structuredClone(snapshot);
   if(command==='staged_iso' && args.action==='inspect'){check(args.resize);return structuredClone(snapshot);}
   if(command==='respond_staged_review'){
-    if(args.approved) Object.assign(snapshot,{stagedReview:null,stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false});
+    if(args.approved) Object.assign(snapshot,{stagedReview:{...snapshot.stagedReview,approved:true},stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false});
     else Object.assign(snapshot,{stagedReview:null,status:'cancelled',message:'Nothing was changed.'});
     return structuredClone(snapshot);
   }

@@ -77,13 +77,14 @@
   let checkStatus='';
   $: if(quiet && busy) checkStatus=$setup.snapshot?.message || 'Checking disks…';
   $: if(!busy && checkStatus) checkStatus=inspection ? 'Disk check finished.' : '';
-  $: review=$setup.snapshot?.stagedReview;
-  // From approving the review until preparation ends, a panel shows its
-  // progress where the review was.
-  let preparing=false;
-  $: if(!busy) preparing=false;
+  // A review waiting for an answer; once approved, the helper keeps it marked
+  // approved until preparation ends, and a panel shows progress in its place.
+  $: review=$setup.snapshot?.stagedReview?.approved ? null : $setup.snapshot?.stagedReview;
+  let approving=false;
+  $: if(!busy) approving=false;
+  $: preparing=busy && (approving || !!$setup.snapshot?.stagedReview?.approved);
   function respond(approved:boolean) {
-    if(approved) preparing=true;
+    if(approved) approving=true;
     void setup.respondStagedReview(approved);
   }
   $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;

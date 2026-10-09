@@ -149,6 +149,17 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
 /// The helper's error when the user declines a confirmation.
 pub(crate) const NOT_CONFIRMED: &str = "Operation was not confirmed";
 
+/// The error an operation reports to the desktop: the reason on the first
+/// line, then where its files are.
+pub(crate) fn operation_failure(error: &str, workspace: &Path) -> String {
+    format!("{error}\nOperation files: {}", workspace.display())
+}
+
+/// Whether a reported operation error is a declined confirmation.
+pub(crate) fn declined(error: &str) -> bool {
+    error.lines().next() == Some(NOT_CONFIRMED)
+}
+
 fn confirm(
     output: &Emitter,
     receiver: &mpsc::Receiver<Value>,
@@ -1988,7 +1999,7 @@ fn execute(
                 "failure.json",
                 &json!({"operationId":id,"error":error,"recovery":recovery}),
             );
-            Err(format!("{error}\nOperation files: {}", workspace.display()))
+            Err(operation_failure(&error, &workspace))
         }
     }
 }
