@@ -2,6 +2,15 @@
 
 Decision date: 2026-09-06.
 
+**October 9 update — disk map:** the choose-space screen now shows each disk as
+a to-scale map. Selecting a partition shows one line about it and, when the
+partition is usable, chooses it as the space source; free space that fits is
+chosen first. Resize-check progress, Recheck and Refresh appear on that line,
+and an "All partitions" table lists exact sizes. The partition list, the space
+dropdown and the BitLocker notice on that screen are gone. Staging, review and
+recovery behavior are unchanged. See the
+[disk map plan](staged-disk-map-plan-2026-10-06.md).
+
 **September 23 update — review fixes:** a reviewed shrink can again leave
 unallocated space for Omarchy after the temporary installer when the user keeps
 Windows; replacing Windows still shrinks only for the installer. Secure Boot is

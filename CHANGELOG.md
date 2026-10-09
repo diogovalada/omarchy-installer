@@ -3,6 +3,13 @@
 Versions here belong to Omarchy Installer, independently of the Omarchy image it
 downloads. Published versions and their artifacts are immutable.
 
+## Unreleased
+
+- Install without USB (testing builds): choose space on a to-scale disk map.
+  Selecting a partition explains it in one line; an "All partitions" table
+  gives exact sizes. A non-Windows partition is named by its drive letter in
+  the Keep and Replace choices.
+
 ## [0.1.0-preview.4] - 2026-09-13
 
 - Offer Download replacement or Choose another folder when an existing ISO has

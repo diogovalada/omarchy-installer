@@ -28,7 +28,7 @@ it('opens the real testing flow before downloading without prompting for elevati
   render(App);
   await fireEvent.click(screen.getByRole('button',{name:'Install without USB'}));
   expect(screen.getByRole('heading',{name:'Install without USB'})).toBeInTheDocument();
-  expect(screen.getByText('Test build · real disk changes')).toBeInTheDocument();
+  expect(screen.getByText('Test build')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Check available space'})).toBeDisabled();
   expect(setup.stagedIso).not.toHaveBeenCalled();
 });
