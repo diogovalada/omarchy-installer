@@ -3,6 +3,7 @@
   import StagedDiskMap from './StagedDiskMap.svelte';
   import StagedPartitionTable from './StagedPartitionTable.svelte';
   import StagedReview from './StagedReview.svelte';
+  import StagedSteps from './StagedSteps.svelte';
   import StagedSpaceEditor from './StagedSpaceEditor.svelte';
   import { setup, setupActive, type SetupSnapshot, type StagedBlockedDisk, type StagedChoice, type StagedDisk, type StagedOperation, type StagedRegion, type StagedResizeQuery } from './setup';
   import { choiceFor, defaultRegion, formatDiskSize, GiB, limits, overviewSegments, regionKey, regionStatus, type OverviewSegment, type RegionStatus } from './stagedLayout';
@@ -90,8 +91,6 @@
     void setup.respondStagedReview(approved);
   }
   $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;
-  // Unknown until disks are checked; the provider reports when it is already off.
-  $: secureBootMaybeOn=inspection?.secureBoot!==false;
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
   $: testing=$setup.snapshot?.stagedTesting===true;
@@ -125,16 +124,10 @@
     }
     return {...current,disks,choices};
   }
-  // Emphasize only the next step: turn Secure Boot off, select the installer,
-  // or remove it once Windows has restarted after it was selected.
-  function nextAction(op:StagedOperation) {
-    if(op.status==='boot-scheduled') return op.restartedSinceScheduled ? 'cleanup' : null;
-    if(['staged','arming'].includes(op.status)) return inspection?.secureBoot ? 'firmware' : 'arm';
-    return null;
-  }
-  function heading(op:StagedOperation) {
-    if(op.status==='boot-scheduled') return op.restartedSinceScheduled ? 'Windows restarted after selecting the installer' : 'Installer selected for a restart';
-    return ['staged','arming'].includes(op.status) ? 'Temporary installer ready' : 'Installer preparation needs attention';
+  // Recorded installer actions; Prepare again removes it, then checks disks.
+  function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
+    if(action==='again') restarting=op.operationId;
+    void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }
   function inspect() {
     inspection=undefined; analyzing=null; reading=true;
@@ -199,6 +192,9 @@
         {#if copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
         {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
       </div>
+    {:else if operations.length}
+      <!-- A temporary installer exists: its steps replace the choose screen,
+           whose layout is out of date, until it is removed. -->
     {:else if !inspection}
       {#if reading && busy}
         <div class="map-placeholder" aria-hidden="true"></div>
@@ -250,28 +246,8 @@
     <p role="alert">A previous temporary installer could not be identified safely. Its partitions have not been changed.</p>
     <details><summary>Details</summary><p>{record.operationId}: {record.message}</p></details>
   {/each}
-  {#each operations as op}
-    <article>
-      <h3>{heading(op)}</h3>
-      <p>Disk {op.diskNumber} · {(op.temporaryBytes/1024**3).toFixed(1)} GiB temporary storage</p>
-      {#if op.status==='boot-scheduled'}<p>{op.restartedSinceScheduled ? 'If Omarchy is installed and starts on its own, resume BitLocker when reminded, then remove the temporary installer. To try again, select the installer for the next restart.' : 'Restart Windows to start the installer.'}</p>{/if}
-      {#if ['staged','arming','boot-scheduled'].includes(op.status)}
-        <details class="next-steps" open={!recoveryOnly}>
-          <summary>What happens next</summary>
-          <ol>
-            <li>If Secure Boot is on, turn it off first with Restart to firmware settings.</li>
-            <li>Select the installer for the next restart, then restart Windows.</li>
-            <li>In the installer, choose the disk marked “installer disk, free space only”, then Free space install. If space is short, it lets you delete a partition you no longer need, such as Windows.</li>
-            <li>Omarchy starts by default afterwards. To open Windows, use your computer’s boot menu key (often F12, F11 or Esc), or run limine-scan in Omarchy once to add Windows to its menu.</li>
-            <li>In Windows, resume BitLocker when reminded, then remove the temporary installer here. If you replaced Windows, the temporary partitions and firmware entry stay on the disk.</li>
-          </ol>
-        </details>
-      {/if}
-      <details><summary>When should I remove it?</summary><p>Remove it after Omarchy boots independently, or to abandon this attempt. Windows and installed Omarchy are kept. These actions require administrator approval.</p></details>
-      <div class="operation-actions">{#if testing && ['staged','arming','boot-scheduled'].includes(op.status)}{#if secureBootMaybeOn && nextAction(op)==='firmware'}<button class="primary" disabled={busy} onclick={()=>{void setup.stagedIso('firmware',null,op.operationId);}}>Restart to firmware settings</button>{/if}<button class:primary={nextAction(op)==='arm'} disabled={busy} onclick={()=>{void setup.stagedIso('arm',null,op.operationId);}}>{op.status==='boot-scheduled' ? 'Start installer again on next restart' : 'Start installer on next restart'}</button>{#if secureBootMaybeOn && nextAction(op)!=='firmware'}<button disabled={busy} onclick={()=>{void setup.stagedIso('firmware',null,op.operationId);}}>Restart to firmware settings</button>{/if}{/if}
-      <button class:primary={nextAction(op)==='cleanup'} disabled={busy} onclick={()=>{void setup.stagedIso('cleanup',null,op.operationId);}}>Remove temporary installer</button>
-      {#if testing && sourceReady}<button disabled={busy} onclick={()=>{restarting=op.operationId;void setup.stagedIso('cleanup',null,op.operationId);}}>Prepare again</button>{/if}</div>
-    </article>
+  {#each operations as op (op.operationId)}
+    <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
   {/each}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
@@ -297,11 +273,10 @@
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end}
-  .preparing,article{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:22px;margin:16px 0}.preparing{margin-top:24px;border-color:var(--accent)}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
-  .operation-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
-  .next-steps ol{margin:6px 0 0;padding-left:18px;font-size:11px;line-height:1.8;color:var(--text-muted)}
+  .preparing{border:1px solid var(--accent);border-radius:6px;background:var(--surface);padding:22px;margin:24px 0 16px}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
+  .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
   progress{width:100%;height:6px;margin:4px 0 12px;accent-color:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
-  @media(max-width:550px){h2{font-size:20px}.preparing,article{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch}}
+  @media(max-width:550px){h2{font-size:20px}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch}}
 </style>

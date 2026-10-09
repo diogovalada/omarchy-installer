@@ -390,7 +390,14 @@ sit in a secondary text row.
   restart**, **Start installer again on next restart**, **Remove temporary
   installer** and **Prepare again**.
 - **`nextAction()`** already picks the current step. Extend it to map states to
-  steps.
+  steps. (Implemented in `StagedSteps.svelte`, which replaces `nextAction()`.)
+- **Needs attention:** the heading is "Installer preparation needs attention ·
+  Disk 0", with "Removing it keeps Windows and any installed Omarchy." and
+  **Remove temporary installer** as the primary button.
+- **In the flow,** while a recorded temporary installer exists, its card
+  replaces the choose screen: the inspected layout is out of date, and
+  **Review changes** would invite a second temporary installer. **Prepare
+  again** removes it and checks the disks again.
 
 ## Copy
 

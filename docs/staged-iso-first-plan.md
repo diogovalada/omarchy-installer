@@ -2,6 +2,14 @@
 
 Decision date: 2026-09-06.
 
+**October 10 update — steps after preparing:** a prepared temporary installer
+shows four steps with only the current one spelled out and one primary button,
+in the flow and on the home screen. The installer-disk instruction shows before
+restarting, since the app can't be seen from the installer. While a temporary
+installer exists, its steps replace the choose screen, whose layout is out of
+date; Prepare again removes it and checks the disks again. Button names are
+unchanged. See the [disk map plan](staged-disk-map-plan-2026-10-06.md).
+
 **October 10 update — review:** the helper now sends a structured review
 beside the confirmed plan, and Review replaces the choose screen: Now and After
 bars drawn from the plan (only when it matches the inspected layout), short
