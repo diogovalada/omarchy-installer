@@ -153,11 +153,12 @@ export function cantReleaseLine(region:StagedRegion) {
   return zone-reserve<GiB ? `${keeps}.` : `${keeps}, and some files near the end of ${region.label} can't be moved.`;
 }
 
-// Space left for Omarchy after the installer in a free region; Review says
-// it without "the remaining".
-export function freeTargetLine(bytes:number,minimumBytes:number,{review=false}:{review?:boolean}={}) {
+// Space Omarchy can use when the target is free space: the largest free
+// region left after the installer (the provider's
+// largestFreeAfterStagingBytes), which may be another region on the disk.
+export function freeTargetLine(bytes:number,minimumBytes:number) {
   if(bytes<minimumBytes) return `Only ${formatSize(bytes,'down')} remains; Omarchy needs ${formatSize(minimumBytes,'up')}. Delete a partition in the installer to make room.`;
-  return `Omarchy can use ${review ? '' : 'the remaining '}${formatSize(bytes,'down')}.`;
+  return `Omarchy can use ${formatSize(bytes,'down')}.`;
 }
 
 // Windows' size after the shrink, as Get-StagingPlan computes it.
@@ -169,6 +170,18 @@ export function windowsAfterBytes(region:StagedRegion,temporaryBytes:number,omar
 // changed since the user saw it. Free space under 5 MiB is left out, as in
 // the overview (a shrink always leaves an alignment sliver under 1 MiB).
 export function afterLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegion[]|null {
+  const projected=projectedLayout(disk,review);
+  if(!projected) return null;
+  // The plan measured the real disk. If the largest free block the projection
+  // shows differs, something changed that the target alone doesn't reveal.
+  let largest=0, block=0;
+  for(const region of projected) {
+    block=region.kind==='free' || region.kind==='omarchy' ? block+region.sizeBytes : 0;
+    largest=Math.max(largest,block);
+  }
+  return Math.abs(largest-review.largestFreeAfterBytes)<=ALIGNMENT_SLACK_BYTES ? drawn(projected) : null;
+}
+function projectedLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRegion[]|null {
   if(disk.diskNumber!==review.diskNumber || disk.diskSizeBytes!==review.diskSizeBytes) return null;
   const project=(r:StagedRegion):ProjectedRegion => ({kind:r.kind,offsetBytes:r.offsetBytes,sizeBytes:r.sizeBytes,label:r.kind==='free' ? 'Free space' : r.label,...(r.partitionGuid ? {partitionGuid:r.partitionGuid} : {})});
   const temporary=review.temporary;
@@ -184,7 +197,7 @@ export function afterLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRe
     const region=disk.regions[index];
     const end=region.offsetBytes+region.sizeBytes;
     const tail:ProjectedRegion[]=end>addedEnd ? [{kind:'free',offsetBytes:addedEnd,sizeBytes:end-addedEnd,label:'Free space'}] : [];
-    return drawn([...disk.regions.slice(0,index).map(project),{...project(region),sizeBytes:shrink.afterSizeBytes},...added,...tail,...disk.regions.slice(index+1).map(project)]);
+    return [...disk.regions.slice(0,index).map(project),{...project(region),sizeBytes:shrink.afterSizeBytes},...added,...tail,...disk.regions.slice(index+1).map(project)];
   }
   const index=disk.regions.findIndex(r=>r.kind==='free' && temporary.offsetBytes>=r.offsetBytes && temporary.offsetBytes<r.offsetBytes+r.sizeBytes);
   if(index<0) return null;
@@ -192,7 +205,7 @@ export function afterLayout(disk:StagedDisk,review:StagedReviewPlan):ProjectedRe
   const end=region.offsetBytes+region.sizeBytes;
   const before:ProjectedRegion[]=temporary.offsetBytes>region.offsetBytes ? [{kind:'free',offsetBytes:region.offsetBytes,sizeBytes:temporary.offsetBytes-region.offsetBytes,label:'Free space'}] : [];
   const after:ProjectedRegion[]=end>addedEnd ? [{kind:'free',offsetBytes:addedEnd,sizeBytes:end-addedEnd,label:'Free space'}] : [];
-  return drawn([...disk.regions.slice(0,index).map(project),...before,...added,...after,...disk.regions.slice(index+1).map(project)]);
+  return [...disk.regions.slice(0,index).map(project),...before,...added,...after,...disk.regions.slice(index+1).map(project)];
 }
 const drawn=(regions:ProjectedRegion[]) => regions.filter(r=>r.kind!=='free' || r.sizeBytes>=HIDDEN_GAP_BYTES);
 
@@ -278,11 +291,13 @@ export function reviewBullets(review:StagedReviewPlan,secureBoot:boolean|null|un
     const {label,beforeSizeBytes:before,afterSizeBytes:after}=review.shrink;
     const from=before>=GiB && after>=GiB ? formatSize(before).replace(/ GiB$/,'') : formatSize(before);
     bullets.push(`${label} shrinks from ${from} to ${formatSize(after)}. Your files stay.`);
-    if(review.omarchy?.sizeBytes) bullets.push(`Omarchy gets ${formatSize(review.omarchy.sizeBytes)}. The ${temporary} installer is removed later.`);
+    // Omarchy's space can join free space next to it, or a larger free region
+    // can remain elsewhere; the installer can use the largest.
+    if(review.omarchy?.sizeBytes) bullets.push(`Omarchy can use ${formatSize(Math.max(review.omarchy.sizeBytes,review.largestFreeAfterBytes),'down')}. The ${temporary} installer is removed later.`);
     else bullets.push(`Adds a ${temporary} temporary installer. In the installer, delete ${windows ? 'Windows' : label} to make room.`);
   } else {
     bullets.push('Uses free space. Existing partitions stay.');
-    bullets.push(freeTargetLine(review.largestFreeAfterBytes,review.minimumOmarchyBytes,{review:true}));
+    bullets.push(freeTargetLine(review.largestFreeAfterBytes,review.minimumOmarchyBytes));
   }
   if(review.bitLocker.length) bullets.push(`BitLocker on ${listNames(review.bitLocker)} pauses until you resume it. Files stay encrypted.`);
   bullets.push(secureBoot ? 'Next: restart into firmware settings to turn off Secure Boot.' : 'Next: choose the installer for your next restart.');

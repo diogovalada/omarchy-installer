@@ -63,7 +63,11 @@ try {
             if ($choice.target.ContainsKey('partition_guid')) { $choice.target.partition_guid=& $guid $choice.target.partition_guid }
         }
     }
-    [IO.File]::WriteAllText($Out,($result | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding $false))
+    # Write beside the target, then move it over, so a failed write can't
+    # truncate an earlier capture.
+    $partial="$Out.partial"
+    [IO.File]::WriteAllText($partial,($result | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding $false))
+    Move-Item -LiteralPath $partial -Destination $Out -Force
     if (-not $Relaunched) { Show-Labels $Out }
 } catch {
     $message=$_.Exception.Message

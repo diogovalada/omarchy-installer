@@ -229,7 +229,9 @@ The editor covers only the selected partition:
 - **No handle**, because the provider accepts an Omarchy size only when
   shrinking.
 - **Editor:** the temporary installer at the start of the free region, then
-  "Omarchy can use the remaining 112 GiB".
+  "Omarchy can use 112 GiB". The line uses the choice's
+  `largestFreeAfterStagingBytes`, the largest free region left after the
+  installer, which can be another region on the disk.
 - **Below the minimum:** "Only 20 GiB remains; Omarchy needs 32 GiB. Delete a
   partition in the installer to make room."
 
@@ -314,7 +316,7 @@ Now    ▪│████████████████ C: 953 GiB ██�
 After  ▪│███████████ C: 881.5 GiB ██████│▒│ Omarchy 64 │▪
 
 • C: shrinks from 953 to 881.5 GiB. Your files stay.
-• Omarchy gets 64 GiB. The 7.5 GiB installer is removed later.
+• Omarchy can use 64 GiB. The 7.5 GiB installer is removed later.
 • BitLocker on C: pauses until you resume it. Files stay encrypted.
 • Next: restart into firmware settings to turn off Secure Boot.
 
@@ -404,7 +406,7 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | Size field | Omarchy [n] GiB · 32–92 |
 | Replace line | In the installer, delete Windows to make room for Omarchy. |
 | Can't keep | Windows can't give enough space to keep it. You can replace it in the installer. |
-| Free target | Omarchy can use the remaining 112 GiB. |
+| Free target | Omarchy can use 112 GiB. |
 | Free target, short | Only 20 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room. |
 | No usable space | No space can be used yet. |
 | Secure Boot (PR 1 and 2 only) | Secure Boot is on. Leave it on; you'll turn it off after preparing. |
@@ -418,7 +420,7 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | Heading | Prepare Disk 0? |
 | Shrink | C: shrinks from 953 to 881.5 GiB. Your files stay. |
 | Free | Uses free space. Existing partitions stay. |
-| Keep | Omarchy gets 64 GiB. The 7.5 GiB installer is removed later. |
+| Keep | Omarchy can use 64 GiB. The 7.5 GiB installer is removed later. (The larger of the chosen size and `largestFreeAfterBytes`: Omarchy's space can join free space next to it.) |
 | Replace | Adds a 7.5 GiB temporary installer. In the installer, delete Windows to make room. |
 | Free target | Omarchy can use 112 GiB. (Below the minimum, use the short free-target line.) |
 | BitLocker | BitLocker on C: pauses until you resume it. Files stay encrypted. |
@@ -535,7 +537,11 @@ the inspection the user saw:
 
 - shrink targets: an inspected region has the same `partitionGuid`, offset and
   size as `review.shrink` before the shrink;
-- free targets: `review.temporary` starts inside an inspected free region.
+- free targets: `review.temporary` starts inside an inspected free region;
+- both: the projection's largest free block (free space plus Omarchy's space)
+  equals `review.largestFreeAfterBytes`, within alignment. This catches
+  changes the target alone doesn't reveal, such as a new partition ending the
+  free region.
 
 Otherwise the layout changed since the check: show the bullets without bars.
 

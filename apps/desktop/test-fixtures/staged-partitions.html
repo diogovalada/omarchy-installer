@@ -91,14 +91,18 @@ function inventory(view=disks) {
 // A reviewed plan for keeping Windows with 64 GiB for Omarchy, placed as
 // Get-StagingPlan does, on the disk shown (the captured one with ?layout).
 function reviewFor() {
-  const disk=capturedLayout ? capturedLayout.disks[0] : disks[0], c=disk.regions.find(r=>r.isWindows && r.resizeState==='checked');
-  if(!c || c.maximumReleaseBytes<temporaryBytes+64*GiB) return null;
-  const start=Math.floor((c.offsetBytes+c.sizeBytes)/MiB)*MiB-temporaryBytes-64*GiB, size=bytes=>(bytes/GiB).toFixed(1);
+  const source=capturedLayout ?? inventory(), disk=source.disks[0], c=disk.regions.find(r=>r.isWindows && r.resizeState==='checked');
+  const temporary=source.temporaryBytes, minimum=source.minimumLinuxBytes;
+  if(!c || c.maximumReleaseBytes<temporary+64*GiB) return null;
+  const start=Math.floor((c.offsetBytes+c.sizeBytes)/MiB)*MiB-temporary-64*GiB, size=bytes=>(bytes/GiB).toFixed(1);
+  // Volumes with protection on, as the helper's summary filters them.
+  const bitLocker=(disk.encryption ?? []).filter(v=>v.protectionStatus===1).map(v=>v.driveLetter).filter(Boolean);
   const review={diskNumber:disk.diskNumber,diskSizeBytes:disk.diskSizeBytes,targetKind:'shrink',
-    shrink:{label:c.label,partitionGuid:c.partitionGuid,offsetBytes:c.offsetBytes,beforeSizeBytes:c.sizeBytes,afterSizeBytes:start-c.offsetBytes},
-    temporary:{offsetBytes:start,sizeBytes:temporaryBytes},omarchy:{offsetBytes:start+temporaryBytes,sizeBytes:64*GiB},
-    largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:minimumLinuxBytes,bitLocker:['C:'],warning:'experimental'};
-  const summary=`EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk ${disk.diskNumber}?\n\nShrink ${c.label} from ${size(c.sizeBytes)} to ${size(start-c.offsetBytes)} GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.\n\nSuspend BitLocker protection on C: without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.`;
+    shrink:{label:c.label.match(/([A-Z]:)\)?$/)?.[1] ?? `Partition ${c.partitionNumber}`,partitionGuid:c.partitionGuid,offsetBytes:c.offsetBytes,beforeSizeBytes:c.sizeBytes,afterSizeBytes:start-c.offsetBytes},
+    temporary:{offsetBytes:start,sizeBytes:temporary},omarchy:{offsetBytes:start+temporary,sizeBytes:64*GiB},
+    largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:minimum,bitLocker,warning:'experimental'};
+  const encryption=bitLocker.length ? `\n\nSuspend BitLocker protection on ${bitLocker.join(', ')} without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.` : '';
+  const summary=`EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk ${disk.diskNumber}?\n\nShrink ${c.label} from ${size(c.sizeBytes)} to ${size(start-c.offsetBytes)} GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.${encryption}\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.`;
   return {summary,review};
 }
 const captured=query.get('layout');

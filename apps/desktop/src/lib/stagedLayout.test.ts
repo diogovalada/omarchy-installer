@@ -130,7 +130,7 @@ describe('staged space editor', () => {
   });
 
   it('describes the space left in a free region', () => {
-    expect(freeTargetLine(112*GiB,minimumBytes)).toBe('Omarchy can use the remaining 112 GiB.');
+    expect(freeTargetLine(112*GiB,minimumBytes)).toBe('Omarchy can use 112 GiB.');
     expect(freeTargetLine(31.99*GiB,minimumBytes)).toBe('Only 31.9 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room.');
   });
 
@@ -146,7 +146,7 @@ describe('staged space editor', () => {
     const free:StagedRegion={kind:'free',offsetBytes:500*GiB,sizeBytes:119.96*GiB,label:'Unallocated space'};
     const temporary=7.46*GiB;
     expect(editorSegments(free,{temporaryBytes:temporary,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.5 GiB · temporary','Omarchy 112.5 GiB']);
-    expect(freeTargetLine(free.sizeBytes-temporary,minimumBytes)).toBe('Omarchy can use the remaining 112.5 GiB.');
+    expect(freeTargetLine(free.sizeBytes-temporary,minimumBytes)).toBe('Omarchy can use 112.5 GiB.');
     expect(editorSegments({...free,sizeBytes:120*GiB},{temporaryBytes:7.54*GiB,mode:'keep'}).map(s=>s.label)).toEqual(['installer 7.6 GiB · temporary','Omarchy 112.4 GiB']);
   });
 });
@@ -249,7 +249,7 @@ describe('staged review', () => {
 
   it('leaves out the alignment sliver after an unaligned partition end', () => {
     const unaligned={...windows,sizeBytes:953*GiB+12345};
-    const replace={...keepReview,omarchy:null,shrink:{...keepReview.shrink!,beforeSizeBytes:unaligned.sizeBytes,afterSizeBytes:945.5*GiB},temporary:{offsetBytes:300*MiB+945.5*GiB,sizeBytes:temporaryBytes}};
+    const replace={...keepReview,omarchy:null,largestFreeAfterBytes:0,shrink:{...keepReview.shrink!,beforeSizeBytes:unaligned.sizeBytes,afterSizeBytes:945.5*GiB},temporary:{offsetBytes:300*MiB+945.5*GiB,sizeBytes:temporaryBytes}};
     const after=afterLayout(diskOf([efi,unaligned,{...recovery,offsetBytes:recovery.offsetBytes+MiB}]),replace);
     expect(after?.map(r=>r.kind)).toEqual(['partition','partition','temporary','partition']);
   });
@@ -269,13 +269,27 @@ describe('staged review', () => {
     expect(afterLayout(diskOf([efi,windows,recovery]),{...keepReview,targetKind:'free',shrink:null})).toBeNull();
   });
 
+  it('draws nothing when free space changed around the target', () => {
+    // The installer still starts in the inspected 120 GiB gap, but a 30 GiB
+    // partition now ends it, so the plan leaves 82.5 GiB instead of 112.5.
+    const free:StagedRegion={kind:'free',offsetBytes:300*MiB+953*GiB,sizeBytes:120*GiB,label:'Unallocated space'};
+    const review:StagedReviewPlan={...keepReview,diskSizeBytes:2000*GiB,targetKind:'free',shrink:null,omarchy:null,temporary:{offsetBytes:free.offsetBytes,sizeBytes:temporaryBytes},largestFreeAfterBytes:82.5*GiB};
+    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),review)).toBeNull();
+    expect(afterLayout(diskOf([efi,windows,free],2000*GiB),{...review,largestFreeAfterBytes:112.5*GiB})).not.toBeNull();
+  });
+
   it('builds bullets for keeping Windows', () => {
     expect(reviewBullets(keepReview,true,true)).toEqual([
       'C: shrinks from 953 to 881.5 GiB. Your files stay.',
-      'Omarchy gets 64 GiB. The 7.5 GiB installer is removed later.',
+      'Omarchy can use 64 GiB. The 7.5 GiB installer is removed later.',
       'BitLocker on C: pauses until you resume it. Files stay encrypted.',
       'Next: restart into firmware settings to turn off Secure Boot.'
     ]);
+  });
+
+  it('counts free space that joins or exceeds the chosen size', () => {
+    // 120 GiB of free space after C: joins Omarchy's 64 GiB.
+    expect(reviewBullets({...keepReview,largestFreeAfterBytes:184*GiB},false,true)[1]).toBe('Omarchy can use 184 GiB. The 7.5 GiB installer is removed later.');
   });
 
   it('builds bullets for replacing a partition and for free space', () => {
