@@ -49,7 +49,10 @@ warn that booting and same-disk installation may fail in the official ISO.
    The target must be a basic GPT disk with 512-byte logical sectors on native
    x64 UEFI. Disks that cannot be used report a specific reason. Inspection marks
    the partition that holds the running Windows (`IsBoot`, reported as
-   `isWindows`; not the EFI partition) so the app can name it. A partition too
+   `isWindows`; not the EFI partition) so the app can name it, and records each
+   disk's GPT layout fingerprint (`layoutSha256`, the same hash the plan
+   rechecks before writing) so the app can tell whether a reviewed plan still
+   matches what it showed. A partition too
    small to hold the installer plus the free-space reserve, even when empty, is
    reported as too small rather than asking to free space. Shrink blockers name
    the limit that applies: the reserve, or files Windows can't move.
