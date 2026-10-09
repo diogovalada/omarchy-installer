@@ -103,6 +103,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
             }
             Emit 'progress' 'inspecting' @{message=('Reading partitions on Disk '+$disk.Number+'...')}
             $diskChoices=@(); $regions=@(); $unallocated=[long]0; $largest=[long]0
+            $layoutBefore=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
             $parts=@(Get-InspectedPartitions $disk | Sort-Object Offset); $cursor=[long]1MB
             foreach ($p in @($parts)+@([pscustomobject]@{Offset=(Align-Down ([long]$disk.Size-1MB));Size=0;GptType=''})) {
                 $gap=[Math]::Max([long]0,(Align-Down ([long]$p.Offset))-$cursor)
@@ -160,8 +161,11 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 $regions+=$region
             }
             # The fingerprint Get-StagingPlan records, so the app can tell
-            # whether a reviewed plan still matches the layout it showed.
-            $layout=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
+            # whether a reviewed plan still matches the layout it showed. It
+            # vouches for these regions only if the layout didn't change while
+            # they were read; otherwise it stays empty and Review draws no bars.
+            $layoutAfter=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
+            $layout=if ($layoutBefore -and $layoutBefore -ceq $layoutAfter) { $layoutBefore } else { '' }
             $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption;layoutSha256=$layout}
             foreach ($choice in $diskChoices) {
                 $choice.diskSizeBytes=[long]$disk.Size; $choice.encryption=$encryption

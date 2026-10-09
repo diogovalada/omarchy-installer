@@ -483,7 +483,10 @@ already stores in the plan and rechecks before writing:
 layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number)
 ```
 
-An empty value (the hash couldn't be read) means Review draws no bars. Add
+Read it before and after collecting the disk's regions and record it only if
+both reads match, so it vouches for exactly the regions shown. An empty value
+(unreadable, or the layout changed during the check) means Review draws no
+bars. Add
 `layoutSha256?:string` to `StagedDisk`.
 
 ### 2. Structured review payload (Rust)

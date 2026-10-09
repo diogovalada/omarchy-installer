@@ -37,7 +37,7 @@ function Assert($Value,[string]$Message) { if (-not $Value) { throw $Message } }
 . (Join-Path $root 'providers/staged-iso/Staging.ps1')
 # Windows disk primitives, stubbed: inspection and planning read the layout fingerprint.
 if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
-    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return "layout"; } } }'
+    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static System.Collections.Generic.Queue<string> Layouts = new System.Collections.Generic.Queue<string>(); public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return Layouts.Count > 0 ? Layouts.Dequeue() : "layout"; } } }'
 }
 function Reject($Work,[string]$Message) { $failed=$false; try { & $Work | Out-Null } catch { $failed=$true }; Assert $failed $Message }
 Assert-Fields (ConvertFrom-Json '{}') @() @()
@@ -184,6 +184,8 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     Assert ($region.freeBytes -eq 100GB -and $region.resizeState -eq 'unchecked') 'Unused filesystem space must remain distinct from unallocated space.'
     Assert ($found.disks[0].unallocatedBytes -eq 0) 'Filesystem free bytes became unallocated disk space.'
     Assert ($found.disks[0].layoutSha256 -eq 'layout') 'Inspection did not record the layout fingerprint the plan checks.'
+    [Omarchy.DirectX86.NativeDisk]::Layouts.Enqueue('before'); [Omarchy.DirectX86.NativeDisk]::Layouts.Enqueue('after')
+    Assert ((Get-StagingChoices $release).disks[0].layoutSha256 -eq '') 'A layout that changed during inspection vouched for the regions read before it.'
     Assert ($region.isWindows -eq $false) 'A data partition was marked as the Windows partition.'
     $part.IsBoot=$true
     Assert ((Get-StagingChoices $release).disks[0].regions[0].isWindows -eq $true) 'The Windows boot partition was not marked.'
