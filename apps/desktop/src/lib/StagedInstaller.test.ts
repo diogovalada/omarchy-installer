@@ -170,7 +170,7 @@ it('allows encrypted space selection and defers suspension to confirmed staging'
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
   expect(calls.prepareBitLocker).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button',{name:'Disk 1'}));
-  expect(screen.getByText('Omarchy can use the remaining 80 GiB.')).toBeInTheDocument();
+  expect(screen.getByText('Omarchy can use 80 GiB.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
 });
 it('preserves the chosen disk across status polling and submits the exact target',async()=>{
@@ -207,7 +207,7 @@ it('invalidates destinations when refreshing fails',async()=>{
 // EFI, C: and free space after it, as on a disk with room left at the end.
 const efi={kind:'partition',partitionNumber:1,partitionGuid:'efi-guid',offsetBytes:MiB,sizeBytes:100*MiB,label:'EFI system',fileSystem:'FAT32',resizeState:'unavailable',resizeReason:'System or unsupported partition; kept unchanged.',isWindows:false};
 const roomy={...fullDisk,unallocatedBytes:100*GiB,largestFreeBytes:100*GiB,regions:[efi,{...checkedC,offsetBytes:101*MiB,sizeBytes:400*GiB},{kind:'free',offsetBytes:101*MiB+400*GiB,sizeBytes:100*GiB-101*MiB,label:'Unallocated space'}]};
-const freeAtEnd={diskNumber:0,diskUniqueId:'windows-disk',label:'Unallocated space',largestFreeAfterStagingBytes:92*GiB,target:{target_kind:'free',start_offset_bytes:101*MiB+400*GiB}};
+const freeAtEnd={diskNumber:0,diskUniqueId:'windows-disk',label:'Unallocated space',largestFreeAfterStagingBytes:100*GiB-101*MiB-8*GiB,target:{target_kind:'free',start_offset_bytes:101*MiB+400*GiB}};
 it('chooses free space first and selects partitions with the keyboard',async()=>{
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[freeAtEnd,encrypted],blocked:[],disks:[roomy],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
   render(StagedInstaller,{sourceReady:true});
@@ -217,7 +217,7 @@ it('chooses free space first and selects partitions with the keyboard',async()=>
   expect(freeSegment).toBeChecked();
   expect(freeSegment).toHaveAttribute('tabindex','0');
   expect(map).toContainElement(freeSegment);
-  expect(screen.getByText('Omarchy can use the remaining 91.9 GiB.')).toBeInTheDocument();
+  expect(screen.getByText('Omarchy can use 91.9 GiB.')).toBeInTheDocument();
   await fireEvent.keyDown(freeSegment,{key:'ArrowLeft'});
   const windows=screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'});
   expect(windows).toBeChecked();

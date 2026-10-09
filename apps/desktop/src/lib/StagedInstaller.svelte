@@ -66,7 +66,6 @@
   $: ({minGiB:minimumGiB,maxGiB:keepMaximumGiB,canKeep}=limits(shrinkRegion,requiredBytes,installMinimum));
   $: if(canKeep && (omarchyGiB>keepMaximumGiB || omarchyGiB<minimumGiB)) omarchyGiB=Math.min(Math.max(omarchyGiB,minimumGiB),keepMaximumGiB);
   $: linuxBytes=canKeep && keepWindows ? omarchyGiB*GiB : 0;
-  $: freeLeft=choice?.target.target_kind==='free' ? (sourceRegion ? sourceRegion.sizeBytes-requiredBytes : choice.largestFreeAfterStagingBytes) : 0;
   $: checkingAny=busy && (!!analyzing || !!layout?.regions.some(r=>r.resizeState==='unchecked'));
   $: tableStatus=(region:StagedRegion) => statusFor([region],spaces,busy,analyzing,requiredBytes,installMinimum).text;
   // The map and the selected-partition line show disk-check progress, so the
@@ -223,7 +222,7 @@
               {:else}
                 <p>{shrinkRegion ? `${targetName} can't give enough space to keep it. You can replace it in the installer.` : `In the installer, delete ${targetName} to make room for Omarchy.`}</p>
               {/if}
-            {:else}<p>{freeTargetLine(freeLeft,installMinimum)}</p>{/if}
+            {:else}<p>{freeTargetLine(choice.largestFreeAfterStagingBytes,installMinimum)}</p>{/if}
             {#if inspection?.secureBoot}<p role="note">Secure Boot is on. Leave it on; you'll turn it off after preparing.</p>{/if}
           </div>
         {:else if layout && !checkingAny}<p class="no-space">No space can be used yet.</p>{/if}
