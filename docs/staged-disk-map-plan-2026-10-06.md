@@ -399,7 +399,7 @@ sit in a secondary text row.
   **Review changes** would invite a second temporary installer. **Prepare
   again** removes it and checks the disks again. When it can't be removed
   (for example, its disk is gone), **Check disks again** below the card brings
-  the choose screen back under it until another installer is prepared.
+  the choose screen back above it until another installer is prepared.
 
 ## Copy
 
