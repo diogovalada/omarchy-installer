@@ -33,7 +33,7 @@
   <div class="setup-content">
     <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
     <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
-    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
+    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       <section class="next-actions" aria-label="Installation options">
         <button bind:this={usbButton} aria-describedby="usb-option-description" disabled={setupActive($setup.snapshot?.status) || $setup.pending} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>
         <button bind:this={directButton} aria-describedby="direct-option-description" disabled={!testingDirect || setupActive($setup.snapshot?.status) || $setup.pending} onclick={(event) => { if (!event.currentTarget.disabled) option='direct'; }}><HardDriveDownload size={21}/><span>Install without USB</span></button>

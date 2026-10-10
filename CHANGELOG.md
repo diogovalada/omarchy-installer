@@ -25,6 +25,13 @@ downloads. Published versions and their artifacts are immutable.
   sit in a text row. The installer-disk instruction shows before restarting,
   and boot-menu tips move to "Starting Windows later". While a temporary
   installer exists, its steps replace the choose screen.
+- Install without USB (testing builds): design review fixes. The space editor
+  says what stays with Windows ("Windows (C:) keeps 881.5 GiB") and uses
+  plainer labels; clicking a label no longer changes the size. With no usable
+  space, "What can help?" suggests next steps and the USB route. Replace-only
+  shows why Windows can't be kept. Review names the installer and Omarchy in
+  its bars. The after-preparing card has clearer steps and help for turning
+  off Secure Boot.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

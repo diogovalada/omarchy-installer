@@ -34,7 +34,12 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // it is display-only.
 export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
-const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
+// `stagedAction` is the staged-installer action whose operation the snapshot
+// reflects: set when a command is accepted, null after any other accepted
+// command, unchanged when a command is rejected before starting. It outlives
+// any one screen, so a failed operation can be traced to it from the home
+// screen too.
+const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null }>({ snapshot:null, pending:false, error:null, stagedAction:null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
@@ -47,7 +52,7 @@ async function refresh() {
 async function command(name: string, args: Record<string, unknown> = {}) {
   if (!isTauri() || get(state).pending) return;
   epoch += 1; commandError=null; state.update(s => ({ ...s, pending:true, error:null }));
-  try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot })); }
+  try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot, stagedAction:name==='staged_iso' ? String(args.action) : null })); }
   catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError })); }
   finally { state.update(s => ({ ...s, pending:false })); }
 }

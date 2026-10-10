@@ -21,7 +21,7 @@
         <tr><th scope="row">{region.kind==='free' ? 'Free space' : region.label}</th><td>{region.fileSystem ?? ''}</td><td>{formatSize(region.sizeBytes)}</td><td>{region.freeBytes!=null ? formatSize(region.freeBytes,'down') : ''}</td><td>{statusText(region)}</td></tr>
       {/each}
     </tbody>
-    <tfoot><tr><td colspan="5">Unallocated in total: {formatSize(unallocatedBytes)}</td></tr></tfoot>
+    <tfoot><tr><td colspan="5">Free space outside partitions: {formatSize(unallocatedBytes)}</td></tr></tfoot>
   </table>
 </div>
 

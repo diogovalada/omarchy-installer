@@ -13,7 +13,11 @@ const KEPT_REASON='System or unsupported partition; kept unchanged.';
 
 export type Tone='normal'|'dimmed'|'hatched'|'checking'|'outlined'|'outlined-dimmed';
 export type RegionAction='refresh'|'recheck'|null;
-export interface RegionStatus { tone:Tone;text:string;action:RegionAction }
+// `detail` is the provider's own reason, for the All partitions table.
+// `cause` says what blocks a partition, so help can fit it: files Windows
+// can't move, too little free space, or no usable measurement.
+export type BlockCause='files'|'space'|'measure';
+export interface RegionStatus { tone:Tone;text:string;action:RegionAction;detail?:string;cause?:BlockCause }
 export interface StatusContext { temporaryBytes:number;minimumBytes:number;usable:boolean;checking?:boolean }
 export interface OverviewSegment { key:string;regions:StagedRegion[];offsetBytes:number;sizeBytes:number;widthPercent:number;label:string }
 export type EditorMode='keep'|'replace';
@@ -123,7 +127,7 @@ export function limits(region:StagedRegion|undefined,temporaryBytes:number,minim
 export function editorSegments(region:StagedRegion,{temporaryBytes,omarchyBytes=0,mode,barPx=760,minPx=24}:{temporaryBytes:number;omarchyBytes?:number;mode:EditorMode;barPx?:number;minPx?:number}):EditorSegment[] {
   const minimum=Math.min(100,minPx/barPx*100);
   const segment=(kind:EditorSegment['kind'],offsetBytes:number|null,sizeBytes:number,label:string):EditorSegment => ({kind,offsetBytes,sizeBytes:Math.max(0,sizeBytes),widthPercent:0,label});
-  const installer=`installer ${formatSize(temporaryBytes,'up')} · temporary`;
+  const installer=`Temporary installer ${formatSize(temporaryBytes,'up')}`;
   if(region.kind==='free') {
     const segments=[segment('temporary',region.offsetBytes,temporaryBytes,installer)];
     const rest=region.sizeBytes-temporaryBytes;
@@ -135,9 +139,10 @@ export function editorSegments(region:StagedRegion,{temporaryBytes,omarchyBytes=
   const free=region.freeBytes ?? 0;
   const used=region.sizeBytes-free;
   const releasable=Math.min(free,region.maximumReleaseBytes ?? free);
-  const segments=[segment('used',region.offsetBytes,used,'')];
-  if(free-releasable>0) segments.push(segment('cant-release',null,free-releasable,"can't release"));
-  if(releasable-temporaryBytes-linux>0) segments.push(segment('free',null,releasable-temporaryBytes-linux,'free'));
+  // "unused", not "free": on the map, free space means space outside partitions.
+  const segments=[segment('used',region.offsetBytes,used,'in use')];
+  if(free-releasable>0) segments.push(segment('cant-release',null,free-releasable,'reserved'));
+  if(releasable-temporaryBytes-linux>0) segments.push(segment('free',null,releasable-temporaryBytes-linux,'unused'));
   segments.push(segment('temporary',start,temporaryBytes,installer));
   if(linux>0) segments.push(segment('omarchy',start+temporaryBytes,linux,`Omarchy ${formatSize(linux)}`));
   const [stub,...rest]=segments;
@@ -167,6 +172,20 @@ export function cantReleaseLine(region:StagedRegion) {
   const free=region.freeBytes ?? 0, zone=free-Math.min(free,region.maximumReleaseBytes ?? 0);
   const keeps=`${formatSize(reserve)} stays free for Windows`;
   return zone-reserve<GiB ? `${keeps}.` : `${keeps}, and some files near the end of ${region.label} can't be moved.`;
+}
+
+// Why a partition that fits only the installer can't keep Windows, with the
+// numbers, and what helps when the free-space reserve is the limit: freed
+// space then raises the release one for one. Files Windows can't move don't
+// yield to freeing space, and no more can be freed than is in use, so no
+// advice then.
+export function cantKeepLine(region:StagedRegion,temporaryBytes:number,minimumBytes:number,name:string) {
+  const release=region.maximumReleaseBytes ?? 0, reserve=region.reserveBytes ?? 0;
+  const line=`${name} can give only ${formatSize(Math.max(0,release-temporaryBytes),'down')}; Omarchy needs ${formatSize(minimumBytes,'up')}.`;
+  if(region.freeBytes==null || reserve<=0) return line;
+  const room=region.freeBytes-reserve, missing=temporaryBytes+minimumBytes-release;
+  if(room-release<ALIGNMENT_SLACK_BYTES && missing<=region.sizeBytes-region.freeBytes) return `${line} Free up ${formatSize(missing,'up')} more in Windows, then refresh.`;
+  return line;
 }
 
 // Space Omarchy can use when the target is free space: the largest free
@@ -255,7 +274,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       // Even an empty partition can't hold the installer plus the reserve.
       if(reserve>0 && region.sizeBytes<context.temporaryBytes+reserve) return status('hatched',`${name} is too small for the installer.`);
       const missing=reserve>0 && region.freeBytes!=null ? context.temporaryBytes+reserve-region.freeBytes : 0;
-      return status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh');
+      return {...status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
     }
     case 'unchecked':
       return context.checking ? status('checking',`Checking how much ${name} can shrink. This can take a few minutes.`) : status('dimmed',`${name} wasn't checked. Refresh to try again.`,'refresh');
@@ -263,7 +282,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       const release=region.maximumReleaseBytes ?? 0;
       if(context.usable) {
         const {maxGiB,canKeep}=limits(region,context.temporaryBytes,context.minimumBytes);
-        return status('normal',`${[name,region.fileSystem].filter(Boolean).join(' · ')} · ${canKeep ? `can give Omarchy up to ${maxGiB} GiB` : 'room for the installer only'}`);
+        return status('normal',`${name} ${canKeep ? `can give Omarchy up to ${maxGiB} GiB` : 'has room for the installer only'}`);
       }
       if(release<context.temporaryBytes) {
         // Freeing space helps when the reserve is the limit, or when only
@@ -273,9 +292,9 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
         if(room!=null && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
           const missing=context.temporaryBytes-(room<context.temporaryBytes ? room : release);
-          return status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck');
+          return {...status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
         }
-        if(room!=null) return status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck');
+        if(room!=null) return {...status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck'),cause:'files'};
         if(region.resizeReason) return status('hatched',region.resizeReason,'recheck');
         const needed=formatSize(context.temporaryBytes-release,'up');
         return status('hatched',release<MiB ? `Windows can't release space from ${name}. ${needed} is needed.` : `Windows can release only ${formatSize(release,'down')} from ${name}. ${needed} more is needed.`,'recheck');
@@ -283,7 +302,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       return status('hatched',region.resizeReason || `Windows can't shrink ${name}.`,'recheck');
     }
     case 'failed':
-      return status('hatched',region.resizeReason || `Windows couldn't measure ${name}.`,'recheck');
+      return {...status('hatched',`Windows couldn't measure ${name}.`,'recheck'),cause:'measure',...(region.resizeReason ? {detail:region.resizeReason} : {})};
     default:
       return !region.resizeReason || region.resizeReason===KEPT_REASON ? status('dimmed',`${name} · ${size} · kept as is`) : status('hatched',`${name} · ${size} · ${region.resizeReason}`);
   }
@@ -307,7 +326,7 @@ export function reviewBullets(review:StagedReviewPlan,secureBoot:boolean|null|un
     bullets.push(freeTargetLine(review.largestFreeAfterBytes,review.minimumOmarchyBytes));
   }
   if(review.bitLocker.length) bullets.push(`BitLocker on ${listNames(review.bitLocker)} pauses until you resume it. Files stay encrypted.`);
-  bullets.push(secureBoot ? 'Next: restart into firmware settings to turn off Secure Boot.' : 'Next: choose the installer for your next restart.');
+  bullets.push(secureBoot ? 'Next: turn off Secure Boot in firmware settings.' : 'Next: set your next restart to open the installer.');
   return bullets;
 }
 
@@ -315,7 +334,7 @@ export function reviewBullets(review:StagedReviewPlan,secureBoot:boolean|null|un
 const listNames=(names:string[]) => names.length<3 ? names.join(' and ') : `${names.slice(0,-1).join(', ')} and ${names.at(-1)}`;
 
 export function reviewWarning(review:StagedReviewPlan) {
-  if(review.warning==='experimental') return 'Test build: real disk changes. This ISO may not start, or may refuse this disk.';
+  if(review.warning==='experimental') return 'Test build: real disk changes. This image may not start or install.';
   if(review.warning==='unsigned') return 'Unsigned test image: real disk changes. It may not start or install.';
   return null;
 }
