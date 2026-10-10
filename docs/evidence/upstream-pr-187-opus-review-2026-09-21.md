@@ -4,13 +4,13 @@ Status: review with subsequent user decisions recorded below. No installer code 
 
 ## User decision: preserve upstream editor access
 
-Preserve the pre-PR behaviour for when the partition editor is offered: it remains available through the insufficient-space flow. Do not add an always-available Manage partitions option or restore the removed Tools shortcut in this PR. Keep the guarded editor and installer-partition protections for the new same-disk path.
+Preserve the pre-PR behavior for when the partition editor is offered: it remains available through the insufficient-space flow. Do not add an always-available Manage partitions option or restore the removed Tools shortcut in this PR. Keep the guarded editor and installer-partition protections for the new same-disk path.
 
 We are not convinced this is the best user experience: access to partition management seems useful even when enough free space already exists, for example when a user still wants to remove Windows. The user's preference is to keep the default flow simple without removing access: the installer need not automatically offer the editor when space is sufficient, but users should still be able to open it deliberately through an optional menu or advanced action. Record that concern for a separate upstream discussion or proposal, rather than expanding this PR. This decision supersedes the earlier recommendation to fix H1 by adding a new menu entry in this PR.
 
 ## User decision: keep this PR only
 
-Keep this work in existing upstream PR #187. Do not split source-resolution, BitLocker suspension, or same-disk support into additional PRs. Organise changes into focused commits within this PR. The reviewer's earlier splitting proposal is superseded by this explicit user decision.
+Keep this work in existing upstream PR #187. Do not split source-resolution, BitLocker suspension, or same-disk support into additional PRs. Organize changes into focused commits within this PR. The reviewer's earlier splitting proposal is superseded by this explicit user decision.
 
 ## User decision: defer bulk deletion
 
@@ -73,7 +73,7 @@ Finding identifiers below refer to the verbatim report appended after this asses
 
 Further history inspection after the user's question found that the editor was once directly available: commit `7e79355c7139f8f9a61e51c9ebbe801cb5ea1d5e` added an Open partition tool installation-mode choice. The later [orchestration change](https://github.com/omacom/omarchy-iso/commit/c50d0bc29948d86d73c7f9f9d393313c3a58a17b) moved general access into a Ctrl-T Tools menu while retaining the insufficient-space entry point. DHH subsequently [removed that Tools menu and shortcut](https://github.com/omacom/omarchy-iso/commit/c77a7b555bce92e49368b5e1f84af540edfd2560), with the message "Drop the tool offering during this initial install."
 
-The reviewed base has no remaining general menu/shortcut to the editor; its only wizard entry point is the insufficient-space flow. The cfdisk executable remains callable from a shell. The removal commit does not explain the deeper UX rationale; simplification is an inference. This history qualifies H1 as an inherited restriction. The user subsequently chose to preserve that behaviour in this PR while recording doubt about its usability, as stated in the decision above.
+The reviewed base has no remaining general menu/shortcut to the editor; its only wizard entry point is the insufficient-space flow. The cfdisk executable remains callable from a shell. The removal commit does not explain the deeper UX rationale; simplification is an inference. This history qualifies H1 as an inherited restriction. The user subsequently chose to preserve that behavior in this PR while recording doubt about its usability, as stated in the decision above.
 
 ### BitLocker qualification
 
@@ -105,7 +105,7 @@ Required disposable-image regressions cover a real write followed by an injected
 
 ## External review, verbatim
 
-The report below is the reviewer's original output, preserved as evidence. It is **not blanket endorsement**: use the user decision and assessment above, plus the follow-up clarification below, when deciding changes. In particular, its recommendation to add a Manage partitions menu entry has been superseded by the user's decision to preserve upstream behaviour.
+The report below is the reviewer's original output, preserved as evidence. It is **not blanket endorsement**: use the user decision and assessment above, plus the follow-up clarification below, when deciding changes. In particular, its recommendation to add a Manage partitions menu entry has been superseded by the user's decision to preserve upstream behavior.
 
 I read the brief, the full diff, the current PR-head sources in `omarchy-iso/same-disk-free-space`, the two base files, the surrounding orchestrator, the community app's `Staging.ps1`, and upstream PR #105. Everything below is my own reading of the code; where I'm relying on the primary agent's reported test runs rather than my own observation, I say so.
 
@@ -115,7 +115,7 @@ I read the brief, the full diff, the current PR-head sources in `omarchy-iso/sam
 
 **Both — but not in the places the brief assumes.**
 
-You are **over-doing it on the shared code path**: the PR adds several new *fatal* aborts to the ordinary, pre-existing install flow (unidentifiable live medium, btrfs-backed loopback, an unreadable partition signature, a non-GPT BitLocker disk). Upstream's behaviour in those cases was "degrade quietly and let the user pick a disk." Turning them into "the installer exits" is the change most likely to get this PR rejected, and none of it is required for same-disk installs.
+You are **over-doing it on the shared code path**: the PR adds several new *fatal* aborts to the ordinary, pre-existing install flow (unidentifiable live medium, btrfs-backed loopback, an unreadable partition signature, a non-GPT BitLocker disk). Upstream's behavior in those cases was "degrade quietly and let the user pick a disk." Turning them into "the installer exits" is the change most likely to get this PR rejected, and none of it is required for same-disk installs.
 
 You are **under-doing it on the feature itself**: the restricted deletion menu — the thing that answers "I want to remove Windows" — is **reachable only when free space is already insufficient**. If the user shrank C: generously and there's 60 GiB free after staging, there is no menu entry anywhere that opens it, and full-disk install is (correctly) removed on that disk. The user's correction ("I never asked you to disable the editor, simply to protect the installation partition") is therefore still only half-applied.
 
@@ -171,16 +171,16 @@ Splitting does not undermine the user's needs — nothing ships to end users unt
 `configurator:481-483`: `od` failing or returning fewer than 8 bytes → `return 1` → abort. Base's `dd` simply didn't match. Fail-closed is the right *direction* (unreadable ≠ "no BitLocker"), but the consequence shouldn't be "the installer exits." Name the partition and return to the disk/mode picker.
 
 **M4. `-RebootCount 0` is the wrong default in the README.**
-`README.md` tells users to run `Suspend-BitLocker -MountPoint C: -RebootCount 0`, which suspends **until explicitly resumed** — leaving the volume unprotected indefinitely if the user forgets, which the PR's own text then warns about. The Windows default (one reboot) is better here: the reboot counter is decremented by the Windows boot manager, so booting the ISO and installing Linux doesn't consume it; the clear key is still present for `cryptsetup` during install; and the first time the user boots Windows through the new menu, Windows resumes protection and re-seals TPM protectors to the *new* PCR values automatically. That is exactly the self-healing behaviour you want after changing the boot configuration. Cancelling also self-heals. I'd recommend the default and mention `-RebootCount 0` only for users who expect several Windows boots before finishing.
+`README.md` tells users to run `Suspend-BitLocker -MountPoint C: -RebootCount 0`, which suspends **until explicitly resumed** — leaving the volume unprotected indefinitely if the user forgets, which the PR's own text then warns about. The Windows default (one reboot) is better here: the reboot counter is decremented by the Windows boot manager, so booting the ISO and installing Linux doesn't consume it; the clear key is still present for `cryptsetup` during install; and the first time the user boots Windows through the new menu, Windows resumes protection and re-seals TPM protectors to the *new* PCR values automatically. That is exactly the self-healing behavior you want after changing the boot configuration. Cancelling also self-heals. I'd recommend the default and mention `-RebootCount 0` only for users who expect several Windows boots before finishing.
 
-**M5. The `plans/consumer-secure-boot.md` edit re-characterises the maintainer's own policy.**
+**M5. The `plans/consumer-secure-boot.md` edit re-characterizes the maintainer's own policy.**
 I read #105. Its description does ground the decrypt guidance in signature detection ("Since the installer detects BitLocker via the `-FVE-FS-` signature, a suspended volume remains detectable and will abort"), so the PR's claim isn't fabricated — but the review framing there treats aborting on suspended BitLocker as intentional policy, and an outside contributor rewriting a plan document to say the maintainer's stated reason was really just a detection artifact is the sort of thing that sours a review.
 
 *Remedy:* drop the `plans/` change from the PR entirely, or reduce it to a neutral statement of the new capability: "Suspended volumes are now distinguished from protected ones by verifying a usable clear-key protector, so the requirement to fully decrypt no longer applies to free-space installs (#105)." No motive attribution.
 
 ## Low
 
-**L1. Finding A — CONFIRMED as code behaviour, but low materiality.**
+**L1. Finding A — CONFIRMED as code behavior, but low materiality.**
 `delete_unprotected_partition:81-82` compares only the parted row (`num:start:end:size:fs:name:flags;`), which carries no GPT UUID, so a UUID-only replacement with identical geometry, name and flags passes. That is a real asymmetry with the rollback path's `created_partition_identity`. But the `expected` row is captured seconds earlier in the same menu, nothing else is running in the live environment, and any mistaken deletion would have to land on byte-identical geometry — so the practical risk is ~nil. I'd rate this a consistency nit, not a safety hole, and I'd fix it only because it's cheap: capture `sfdisk --part-uuid` alongside the row at listing time and re-check both. **Do not let this gate the PR** — M1 is the genuinely load-bearing gap in the same function.
 
 **L2. Finding C — real in the helper, unproven input.**
@@ -195,7 +195,7 @@ I read #105. Its description does ground the decrypt guidance in signature detec
 
 **L6.** `bitlocker_is_suspended:462` anchors the protection line with `clear key$`. Trailing whitespace from a future cryptsetup would fail closed and tell an already-suspended user to suspend. Use `clear key[[:space:]]*$`.
 
-**L7.** Behaviour change worth calling out in the PR description: rollback went from best-effort (`parted rm ... || true`) to refuse-and-abort on any identity mismatch, **for all free-space installs**, not just same-disk. I think that's an improvement, but it's a silent change for existing users.
+**L7.** Behavior change worth calling out in the PR description: rollback went from best-effort (`parted rm ... || true`) to refuse-and-abort on any identity mismatch, **for all free-space installs**, not just same-disk. I think that's an improvement, but it's a silent change for existing users.
 
 **L8.** The autoinstall/`cidata` path skips the configurator entirely, so none of these guards apply there. Pre-existing and out of scope, but the PR body claims it "guards alternate full-disk entry points" — worth one honest sentence.
 
@@ -203,7 +203,7 @@ I read #105. Its description does ground the decrypt guidance in signature detec
 
 I read the code and traced the flows myself. I did **not** run any test: this session is on Windows, the storage tests need root and loop devices, and the BitLocker test needs cryptsetup plus the upstream fixtures. The reported 93-test/24-test runs are the primary agent's, not mine.
 
-Two external facts I did check: cryptsetup gained **clear-key BitLocker open support in 2.8.2**, and Arch currently ships **2.8.8** — so the shipped ISO satisfies it, and anything older fails closed (the feature silently becomes useless rather than unsafe). Worth one line in the PR. The `--key-file /dev/null` trick relies on cryptsetup preferring the clear-key VMK over the supplied key; `test/bitlocker-suspension` against the upstream `bitlk-aes-xts-128-clearkey-only.img` fixture is the only thing pinning that behaviour, which is a good reason to keep that test prominent.
+Two external facts I did check: cryptsetup gained **clear-key BitLocker open support in 2.8.2**, and Arch currently ships **2.8.8** — so the shipped ISO satisfies it, and anything older fails closed (the feature silently becomes useless rather than unsafe). Worth one line in the PR. The `--key-file /dev/null` trick relies on cryptsetup preferring the clear-key VMK over the supplied key; `test/bitlocker-suspension` against the upstream `bitlk-aes-xts-128-clearkey-only.img` fixture is the only thing pinning that behavior, which is a good reason to keep that test prominent.
 
 **What the clear-key probe proves:** a clear-key VMK exists and works right now, cryptsetup can derive the FVEK, and the volume is not in an unsupported conversion state (the partially-encrypted fixture is rejected). **What it does not prove:** that Windows will boot afterwards, that the user will resume protection, that the suspension will still be in place at the next Windows boot (see M4), or anything about other disks.
 
@@ -233,7 +233,7 @@ Two external facts I did check: cryptsetup gained **clear-key BitLocker open sup
 | Temp ESP retained until the new system boots; 512 MiB (brief #2, #9) | **Keep** | 512 MiB is one aligned allocation nobody will notice; shrinking it to fit an 0.85 MiB GRUB buys nothing and risks firmware/FAT edge cases. Keeping the retry boot path after Windows is gone is worth far more. |
 | Filesystem-aware Linux resizing (brief #7) | **Defer** | Deletion-only is the right minimal addition; Windows already does the shrink natively. Say so plainly in the README. |
 | Same-disk deferred provisioning / OEM (brief #8) | **Defer** | Already excluded via `can_install_beside_media:437`. |
-| `plans/consumer-secure-boot.md` policy rewrite (M5) | **Drop** | Not yours to re-characterise. |
+| `plans/consumer-secure-boot.md` policy rewrite (M5) | **Drop** | Not yours to re-characterize. |
 
 ---
 
@@ -253,7 +253,7 @@ Two external facts I did check: cryptsetup gained **clear-key BitLocker open sup
 
 Net effect: roughly −25 lines of over-reach, +30 lines of feature and safety. The PR gets *smaller* and does *more*.
 
-**On splitting:** split. The BitLocker policy and same-disk support solve different problems, and only their combination is needed for your end-to-end flow — which is already disabled in published builds, so nothing user-facing waits on serialising them. Leading with the loopback fix costs you one cheap PR and changes the conversation from "here are 1,229 lines relaxing your BitLocker policy" to "I found a way your installer can offer to wipe the disk it's booting from; here's the fix — and here are two follow-ups."
+**On splitting:** split. The BitLocker policy and same-disk support solve different problems, and only their combination is needed for your end-to-end flow — which is already disabled in published builds, so nothing user-facing waits on serializing them. Leading with the loopback fix costs you one cheap PR and changes the conversation from "here are 1,229 lines relaxing your BitLocker policy" to "I found a way your installer can offer to wipe the disk it's booting from; here's the fix — and here are two follow-ups."
 
 **Acceptance forecast** (a reasoned guess, not knowledge): loopback fix, likely and quick. BitLocker policy, plausible — the technical case is strong (Microsoft's own guidance for firmware/boot changes is *suspend*, not decrypt; requiring full decryption of a 1 TB drive is a multi-hour barrier), and the cryptsetup fixture test is exactly the evidence a maintainer needs — but expect a conversation, and don't open it by reinterpreting #105. Same-disk support, genuinely uncertain: it's the largest change, its motivation is external, and it should be framed generically ("install from a partition-based live medium") rather than as plumbing for a third-party app.
 
@@ -267,7 +267,7 @@ Net effect: roughly −25 lines of over-reach, +30 lines of feature and safety. 
 
 1. **Regression sweep on the ordinary path.** Existing `bin/omarchy-iso-test` VM, three boots: plain ISO; `copytoram=y`; `img_dev`/`img_loop` from a second virtual disk. Assert the disk list and full-disk install are unchanged, and that the installer *starts* in every case. This is the direct check on H3 and is the evidence a maintainer will actually want.
 2. **The same-disk flow end to end.** Build a QEMU image mirroring what `Staging.ps1` produces — GPT with `[ESP 512 MiB + GRUB][NTFS source with extracted ISO][fake "Windows" NTFS][free space]` — boot it, delete the fake Windows partition through the restricted menu, install, reboot, boot the installed system. `bin/omarchy-iso-test-windows-disk` is already most of this fixture. **This is the single highest-value missing test.**
-3. **btrfs-hosted `img_loop`**, to pin whatever degrade behaviour you settle on.
+3. **btrfs-hosted `img_loop`**, to pin whatever degrade behavior you settle on.
 4. **BitLocker round trip in a Windows VM with a virtual TPM** (QEMU swtpm or Hyper-V): suspend → stage → install → boot Windows through the new menu → confirm protection state → boot Windows again. Also test cancel-and-return. This is the only way to validate M4 and the "Windows still boots" claim, and it needs no physical disk.
 5. **A 4Kn target**, since `verify_partition_device:134` hard-codes the 512-byte sysfs unit. The loop test covers 4096 *logical* sectors; a `qemu` disk with `physical_block_size=4096,logical_block_size=4096` closes the rest cheaply.
 
@@ -294,7 +294,7 @@ Sources: [cryptsetup 2.8.2 clear-key support](https://www.phoronix.com/news/cryp
 
 # Addendum
 
-**1. H3 — revised.** You're right and I withdraw the fallback. Clearing `install_media_disk` makes the unidentified source disk an ordinary target at `disk_form:1035-1039`, re-enabling full-disk wipe and cfdisk on it. That is base behaviour, but "base did it" isn't a defence when the PR is already rewriting that code, and my own principle (don't drop safeguards protecting the live source) contradicted my recommendation. Your rule — destructive actions only on targets proven independent of the source, or after positive proof of RAM/remote backing — is the correct one. I also accept the copytoram correction: `ram_backed_live_root` matches current archiso layout, and I demonstrated no broken present-day boot, only a coupling I'd prefer looser. That part was a robustness preference, not a finding.
+**1. H3 — revised.** You're right and I withdraw the fallback. Clearing `install_media_disk` makes the unidentified source disk an ordinary target at `disk_form:1035-1039`, re-enabling full-disk wipe and cfdisk on it. That is base behavior, but "base did it" isn't a defense when the PR is already rewriting that code, and my own principle (don't drop safeguards protecting the live source) contradicted my recommendation. Your rule — destructive actions only on targets proven independent of the source, or after positive proof of RAM/remote backing — is the correct one. I also accept the copytoram correction: `ram_backed_live_root` matches current archiso layout, and I demonstrated no broken present-day boot, only a coupling I'd prefer looser. That part was a robustness preference, not a finding.
 
 What I retain, narrowed: H3 drops from High to **Medium, scoped to btrfs-backed and stacked loopback sources**, and the remaining ask is about *how* it fails, not *whether*. Aborting at the top of `disk_form` ends the process before the user sees any actionable screen. Since an unprovable source means no local disk can be offered anyway, the outcome is nearly identical — so make it a clear explanatory screen ("the installer media is on storage this ISO can't pin down; boot from USB or use another machine") rather than a bare abort line. Optional improvement, not required: enumerate btrfs members via `btrfs filesystem show` and exclude those disks, which converts an outright refusal into a working install on genuinely unrelated disks.
 
