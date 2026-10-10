@@ -58,7 +58,7 @@
   {#if ready && !underway}
     <details>
       <summary>Starting Windows later</summary>
-      <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once to add Windows to its menu.</p>
+      <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once and choose Windows Boot Manager to add it to the menu.</p>
       <p>If you replace Windows, the temporary installer stays on the disk.</p>
     </details>
   {/if}

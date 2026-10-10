@@ -455,9 +455,9 @@ and found these, fixed in PR 6 (`staged-vm-fixes`):
   The store had it, but the screen showed only the provider's result message.
 - **Card while working:** only the record a running command changes is under
   way: the one its Review prepares (the review payload now carries the plan's
-  `operationId`) or the one being removed (the setup store's `stagedTarget`,
-  set when a staged command is sent and kept while answering its Review or
-  stopping it). Its card reads "Preparing the installer · Disk 0" or
+  `operationId`) or the one being removed (the snapshot's new `stagedTarget`,
+  the running staged action and its record, set when `staged_iso` starts and
+  cleared by `begin()`, so it survives reloading the window). Its card reads "Preparing the installer · Disk 0" or
   "Removing the temporary installer · Disk 0" with "Keep this window open."
   and no actions. Other records, and every record during a disk check or the
   USB route, keep their own state; an interrupted removal (`cleaning`) reads
@@ -475,6 +475,9 @@ and found these, fixed in PR 6 (`staged-vm-fixes`):
   app again to set the next restart." The provider's verifying stage reads
   "Verifying the installer image before disk changes..." (it said "qualified
   official ISO" for a local test image too).
+- **`limine-scan`:** it lists firmware boot entries, including "Omarchy
+  temporary installer" while that exists, so "Starting Windows later" now says
+  to choose Windows Boot Manager.
 - **Not changed:** the helper still writes `failure.json` for a declined
   confirmation, as for every non-success outcome; it isn't shown, and changing
   helper record keeping is outside this plan. Opening the reserved

@@ -663,20 +663,21 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
 });
 it('says a removal is under way, or that it did not finish',async()=>{
-  const removing={...card('cleaning',null).snapshot,status:'running',stage:'staged-installer',message:'Loading Windows disk tools...'};
   const stagedTarget={action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'};
-  // From the click on, before the record says `cleaning`.
-  state.set({pending:true,stagedTarget,snapshot:card('boot-scheduled',null,true).snapshot});
+  const removing={...card('cleaning',null).snapshot,status:'running',stage:'staged-installer',message:'Loading Windows disk tools...',stagedTarget};
+  // Once the removal starts, before the record says `cleaning`; the store
+  // starts empty, as after reloading the window.
+  state.set({pending:false,snapshot:{...card('boot-scheduled',null,true).snapshot,status:'running',stagedTarget}});
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.queryByText('Starting Windows later')).not.toBeInTheDocument();
-  state.set({pending:false,stagedAction:'cleanup',stagedTarget,snapshot:removing});
+  state.set({pending:false,stagedAction:'cleanup',snapshot:removing});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Keep this window open.')).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Remove temporary installer'})).not.toBeInTheDocument();
-  state.set({pending:false,stagedAction:'cleanup',stagedTarget,snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  state.set({pending:false,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
   await tick();
   expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
@@ -693,13 +694,13 @@ it('keeps other recorded installers as they are while one is prepared or removed
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
   view.unmount();
   // Removing one installer.
-  state.set({pending:false,stagedTarget:{action:'cleanup',operationId:mine.operationId},snapshot:{status:'running',stagedTesting:true,stagedRecovery:{operations:[other,{...mine,status:'cleaning'}],recordErrors:[]}}});
+  state.set({pending:false,snapshot:{status:'running',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:mine.operationId},stagedRecovery:{operations:[other,{...mine,status:'cleaning'}],recordErrors:[]}}});
   const home=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
   // Another command, such as the USB route's disk check, changes neither.
-  state.set({pending:false,stagedTarget:null,snapshot:{status:'inspecting',kind:'usb',stagedTesting:true,stagedRecovery:{operations:[other],recordErrors:[]}}});
+  state.set({pending:false,snapshot:{status:'inspecting',kind:'usb',stagedTarget:null,stagedTesting:true,stagedRecovery:{operations:[other],recordErrors:[]}}});
   await tick();
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
   home.unmount();

@@ -65,6 +65,9 @@ pub struct Snapshot {
     staged_testing: bool,
     staged_recovery: Option<Value>,
     staged_review: Option<Value>,
+    // The running staged action and the recorded installer it acts on, so the
+    // app can tell it from other records, even after reloading.
+    staged_target: Option<Value>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +132,7 @@ impl Default for Setup {
                     staged_testing: crate::direct_install_policy::STAGED_ISO_TESTING,
                     staged_recovery: None,
                     staged_review: None,
+                    staged_target: None,
                 },
                 destinations: vec![],
                 usb_review: None,
@@ -304,6 +308,7 @@ impl Setup {
         inner.snapshot.cancel_available = false;
         inner.staged_review_declined = false;
         inner.snapshot.staged_review = None;
+        inner.snapshot.staged_target = None;
         inner.snapshot.stage = status.into();
         inner.snapshot.message = if status == "inspecting" {
             "Checking this computer…"
@@ -784,6 +789,14 @@ pub fn staged_iso(
         resize,
     };
     crate::direct_install_policy::check_destination(&destination)?;
+    let target = match &destination {
+        Destination::StagedIso {
+            action,
+            operation_id,
+            ..
+        } => json!({"action": action, "operationId": operation_id}),
+        _ => Value::Null,
+    };
     let source = if matches!(action, StagedAction::Stage | StagedAction::Inspect) {
         source(&downloads)?
     } else {
@@ -801,6 +814,7 @@ pub fn staged_iso(
     setup.update(&app, |inner| {
         inner.snapshot.kind = None;
         inner.snapshot.stage = "staged-installer".into();
+        inner.snapshot.staged_target = Some(target);
         if matches!(action, StagedAction::Inspect) {
             inner.snapshot.staged_iso = None;
             inner.snapshot.bit_locker = None;
@@ -1589,11 +1603,15 @@ mod usb_review_tests {
             inner.snapshot.staged_review = Some(json!({"summary":"Prepare?","approved":true}));
             inner.snapshot.status = "failed".into();
         }
-        // A new operation forgets the declined and the approved review.
+        // A new operation forgets the declined and the approved review, and
+        // the previous staged target.
+        setup.inner.lock().unwrap().snapshot.staged_target =
+            Some(json!({"action":"cleanup","operationId":"id"}));
         setup.begin("direct", "running").unwrap();
         let mut inner = setup.inner.lock().unwrap();
         assert!(!inner.staged_review_declined);
         assert_eq!(inner.snapshot.staged_review, None);
+        assert_eq!(inner.snapshot.staged_target, None);
         record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());
         assert_eq!(inner.snapshot.status, "failed");
     }

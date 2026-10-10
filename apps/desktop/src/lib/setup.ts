@@ -11,6 +11,9 @@ export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
   stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
+  // The running staged action and the recorded installer it acts on; set when
+  // a staged command starts, and cleared when any other operation starts.
+  stagedTarget?:{action:string;operationId:string|null}|null;
   // After approval, the review stays marked approved until the operation ends.
   stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;
@@ -39,12 +42,7 @@ export const setupActive = (status?: string) => status === 'inspecting' || statu
 // command, unchanged when a command is rejected before starting. It outlives
 // any one screen, so a failed operation can be traced to it from the home
 // screen too.
-// `stagedTarget` is the staged-installer action a command carries out and the
-// recorded installer it acts on: set when a staged command is sent, kept while
-// answering its Review or stopping it, cleared by any other command, and
-// restored when a command is rejected. Screens read it only while busy.
-export interface StagedTarget { action:string; operationId:string|null }
-const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null; stagedTarget?: StagedTarget | null }>({ snapshot:null, pending:false, error:null, stagedAction:null, stagedTarget:null });
+const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null }>({ snapshot:null, pending:false, error:null, stagedAction:null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
@@ -56,12 +54,9 @@ async function refresh() {
 }
 async function command(name: string, args: Record<string, unknown> = {}) {
   if (!isTauri() || get(state).pending) return;
-  epoch += 1; commandError=null;
-  const previous = get(state).stagedTarget ?? null;
-  const stagedTarget = name==='staged_iso' ? {action:String(args.action),operationId:typeof args.operationId==='string' ? args.operationId : null} : name==='respond_staged_review' || name==='cancel_setup' ? previous : null;
-  state.update(s => ({ ...s, pending:true, error:null, stagedTarget }));
+  epoch += 1; commandError=null; state.update(s => ({ ...s, pending:true, error:null }));
   try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot, stagedAction:name==='staged_iso' ? String(args.action) : null })); }
-  catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError, stagedTarget:previous })); }
+  catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError })); }
   finally { state.update(s => ({ ...s, pending:false })); }
 }
 export const setup = { subscribe:state.subscribe, refresh,

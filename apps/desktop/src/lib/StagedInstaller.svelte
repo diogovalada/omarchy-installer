@@ -129,7 +129,7 @@
   // prepares, or the one being removed. Others keep their own state, and a
   // disk check changes none.
   $: preparingId=busy ? $setup.snapshot?.stagedReview?.review?.operationId ?? null : null;
-  $: removingId=busy && $setup.stagedTarget?.action==='cleanup' ? $setup.stagedTarget.operationId : null;
+  $: removingId=busy && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
   $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
   // Declining Review changes nothing; the helper reports it as cancelled
   // without an error.
