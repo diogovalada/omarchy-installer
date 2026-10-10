@@ -95,7 +95,7 @@ it('leaves tiny gaps off the map and counts them in the table total',async()=>{
   await tick();
   expect(screen.getAllByRole('radio')).toHaveLength(1);
   await fireEvent.click(screen.getByRole('button',{name:'All partitions (1)'}));
-  expect(screen.getByRole('table')).toHaveTextContent('Unallocated in total: 1 MiB');
+  expect(screen.getByRole('table')).toHaveTextContent('Free space outside partitions: 1 MiB');
   expect(screen.queryByRole('rowheader',{name:'Free space'})).not.toBeInTheDocument();
 });
 it('explains a partition that cannot provide enough space without waiting for a shrink limit',async()=>{
@@ -122,7 +122,7 @@ it('shows a full disk while Windows measures its resize limit',async()=>{
   expect(calls.stagedIso).not.toHaveBeenCalled();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:40*GiB,temporaryBytes:8*GiB}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('status')).toHaveTextContent('Disk check finished.');
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*GiB});
@@ -140,11 +140,11 @@ it('keeps browsing available while measured limits arrive in one inspection',asy
   await tick();
   expect(calls.stagedIso).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button',{name:'Disk 0 · 500 GiB'}));
-  expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
   state.set({pending:false,snapshot:{status:'complete',stage:'complete',stagedTesting:true,stagedIso:{...base,choices:[encrypted],disks:[{...fullDisk,regions:[checkedC]},{...other,regions:[{...other.regions[0],resizeState:'checked',maximumReleaseBytes:10*GiB,reserveBytes:50*GiB}]}]}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
   expect(calls.stagedIso).not.toHaveBeenCalled();
 });
@@ -218,10 +218,10 @@ it('chooses free space first and selects partitions with the keyboard',async()=>
   expect(freeSegment).toHaveAttribute('tabindex','0');
   expect(map).toContainElement(freeSegment);
   expect(screen.getByText('Omarchy can use 91.9 GiB.')).toBeInTheDocument();
-  expect(screen.getByText('installer 8 GiB · temporary')).toBeInTheDocument();
+  expect(screen.getByText('Temporary installer 8 GiB')).toBeInTheDocument();
   expect(screen.queryByRole('slider')).not.toBeInTheDocument();
   await fireEvent.keyDown(freeSegment,{key:'ArrowLeft'});
-  const windows=screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'});
+  const windows=screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'});
   expect(windows).toBeChecked();
   expect(windows).toHaveFocus();
   await fireEvent.keyDown(windows,{key:'Home'});
@@ -290,7 +290,7 @@ it('keeps Windows with a chosen Omarchy size or replaces it later',async()=>{
   expect(screen.getByText('In the installer, delete Windows to make room for Omarchy.')).toBeInTheDocument();
   expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
   expect(screen.queryByRole('slider')).not.toBeInTheDocument();
-  expect(screen.getByText('Windows 492 GiB')).toBeInTheDocument();
+  expect(screen.getByText('Windows (C:) 492 GiB')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
 });
@@ -303,14 +303,14 @@ it('moves the handle in step with the size field',async()=>{
   expect(slider).toHaveAttribute('min','32');
   expect(slider).toHaveAttribute('max','100');
   expect(slider).toHaveAttribute('dir','rtl');
-  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 64 GiB, Windows keeps 428 GiB');
+  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 64 GiB, Windows (C:) keeps 428 GiB');
   // jsdom has no layout, so every bar label is in the legend.
   expect(screen.getByText('Omarchy 64 GiB')).toBeInTheDocument();
   await fireEvent.input(slider,{target:{value:'90'}});
   expect(field).toHaveValue(90);
   expect(screen.getByText('Omarchy 90 GiB')).toBeInTheDocument();
-  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 90 GiB, Windows keeps 402 GiB');
-  expect(screen.getByText('Windows 402 GiB')).toBeInTheDocument();
+  expect(slider).toHaveAttribute('aria-valuetext','Omarchy 90 GiB, Windows (C:) keeps 402 GiB');
+  expect(screen.getByText('Windows (C:) keeps 402 GiB')).toBeInTheDocument();
   await fireEvent.keyDown(slider,{key:'PageUp'});
   expect(field).toHaveValue(100);
   expect(slider.value).toBe('100');
@@ -343,7 +343,7 @@ it("explains the space Windows can't release when it is selected",async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[roomy]}]}}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  const zone=screen.getByRole('button',{name:"Can't release 92 GiB"});
+  const zone=screen.getByRole('button',{name:'Reserved 92 GiB'});
   const line=screen.getByText("50 GiB stays free for Windows, and some files near the end of C: can't be moved.");
   expect(zone).toHaveAttribute('aria-expanded','false');
   expect(line).not.toBeVisible();
@@ -361,7 +361,7 @@ it('keeps the space being edited when a later measurement would move the default
   await fireEvent.input(screen.getByRole('spinbutton',{name:'Space for Omarchy'}),{target:{value:'40'}});
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted,dataChoice],blocked:[],disks:[disk({...data,resizeState:'checked',maximumReleaseBytes:700*GiB,reserveBytes:100*GiB})],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · NTFS · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*GiB});
 });
@@ -374,7 +374,7 @@ it('pins the source shown in the editor when it stands in for an earlier pick',a
   state.set(twoPartitions(dataMeasured,'complete'));
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  await fireEvent.click(screen.getByRole('radio',{name:'D: · NTFS · can give Omarchy up to 692 GiB'}));
+  await fireEvent.click(screen.getByRole('radio',{name:'D: · can give Omarchy up to 692 GiB'}));
   await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
   state.set(twoPartitions(dataRegion,'running'));
   await tick();
@@ -403,9 +403,12 @@ it('offers only replacing when Windows cannot give enough space to keep it',asyn
   state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:30*GiB}]}]}}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · NTFS · room for the installer only'})).toBeChecked();
-  expect(screen.getByText("Windows can't give enough space to keep it. You can replace it in the installer.")).toBeInTheDocument();
-  expect(screen.queryByRole('radio',{name:'Keep Windows'})).not.toBeInTheDocument();
+  expect(screen.getByRole('radio',{name:'C: · room for the installer only'})).toBeChecked();
+  // Keeping is shown but unavailable, with the numbers; Windows can't move
+  // the files in the way, so freeing space isn't suggested.
+  expect(screen.getByText('Windows can give only 22 GiB; Omarchy needs 32 GiB.')).toBeInTheDocument();
+  expect(screen.getByRole('radio',{name:'Keep Windows'})).toBeDisabled();
+  expect(screen.getByRole('radio',{name:'Replace Windows'})).toBeChecked();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
 });
@@ -422,7 +425,7 @@ it('moves the Secure Boot advice from the choose screen to Review',async()=>{
   expect(screen.queryByText(/Secure Boot/)).not.toBeInTheDocument();
   state.set(reviewing(reviewed()));
   await tick();
-  expect(screen.getByRole('region',{name:'Review changes'})).toHaveTextContent('Next: restart into firmware settings to turn off Secure Boot.');
+  expect(screen.getByRole('region',{name:'Review changes'})).toHaveTextContent('Next: turn off Secure Boot in firmware settings.');
 });
 it('reviews the plan with Now and After bars, short bullets and one warning',async()=>{
   state.set(reviewing(reviewed()));
@@ -435,9 +438,9 @@ it('reviews the plan with Now and After bars, short bullets and one warning',asy
     'C: shrinks from 500 to 428 GiB. Your files stay.',
     'Omarchy can use 64 GiB. The 8 GiB installer is removed later.',
     'BitLocker on C: pauses until you resume it. Files stay encrypted.',
-    'Next: restart into firmware settings to turn off Secure Boot.'
+    'Next: turn off Secure Boot in firmware settings.'
   ]);
-  expect(review).toHaveTextContent('Test build: real disk changes. This ISO may not start, or may refuse this disk.');
+  expect(review).toHaveTextContent('Test build: real disk changes. This image may not start or install.');
   expect(screen.getByText('Full details')).toBeInTheDocument();
   expect(review).toHaveTextContent('Shrink C: from 500.0 to 428.0 GiB.');
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
@@ -521,7 +524,7 @@ it('lets the installer be selected again after a restart and restarts to firmwar
   const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:''};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op]}}});
   render(StagedInstaller,{recoveryOnly:true});
-  expect(screen.getByRole('heading',{name:'Temporary installer ready · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Install Omarchy')).toHaveAttribute('aria-current','step');
   expect(screen.getByText('Starting Windows later')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
@@ -549,18 +552,18 @@ it('asks for a restart after selecting the installer, then suggests removal',asy
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[{...op,restartedSinceScheduled:true}],recordErrors:[]}}});
   await tick();
   expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
-  expect(screen.getByText('If Omarchy starts on its own, resume BitLocker when reminded, then remove the temporary installer.')).toBeInTheDocument();
+  expect(screen.getByText('Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toHaveClass('primary');
   expect(screen.getByRole('button',{name:'Start installer again on next restart'})).not.toHaveClass('primary');
 });
 const card=(status:string,secureBoot:boolean|null,restartedSinceScheduled=false)=>({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],secureBoot,operations:[{operationId:'11111111-1111-4111-8111-111111111111',status,diskNumber:0,temporaryBytes:8*GiB,message:'',restartedSinceScheduled}]}}});
-const installerDisk='In the installer, choose the disk marked “installer disk, free space only”, then Free space install.';
+const installerDisk='In the installer, choose the disk marked “installer disk, free space only”, then “Free space install”.';
 it('shows only the current step of a prepared installer, with one primary button',async()=>{
   const cases:[ReturnType<typeof card>,string,string,string|null,boolean][]=[
     [card('staged',true),'Turn off Secure Boot','Restart into firmware settings, turn off Secure Boot, then return to Windows.','Restart to firmware settings',false],
-    [card('arming',false),'Start installer','Choose the installer for your next restart.','Start installer on next restart',true],
+    [card('arming',false),'Set next restart','Make your next restart open the installer.','Start installer on next restart',true],
     [card('boot-scheduled',false),'Install Omarchy','Restart Windows to start the installer.',null,true],
-    [card('boot-scheduled',false,true),'Clean up','If Omarchy starts on its own, resume BitLocker when reminded, then remove the temporary installer.','Remove temporary installer',false]
+    [card('boot-scheduled',false,true),'Clean up','Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.','Remove temporary installer',false]
   ];
   for(const [snapshot,step,text,primary,instruction] of cases) {
     state.set(snapshot);
@@ -582,7 +585,7 @@ it('offers a firmware restart beside starting the installer when Secure Boot is 
   render(StagedInstaller,{recoveryOnly:true});
   await tick();
   expect(screen.getByText("Turn off Secure Boot if it's on")).not.toHaveAttribute('aria-current');
-  expect(screen.getByText('Start installer')).toHaveAttribute('aria-current','step');
+  expect(screen.getByText('Set next restart')).toHaveAttribute('aria-current','step');
   expect(screen.getByRole('button',{name:'Start installer on next restart'})).toHaveClass('primary');
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('firmware',null,'11111111-1111-4111-8111-111111111111');
@@ -591,15 +594,19 @@ it('replaces the choose screen with the installer steps while one exists',async(
   state.set(card('staged',true));
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByRole('heading',{name:'Temporary installer ready · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Check available space'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
 });
 it('can check disks beside an installer that cannot be removed',async()=>{
-  state.set({...card('copying',true),error:'The recorded staging disk cannot be identified uniquely.'});
+  state.set(card('copying',true));
   render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Remove temporary installer'}));
+  state.set({...card('copying',true),error:'The recorded staging disk cannot be identified uniquely.'});
   await tick();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Check disks again'}));
@@ -608,7 +615,56 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   state.set({pending:false,snapshot:{...base,stagedIso:{...base.stagedIso,operations:card('copying',true).snapshot.stagedIso.operations}}});
   await tick();
   expect(screen.getByRole('radiogroup',{name:'Partitions on Disk 0'})).toBeInTheDocument();
-  expect(screen.getByRole('heading',{name:'Installer preparation needs attention · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+});
+it('offers help and the USB route when no space can be used',async()=>{
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:0}]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  const useUsb=vi.fn();
+  render(StagedInstaller,{sourceReady:true,useUsb});
+  await tick();
+  expect(screen.getByText('No space can be used yet.')).toBeInTheDocument();
+  expect(screen.getByText('What can help?')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'create a bootable USB'}));
+  expect(useUsb).toHaveBeenCalledOnce();
+});
+it('keeps a usable default when a later measurement finds more room, and says what Review waits for',async()=>{
+  state.set(twoPartitions(dataRegion,'running'));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByText('Still checking D:…')).toBeInTheDocument();
+  state.set(twoPartitions(dataMeasured,'complete'));
+  await tick();
+  // D: could give more, but the selection doesn't jump from C: by itself.
+  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.queryByText(/Still checking/)).not.toBeInTheDocument();
+  expect(screen.getByText('Select where the space comes from.')).toBeInTheDocument();
+});
+it('explains a failed measurement plainly and keeps the reason in the table',async()=>{
+  const failed={...fullDisk.regions[0],resizeState:'failed',resizeReason:'Windows returned unsupported NTFS shrink limits.',reserveBytes:0};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[{...fullDisk,regions:[failed]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByText("Windows couldn't measure C:.",{selector:'p'})).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'All partitions (1)'}));
+  expect(screen.getByRole('table')).toHaveTextContent("Windows couldn't measure C:. Windows returned unsupported NTFS shrink limits.");
+});
+it('names the new parts of the After bar and keeps the warning out of Full details',async()=>{
+  state.set(reviewing(reviewed()));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const review=screen.getByRole('region',{name:'Review changes'});
+  expect(review.querySelector('.legend')).toHaveTextContent('Temporary installer');
+  expect(review.querySelector('.legend')).toHaveTextContent('Omarchy');
+  expect(review.querySelector('details')).not.toHaveTextContent('EXPERIMENTAL');
+});
+it('helps with Secure Boot and leaves starting the installer for later',async()=>{
+  state.set(card('staged',true));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByText('How?')).toBeInTheDocument();
+  const row=screen.getByRole('button',{name:'Remove temporary installer'}).parentElement!;
+  expect([...row.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['Remove temporary installer','Prepare again','Start installer on next restart']);
 });

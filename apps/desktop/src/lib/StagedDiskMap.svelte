@@ -20,7 +20,9 @@
   // theirs in the selected-partition line instead.
   function fitting(segment:OverviewSegment,px:number) {
     const region=segment.regions[0], size=formatSize(segment.sizeBytes,region.kind==='free' ? 'down' : 'nearest');
-    const labels=segment.regions.length>1 ? [segment.label] : region.kind==='free' ? [`Free · ${size}`,'Free'] : [`${region.label}${region.isWindows ? ' Windows' : ''} · ${size}`,region.label];
+    // Windows is named once: "C: · Windows · 953 GiB", but "Windows (C:) · 475 GiB".
+    const windows=region.isWindows && !/windows/i.test(region.label) ? ' · Windows' : '';
+    const labels=segment.regions.length>1 ? [segment.label] : region.kind==='free' ? [`Free · ${size}`,'Free'] : [`${region.label}${windows} · ${size}`,region.label];
     return labels.find(text=>text.length*CHAR_PX+PADDING_PX<=segment.widthPercent/100*px) ?? '';
   }
   function usedPercent(segment:OverviewSegment) {
@@ -55,12 +57,12 @@
   .map{display:flex;gap:2px;height:40px;margin:14px 0 10px}
   .segment{position:relative;flex:0 1 0;min-width:0;display:flex;align-items:center;padding:0;border:0;border-radius:0;background:var(--surface-raised);color:var(--text);font:inherit;font-size:11px;white-space:nowrap;overflow:hidden;cursor:pointer;appearance:none}
   .segment:first-child{border-radius:3px 0 0 3px}.segment:last-child{border-radius:0 3px 3px 0}.segment:only-child{border-radius:3px}
-  .segment:hover:not(:disabled){filter:brightness(1.15)}.segment:disabled{cursor:default}
+  .segment:hover:not(:disabled):not(.selected){box-shadow:inset 0 0 0 1px var(--accent-hover)}.segment:disabled{cursor:default}
   .segment:focus-visible{outline:2px solid var(--accent-hover);outline-offset:2px;z-index:1}
   /* A dark backing keeps labels readable on every fill (4.5:1 or more). */
   .text{position:relative;margin:0 6px;padding:1px 4px;border-radius:2px;background:rgb(19 20 28/.75);overflow:hidden;text-overflow:clip}
   .used{background:linear-gradient(to right,var(--border-strong) var(--used),var(--surface-raised) var(--used))}
-  .dimmed{box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--text-dim)}.outlined-dimmed{opacity:.6}
+  .dimmed{color:var(--text-dim)}.dimmed:not(.used){background:var(--border)}.outlined-dimmed{opacity:.6}
   .hatched{background:repeating-linear-gradient(135deg,var(--border) 0 2px,var(--surface-deep) 2px 8px)}
   .checking{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-hover) 50%,var(--surface-raised) 100%) 0 0/200% 100%;animation:shimmer 1.6s linear infinite}
   .outlined,.outlined-dimmed{background:transparent;border:1px dashed var(--border-strong)}

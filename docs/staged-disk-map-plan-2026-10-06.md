@@ -401,6 +401,44 @@ sit in a secondary text row.
   (for example, its disk is gone), **Check disks again** below the card brings
   the choose screen back above it until another installer is prepared.
 
+## Design review (2026-10-10)
+
+An Opus design review of PRs 1–4, converged finding by finding, changed these
+in PR 5 (`staged-design-fixes`). Where they differ, they replace the texts
+above and in the Screen sections:
+
+- **Space editor:** the bar's labels are "in use" (the stub, without the `//`
+  break), "reserved" (the space Windows can't release) and "unused" (free
+  space inside the partition, so "free" keeps one meaning: space outside
+  partitions). A bracket under everything left of the handle names what stays:
+  "Windows (C:) keeps 881.5 GiB". The reserved explanation shows right under
+  the bar. Only the handle takes the pointer. The hatching is quieter.
+- **Choose screen:** "· NTFS" left the selected-partition line; "Space comes
+  from C:." moved into it; "Select where the space comes from." appears when
+  several spaces are usable; "Still checking D:…" sits beside a disabled
+  Review changes. Once a usable default is shown it stays while usable, so a
+  later measurement doesn't move the selection. A failed measurement reads
+  "Windows couldn't measure C:."; the provider's reason moved to the table.
+  No usable space offers "What can help?" and the USB route. Map labels name
+  Windows once.
+- **Replace only:** Keep is shown unavailable, with the numbers and, only when
+  the reserve is the limit, how much to free.
+- **Review:** a legend names the temporary installer and Omarchy; the
+  duplicate warning left "Full details"; the bars use the map's used-space
+  fill.
+- **Card:** "Temporary installer · Disk 0" in every step; step 2 is "Set next
+  restart" ("Make your next restart open the installer."); Clean up asks
+  "Does your PC now start Omarchy by itself? Then remove the temporary
+  installer. Resume BitLocker when Windows reminds you."; the Secure Boot step
+  has a "How?" disclosure; starting the installer moves to the end of the
+  link row while it can't help yet; needs attention reads "Preparing the
+  installer didn't finish · Disk 0" / "Remove the temporary installer.
+  Windows and any installed Omarchy stay." **Check disks again** shows only
+  after removing the installer failed.
+- **Not changed, by agreement:** zoom lines between the map and the editor,
+  a Restart now button, Back acting as Cancel, a longer subtitle, and GiB
+  versus GB (an app-wide decision).
+
 ## Copy
 
 Final English strings. Sizes drop a trailing `.0`: "953 GiB", "881.5 GiB",
@@ -420,14 +458,17 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | First read | Reading disks… |
 | Disk button | Disk 0 · 954 GiB; Disk 1 · 1.8 TiB · can't use |
 | No disks | No internal disks found. Check Disk Management, then refresh. |
-| Editor labels | Windows 881.5 GiB · installer 7.5 GiB · temporary · Omarchy 64 GiB · can't release · free |
+| Editor labels | in use · reserved · unused · Omarchy 64 GiB in the bar; below it a bracket "Windows (C:) keeps 881.5 GiB" (no "keeps" when replacing; a data partition by its label) and "Temporary installer 7.5 GiB" |
 | Toggle | Keep Windows / Replace Windows (or Keep D: / Replace D:) |
 | Size field | Omarchy [n] GiB · 32–92 |
 | Replace line | In the installer, delete Windows to make room for Omarchy. |
-| Can't keep | Windows can't give enough space to keep it. You can replace it in the installer. |
+| Can't keep | Keep shown unavailable, Replace selected; "Windows can give only 22.5 GiB; Omarchy needs 32 GiB." plus "Free up 9.5 GiB more in Windows, then refresh." only when the reserve is the limit |
 | Free target | Omarchy can use 112 GiB. |
 | Free target, short | Only 20 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room. |
-| No usable space | No space can be used yet. |
+| No usable space | No space can be used yet. With a closed "What can help?": turning off hibernation and System Restore, then restarting; or create a bootable USB and replace Windows |
+| Several usable spaces | Select where the space comes from. (dim, above the map) |
+| Space source differs | "Space comes from C:." in the selected-partition line |
+| Waiting for the check | Still checking D:… (beside the disabled Review changes) |
 | Secure Boot (PR 1 and 2 only) | Secure Boot is on. Leave it on; you'll turn it off after preparing. |
 | Button | Review changes |
 | Table | All partitions (n) |
@@ -443,17 +484,18 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | Replace | Adds a 7.5 GiB temporary installer. In the installer, delete Windows to make room. |
 | Free target | Omarchy can use 112 GiB. (Below the minimum, use the short free-target line.) |
 | BitLocker | BitLocker on C: pauses until you resume it. Files stay encrypted. |
-| Next, Secure Boot on | Next: restart into firmware settings to turn off Secure Boot. |
-| Next, otherwise | Next: choose the installer for your next restart. |
-| Warning, official ISO | Test build: real disk changes. This ISO may not start, or may refuse this disk. |
+| Next, Secure Boot on | Next: turn off Secure Boot in firmware settings. |
+| Next, otherwise | Next: set your next restart to open the installer. |
+| Warning, official ISO | Test build: real disk changes. This image may not start or install. (with a warning icon) |
+| Bar legend | Temporary installer · Omarchy (swatches) |
 | Warning, unsigned ISO | Unsigned test image: real disk changes. It may not start or install. |
 | Disclosure | Full details |
 | Buttons | Cancel / Prepare installer |
 
 ### After preparing
 
-Use the texts in the Screen 3 table. Step titles: Turn off Secure Boot, Start
-installer, Install Omarchy, Clean up.
+Use the texts in the Screen 3 table, as revised by the design review below.
+Step titles: Turn off Secure Boot, Set next restart, Install Omarchy, Clean up.
 
 ## Visual design
 

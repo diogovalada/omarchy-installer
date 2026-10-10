@@ -11,6 +11,8 @@
   export let close:()=>void=()=>{};
   export let sourceReady=false;
   export let prepareAgain:()=>void=()=>{};
+  // Opens the USB installer instead, when no space can be used here.
+  export let useUsb:(()=>void)|null=null;
   let selectedDisk='';
   // Map segment and space source the user picked; empty until they pick one,
   // so the default can follow the check as limits arrive.
@@ -58,8 +60,16 @@
   $: segments=layout ? overviewSegments(layout,{barPx:mapWidth || 760}) : [];
   $: statuses=Object.fromEntries(segments.map(s=>[s.key,statusFor(s.regions,spaces,busy,analyzing,requiredBytes,installMinimum)])) as Record<string,RegionStatus>;
   $: autoRegion=layout ? defaultRegion(layout,spaces,requiredBytes,installMinimum) : undefined;
-  $: selectedSegment=segments.find(s=>s.key===chosenSegment) ?? segments.find(s=>!!autoRegion && s.regions.includes(autoRegion)) ?? segments[0];
-  $: sourceRegion=layout?.regions.find(r=>regionKey(r)===chosenSource && choiceFor(r,spaces)) ?? (autoRegion && choiceFor(autoRegion,spaces) ? autoRegion : undefined);
+  // Once a usable default is shown, it stays while it is usable, so a later
+  // measurement doesn't move the selection; measurements take minutes.
+  let heldDefault='';
+  $: if(autoRegion && choiceFor(autoRegion,spaces) && !layout?.regions.some(r=>regionKey(r)===heldDefault && choiceFor(r,spaces))) heldDefault=regionKey(autoRegion);
+  $: shownDefault=layout?.regions.find(r=>regionKey(r)===heldDefault && choiceFor(r,spaces)) ?? autoRegion;
+  $: selectedSegment=segments.find(s=>s.key===chosenSegment) ?? segments.find(s=>!!shownDefault && s.regions.includes(shownDefault)) ?? segments[0];
+  $: sourceRegion=layout?.regions.find(r=>regionKey(r)===chosenSource && choiceFor(r,spaces)) ?? (shownDefault && choiceFor(shownDefault,spaces) ? shownDefault : undefined);
+  $: usableCount=layout ? layout.regions.filter(r=>choiceFor(r,spaces)).length : 0;
+  // Review waits for the disk check; say which partition it waits for.
+  $: waitingFor=busy && browsing ? (inspection?.disks ?? []).flatMap(d=>d.regions).find(r=>analyzing ? r.partitionGuid===analyzing.partitionGuid : r.kind==='partition' && r.resizeState==='unchecked')?.label ?? '' : '';
   // Without a layout (an older provider), use the first choice as before.
   $: choice=layout ? (sourceRegion ? choiceFor(sourceRegion,spaces) : undefined) : spaces[0];
   // Shrinking can also leave room for Omarchy after the temporary installer,
@@ -70,7 +80,10 @@
   $: if(canKeep && (omarchyGiB>keepMaximumGiB || omarchyGiB<minimumGiB)) omarchyGiB=Math.min(Math.max(omarchyGiB,minimumGiB),keepMaximumGiB);
   $: linuxBytes=canKeep && keepWindows ? omarchyGiB*GiB : 0;
   $: checkingAny=busy && (!!analyzing || !!layout?.regions.some(r=>r.resizeState==='unchecked'));
-  $: tableStatus=(region:StagedRegion) => statusFor([region],spaces,busy,analyzing,requiredBytes,installMinimum).text;
+  $: tableStatus=(region:StagedRegion) => {
+    const status=statusFor([region],spaces,busy,analyzing,requiredBytes,installMinimum);
+    return status.detail ? `${status.text} ${status.detail}` : status.text;
+  };
   // The map and the selected-partition line show disk-check progress, so the
   // page-bottom status is hidden then; a hidden status region keeps it for
   // screen readers, and says when the check is over.
@@ -135,12 +148,16 @@
     return {...current,disks,choices};
   }
   // Recorded installer actions; Prepare again removes it, then checks disks.
+  // Checking disks beside an installer is offered once its removal failed.
+  let removing='';
+  $: removalFailed=!!removing && !!error && operations.some(op=>op.operationId===removing);
   function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
+    if(action==='again' || action==='cleanup') removing=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }
   function inspect() {
-    inspection=undefined; analyzing=null; reading=true;
+    inspection=undefined; analyzing=null; reading=true; heldDefault='';
     void setup.stagedIso('inspect');
   }
   // A partition being rechecked shows as checking until its new limit arrives.
@@ -166,7 +183,7 @@
     if(sourceRegion) chosenSource=regionKey(sourceRegion);
   }
   function selectDisk(id:string) {
-    selectedDisk=id; chosenSegment=''; chosenSource='';
+    selectedDisk=id; chosenSegment=''; chosenSource=''; heldDefault='';
   }
   function diskName(item:{number:number;size?:number;blocked?:StagedBlockedDisk}) {
     return `Disk ${item.number}${item.size ? ` · ${formatDiskSize(item.size)}` : ''}${item.blocked ? " · can't use" : ''}`;
@@ -199,6 +216,7 @@
       <div class="preparing" role="region" aria-label="Preparing the installer">
         <h3>Preparing the installer</h3>
         <p role="status">{$setup.snapshot?.message || 'Preparing…'}</p>
+        <p>Keep this window open.</p>
         {#if copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
         {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
       </div>
@@ -224,11 +242,13 @@
       {#if disk?.blocked}
         <p class="blocked">{disk.blocked.reason}</p>
       {:else if layout}
+        {#if usableCount>1}<p class="hint">Select where the space comes from.</p>{/if}
         <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} disabled={!sourceReady || !(browsing || analyzing)} bind:width={mapWidth}/>
         {#if selectedSegment}
           {@const status=statuses[selectedSegment.key]}
           {@const region=single(selectedSegment)}
           <p class="line">{status?.text}
+            {#if sourceRegion && region!==sourceRegion}<span class="source-note">Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</span>{/if}
             {#if status?.action==='recheck' && region}<button class="text-action" aria-label={`Recheck ${region.label}`} disabled={busy || !testing || !sourceReady} onclick={()=>analyze(region)}>Recheck</button>
             {:else if status?.action==='refresh'}<button class="text-action" aria-label="Refresh disks" disabled={busy || !testing || !sourceReady} onclick={inspect}>Refresh</button>{/if}
           </p>
@@ -237,16 +257,22 @@
       {#if !disk?.blocked && (layout || choice)}
         {#if choice}
           <div class="allocation">
-            {#if layout && sourceRegion && single(selectedSegment)!==sourceRegion}<p>Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</p>{/if}
             {#if !layout}<p>{choice.label}</p>{/if}
             {#key sourceRegion ? regionKey(sourceRegion) : JSON.stringify(choice.target)}
               <StagedSpaceEditor {choice} region={sourceRegion} {targetName} temporaryBytes={requiredBytes} minimumBytes={installMinimum} minGiB={minimumGiB} maxGiB={keepMaximumGiB} {canKeep} bind:keep={keepWindows} bind:omarchyGiB disabled={!browsing} edit={pin}/>
             {/key}
           </div>
-        {:else if layout && !checkingAny}<p class="no-space">No space can be used yet.</p>{/if}
+        {:else if layout && !checkingAny}
+          <p class="no-space">No space can be used yet.</p>
+          <details class="help">
+            <summary>What can help?</summary>
+            <p>Windows can't move some system files. Turning off hibernation and System Restore, then restarting, often lets it shrink further.</p>
+            {#if useUsb}<p>Or <button class="text-action inline" disabled={busy} onclick={useUsb}>create a bootable USB</button> and replace Windows.</p>{/if}
+          </details>
+        {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
-          {#if choice}<button class="primary submit" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button>{/if}
+          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
         </div>
       {/if}
     {/if}
@@ -258,7 +284,7 @@
   {#each operations as op (op.operationId)}
     <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
   {/each}
-  {#if !recoveryOnly && operations.length && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
+  {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
@@ -281,13 +307,17 @@
   .line{margin:0;font-size:12px;color:var(--text)}.text-action{min-height:0;padding:0 0 0 6px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){border-color:transparent;background:transparent;color:var(--accent-hover)}
   .blocked{margin:14px 0 0;font-size:12px}
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
+  .hint{margin:14px 0 -6px;font-size:11px;color:var(--text-dim)}
+  .source-note{color:var(--text-dim)}.source-note::before{content:'·';margin:0 6px}
+  .help{margin:0 0 8px}.help p{margin:0 0 6px;font-size:11px}.text-action.inline{padding:0}
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-  .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end}
+  .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end;display:flex;align-items:center;gap:12px}.waiting{font-size:11px;color:var(--text-dim)}
   .preparing{border:1px solid var(--accent);border-radius:6px;background:var(--surface);padding:22px;margin:24px 0 16px}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
   .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
   .beside{margin:0}.beside .text-action{padding:0}
-  progress{width:100%;height:6px;margin:4px 0 12px;accent-color:var(--accent)}
+  progress{width:100%;height:6px;margin:4px 0 12px;border:0;border-radius:3px;background:var(--surface-raised);appearance:none;-webkit-appearance:none}
+  progress::-webkit-progress-bar{border-radius:3px;background:var(--surface-raised)}progress::-webkit-progress-value{border-radius:3px;background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
-  @media(max-width:550px){h2{font-size:20px}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch}}
+  @media(max-width:550px){h2{font-size:20px}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
 </style>
