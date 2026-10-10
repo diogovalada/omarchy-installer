@@ -521,8 +521,9 @@ it('lets the installer be selected again after a restart and restarts to firmwar
   const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:''};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op]}}});
   render(StagedInstaller,{recoveryOnly:true});
-  expect(screen.getByText('Installer selected for a restart')).toBeInTheDocument();
-  expect(screen.getByText('What happens next')).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Temporary installer ready · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByText('Install Omarchy')).toHaveAttribute('aria-current','step');
+  expect(screen.getByText('Starting Windows later')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
@@ -547,7 +548,67 @@ it('asks for a restart after selecting the installer, then suggests removal',asy
   for(const button of screen.getAllByRole('button')) expect(button).not.toHaveClass('primary');
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[{...op,restartedSinceScheduled:true}],recordErrors:[]}}});
   await tick();
-  expect(screen.getByText('Windows restarted after selecting the installer')).toBeInTheDocument();
+  expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
+  expect(screen.getByText('If Omarchy starts on its own, resume BitLocker when reminded, then remove the temporary installer.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toHaveClass('primary');
   expect(screen.getByRole('button',{name:'Start installer again on next restart'})).not.toHaveClass('primary');
+});
+const card=(status:string,secureBoot:boolean|null,restartedSinceScheduled=false)=>({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],secureBoot,operations:[{operationId:'11111111-1111-4111-8111-111111111111',status,diskNumber:0,temporaryBytes:8*GiB,message:'',restartedSinceScheduled}]}}});
+const installerDisk='In the installer, choose the disk marked “installer disk, free space only”, then Free space install.';
+it('shows only the current step of a prepared installer, with one primary button',async()=>{
+  const cases:[ReturnType<typeof card>,string,string,string|null,boolean][]=[
+    [card('staged',true),'Turn off Secure Boot','Restart into firmware settings, turn off Secure Boot, then return to Windows.','Restart to firmware settings',false],
+    [card('arming',false),'Start installer','Choose the installer for your next restart.','Start installer on next restart',true],
+    [card('boot-scheduled',false),'Install Omarchy','Restart Windows to start the installer.',null,true],
+    [card('boot-scheduled',false,true),'Clean up','If Omarchy starts on its own, resume BitLocker when reminded, then remove the temporary installer.','Remove temporary installer',false]
+  ];
+  for(const [snapshot,step,text,primary,instruction] of cases) {
+    state.set(snapshot);
+    const view=render(StagedInstaller,{sourceReady:true});
+    await tick();
+    expect(screen.getByText(step)).toHaveAttribute('aria-current','step');
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.queryByText(installerDisk)!=null).toBe(instruction);
+    const primaries=screen.getAllByRole('button').filter(button=>button.classList.contains('primary'));
+    expect(primaries.map(button=>button.textContent)).toEqual(primary ? [primary] : []);
+    // Remove and Prepare again are always offered.
+    expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'Prepare again'})).toBeEnabled();
+    view.unmount();
+  }
+});
+it('offers a firmware restart beside starting the installer when Secure Boot is unknown',async()=>{
+  state.set(card('staged',null));
+  render(StagedInstaller,{recoveryOnly:true});
+  await tick();
+  expect(screen.getByText("Turn off Secure Boot if it's on")).not.toHaveAttribute('aria-current');
+  expect(screen.getByText('Start installer')).toHaveAttribute('aria-current','step');
+  expect(screen.getByRole('button',{name:'Start installer on next restart'})).toHaveClass('primary');
+  await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('firmware',null,'11111111-1111-4111-8111-111111111111');
+});
+it('replaces the choose screen with the installer steps while one exists',async()=>{
+  state.set(card('staged',true));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Temporary installer ready · Disk 0'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Check available space'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
+});
+it('can check disks beside an installer that cannot be removed',async()=>{
+  state.set({...card('copying',true),error:'The recorded staging disk cannot be identified uniquely.'});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Check disks again'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
+  const base=measured().snapshot;
+  state.set({pending:false,snapshot:{...base,stagedIso:{...base.stagedIso,operations:card('copying',true).snapshot.stagedIso.operations}}});
+  await tick();
+  expect(screen.getByRole('radiogroup',{name:'Partitions on Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Installer preparation needs attention · Disk 0'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
 });

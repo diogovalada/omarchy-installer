@@ -7,6 +7,8 @@
 // ?layout=<name> for test-fixtures/staged-layouts/<name>.json (a captured
 // `stagedIso` value; see the README there). In Review, Cancel ends as the app
 // reports a declined review, and Prepare installer shows copy progress.
+// ?card=<firmware|start|unknown|scheduled|cleanup|attention> shows a prepared
+// temporary installer at that step (Secure Boot on, off or unknown).
 // Each check replays the provider's timeline and progress messages: the
 // layout first, then one partition measured at a time. A Recheck returns only
 // at the end, as the real resize query does. Captured layouts are published as
@@ -175,7 +177,15 @@ window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
   }
   throw new Error('Preview only: this action is not implemented.');
 }};
-check(null);
+// A recorded temporary installer: [status, Secure Boot, restarted since scheduled].
+const cards={firmware:['staged',true],start:['staged',false],unknown:['staged',null],scheduled:['boot-scheduled',false],cleanup:['boot-scheduled',false,true],attention:['copying',true]};
+const card=query.get('card');
+if(card) {
+  if(!cards[card]) throw new Error(`No card named ${card}.`);
+  const [status,secureBoot,restartedSinceScheduled=false]=cards[card];
+  Object.assign(snapshot,{status:'complete',stage:'complete',stagedIso:{choices:[],blocked:[],secureBoot,operations:[{operationId:'11111111-1111-4111-8111-111111111111',status,diskNumber:0,linuxBytes:0,temporaryBytes,message:'',restartedSinceScheduled}]}});
+  window.__fixtureSettled=true;
+} else check(null);
 await setup.refresh();
 mount(StagedInstaller,{target:document.getElementById('app'),props:{sourceReady:true}});
 </script><style>body{overflow:auto}#app{max-width:880px;padding:24px;margin:auto}</style></body></html>

@@ -35,7 +35,7 @@ it('opens the real testing flow before downloading without prompting for elevati
 it('surfaces an interrupted installer without invoking the privileged checker',()=>{
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:false,stagedRecovery:{operations:[{operationId:'id',status:'copying',diskNumber:0,temporaryBytes:8*1024**3}],recordErrors:[]}}});
   render(App);
-  expect(screen.getByRole('heading',{name:'Installer preparation needs attention'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Installer preparation needs attention · Disk 0'})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
   expect(setup.stagedIso).not.toHaveBeenCalled();
 });

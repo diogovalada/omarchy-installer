@@ -19,6 +19,12 @@ downloads. Published versions and their artifacts are immutable.
   progress shows in the same place. Cancelling Review returns to the choose
   screen with the selection intact instead of reporting a failure. The Secure
   Boot advice moved from the choose screen to Review's "Next" bullet.
+- Install without USB (testing builds): a prepared temporary installer shows
+  four steps (Turn off Secure Boot, Start installer, Install Omarchy, Clean up)
+  with only the current one spelled out and one primary button; other actions
+  sit in a text row. The installer-disk instruction shows before restarting,
+  and boot-menu tips move to "Starting Windows later". While a temporary
+  installer exists, its steps replace the choose screen.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
