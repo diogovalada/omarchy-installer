@@ -597,3 +597,18 @@ it('replaces the choose screen with the installer steps while one exists',async(
   await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
 });
+it('can check disks beside an installer that cannot be removed',async()=>{
+  state.set({...card('copying',true),error:'The recorded staging disk cannot be identified uniquely.'});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Check disks again'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
+  const base=measured().snapshot;
+  state.set({pending:false,snapshot:{...base,stagedIso:{...base.stagedIso,operations:card('copying',true).snapshot.stagedIso.operations}}});
+  await tick();
+  expect(screen.getByRole('radiogroup',{name:'Partitions on Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:'Installer preparation needs attention · Disk 0'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+});

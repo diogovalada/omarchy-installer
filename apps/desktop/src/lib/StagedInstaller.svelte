@@ -90,6 +90,16 @@
     if(approved) approving=true;
     void setup.respondStagedReview(approved);
   }
+  // A recorded temporary installer's steps replace the choose screen, whose
+  // layout is then out of date. Checking disks again brings it back below
+  // them, for when the installer can't be removed; preparing another one
+  // hides it again.
+  let checkingBeside=false;
+  $: if(preparing) checkingBeside=false;
+  function checkBeside() {
+    checkingBeside=true;
+    inspect();
+  }
   $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
@@ -192,9 +202,8 @@
         {#if copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
         {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
       </div>
-    {:else if operations.length}
-      <!-- A temporary installer exists: its steps replace the choose screen,
-           whose layout is out of date, until it is removed. -->
+    {:else if operations.length && !checkingBeside}
+      <!-- The recorded installer's steps below stand in for the choose screen. -->
     {:else if !inspection}
       {#if reading && busy}
         <div class="map-placeholder" aria-hidden="true"></div>
@@ -249,6 +258,7 @@
   {#each operations as op (op.operationId)}
     <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
   {/each}
+  {#if !recoveryOnly && operations.length && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
@@ -275,6 +285,7 @@
   .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end}
   .preparing{border:1px solid var(--accent);border-radius:6px;background:var(--surface);padding:22px;margin:24px 0 16px}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
   .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
+  .beside{margin:0}.beside .text-action{padding:0}
   progress{width:100%;height:6px;margin:4px 0 12px;accent-color:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
