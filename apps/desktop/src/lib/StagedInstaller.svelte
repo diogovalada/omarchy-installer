@@ -125,6 +125,12 @@
   // restart, so only a firmware restart's or a removal's own result shows;
   // a removed installer's card is gone.
   $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup'].includes($setup.stagedAction ?? '') ? result?.message ?? '' : '';
+  // The recorded installer a running command changes: the one its Review
+  // prepares, or the one being removed. Others keep their own state, and a
+  // disk check changes none.
+  $: preparingId=busy ? $setup.snapshot?.stagedReview?.review?.operationId ?? null : null;
+  $: removingId=busy && $setup.stagedTarget?.action==='cleanup' ? $setup.stagedTarget.operationId : null;
+  $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
   // Declining Review changes nothing; the helper reports it as cancelled
   // without an error.
   $: declined=!busy && !error && $setup.snapshot?.status==='cancelled' ? $setup.snapshot.message : '';
@@ -302,12 +308,12 @@
     <p role="alert">A previous temporary installer could not be identified safely. Its partitions have not been changed.</p>
     <details><summary>Details</summary><p>{record.operationId}: {record.message}</p></details>
   {/each}
-  <!-- While preparing, the panel above stands in for the new installer's card. -->
-  {#if !preparing}
-    {#each operations as op (op.operationId)}
-      <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} changing={busy && !quiet} act={action=>operate(op,action)}/>
-    {/each}
-  {/if}
+  {#each operations as op (op.operationId)}
+    <!-- While preparing, the panel above stands in for the new installer's card. -->
+    {#if !(preparing && op.operationId===preparingId)}
+      <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
+    {/if}
+  {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}

@@ -323,6 +323,8 @@ fn staged_review(
         Value::Null
     };
     let review = json!({
+        // The record preparation creates, so the app can tell it from others.
+        "operationId": plan["operationId"],
         "diskNumber": disk_number,
         "diskSizeBytes": bytes(&plan["diskSizeBytes"], "the disk size")?,
         "layoutSha256": plan["layoutSha256"].as_str().ok_or("The staging plan is missing the layout fingerprint")?,
@@ -561,6 +563,7 @@ mod staged_review_tests {
     fn plan(shrink: bool, linux: u64) -> Value {
         let start = 300 * MIB + 953 * GIB - 7 * GIB - 512 * MIB - linux;
         json!({
+            "operationId": "11111111-1111-4111-8111-111111111111",
             "diskNumber": 0,
             "diskSizeBytes": 954 * GIB,
             "layoutSha256": "layout",
@@ -588,6 +591,10 @@ mod staged_review_tests {
         let start = 300 * MIB + 881 * GIB + 512 * MIB;
         assert_eq!(review["targetKind"], "shrink");
         assert_eq!(review["layoutSha256"], "layout");
+        assert_eq!(
+            review["operationId"],
+            "11111111-1111-4111-8111-111111111111"
+        );
         assert_eq!(
             review["shrink"],
             json!({"label":"C:","partitionGuid":"guid","offsetBytes":300 * MIB,"beforeSizeBytes":953 * GIB,"afterSizeBytes":start - 300 * MIB})

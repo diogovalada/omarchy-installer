@@ -8,8 +8,8 @@
   export let testing=false;
   export let canPrepareAgain=false;
   export let busy=false;
-  // A running command may be changing recorded installers (not a disk check).
-  export let changing=false;
+  // Set while a running command prepares or removes this installer.
+  export let underway:'preparing'|'removing'|null=null;
   export let act:(action:'arm'|'firmware'|'cleanup'|'again')=>void=()=>{};
   type Action='arm'|'firmware'|'cleanup'|'again';
   // Shown before restarting, since the app can't be seen from the installer.
@@ -21,11 +21,9 @@
     'Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.'
   ];
   $: ready=['staged','arming','boot-scheduled'].includes(op.status);
-  // An unfinished status is under way while a command changes it, and was
-  // interrupted otherwise; removal sets `cleaning` first.
-  $: underway=!ready && changing;
-  $: removal=op.status==='cleaning';
-  $: heading=ready ? 'Temporary installer' : removal ? (underway ? 'Removing the temporary installer' : "Removing the temporary installer didn't finish") : underway ? 'Preparing the installer' : "Preparing the installer didn't finish";
+  // Without a command on it, an unfinished status was interrupted; an
+  // interrupted removal is left `cleaning`.
+  $: heading=underway==='removing' ? 'Removing the temporary installer' : underway==='preparing' ? 'Preparing the installer' : ready ? 'Temporary installer' : op.status==='cleaning' ? "Removing the temporary installer didn't finish" : "Preparing the installer didn't finish";
   $: scheduled=op.status==='boot-scheduled';
   // 0 Turn off Secure Boot, 1 Start installer, 2 Install Omarchy, 3 Clean up;
   // -1 when preparation needs attention.
@@ -42,7 +40,9 @@
 
 <article aria-label={`Temporary installer on Disk ${op.diskNumber}`}>
   <h3>{heading} · Disk {op.diskNumber}</h3>
-  {#if ready}
+  {#if underway}
+    <p>Keep this window open.</p>
+  {:else if ready}
     <ol class="steps" aria-label="Steps">
       {#each steps as step,index}
         <li class:done={index<current && !(index===0 && secureBoot==null)} class:maybe={index===0 && secureBoot==null && current>0} class:current={index===current} aria-current={index===current ? 'step' : undefined}>{step}</li>
@@ -51,13 +51,11 @@
     <p>{TEXT[current]}</p>
     {#if current===0}<details class="how"><summary>How?</summary><p>Look for a Security or Boot tab, set Secure Boot to Disabled, then save and exit.</p></details>{/if}
     {#if current===1 || current===2}<p>{INSTALLER}</p>{/if}
-  {:else if underway}
-    <p>Keep this window open.</p>
   {:else}
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>
   {/if}
   {#if primary}<button class="primary" disabled={busy} onclick={()=>act(primary)}>{labels[primary]}</button>{/if}
-  {#if ready}
+  {#if ready && !underway}
     <details>
       <summary>Starting Windows later</summary>
       <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once to add Windows to its menu.</p>

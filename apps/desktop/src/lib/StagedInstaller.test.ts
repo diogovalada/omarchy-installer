@@ -420,7 +420,7 @@ it('offers only replacing when Windows cannot give enough space to keep it',asyn
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
 });
 // The plan the helper reviews for keeping Windows with 64 GiB on `measured()`.
-const reviewed=(layoutSha256='layout')=>({summary:'EXPERIMENTAL TESTING BUILD: real disk changes.\n\nPrepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB. Leave 64 GiB unallocated for Omarchy after it.',review:{diskNumber:0,diskSizeBytes:500*GiB,layoutSha256,targetKind:'shrink',shrink:{label:'C:',partitionGuid:'guid',offsetBytes:MiB,beforeSizeBytes:500*GiB,afterSizeBytes:428*GiB},temporary:{offsetBytes:MiB+428*GiB,sizeBytes:8*GiB},omarchy:{offsetBytes:MiB+436*GiB,sizeBytes:64*GiB},largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:32*GiB,bitLocker:['C:'],warning:'experimental'}});
+const reviewed=(layoutSha256='layout')=>({summary:'EXPERIMENTAL TESTING BUILD: real disk changes.\n\nPrepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB. Leave 64 GiB unallocated for Omarchy after it.',review:{operationId:'11111111-1111-4111-8111-111111111111',diskNumber:0,diskSizeBytes:500*GiB,layoutSha256,targetKind:'shrink',shrink:{label:'C:',partitionGuid:'guid',offsetBytes:MiB,beforeSizeBytes:500*GiB,afterSizeBytes:428*GiB},temporary:{offsetBytes:MiB+428*GiB,sizeBytes:8*GiB},omarchy:{offsetBytes:MiB+436*GiB,sizeBytes:64*GiB},largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:32*GiB,bitLocker:['C:'],warning:'experimental'}});
 const reviewing=(stagedReview:object|null,extra:object={})=>{
   const base=measured().snapshot;
   return {pending:false,snapshot:{...base,status:'running',stage:'staged-installer',stagedIso:{...base.stagedIso,disks:[{...fullDisk,layoutSha256:'layout',regions:[checkedC]}]},stagedReview,...extra}};
@@ -664,16 +664,45 @@ it('can check disks beside an installer that cannot be removed',async()=>{
 });
 it('says a removal is under way, or that it did not finish',async()=>{
   const removing={...card('cleaning',null).snapshot,status:'running',stage:'staged-installer',message:'Loading Windows disk tools...'};
-  state.set({pending:false,stagedAction:'cleanup',snapshot:removing});
+  const stagedTarget={action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'};
+  // From the click on, before the record says `cleaning`.
+  state.set({pending:true,stagedTarget,snapshot:card('boot-scheduled',null,true).snapshot});
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
+  expect(screen.queryByText('Starting Windows later')).not.toBeInTheDocument();
+  state.set({pending:false,stagedAction:'cleanup',stagedTarget,snapshot:removing});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Keep this window open.')).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Remove temporary installer'})).not.toBeInTheDocument();
-  state.set({pending:false,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  state.set({pending:false,stagedAction:'cleanup',stagedTarget,snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
   await tick();
   expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
+});
+it('keeps other recorded installers as they are while one is prepared or removed',async()=>{
+  const other={operationId:'22222222-2222-4222-8222-222222222222',status:'copying',diskNumber:1,temporaryBytes:8*GiB,message:''};
+  const mine={operationId:'11111111-1111-4111-8111-111111111111',status:'copying',diskNumber:0,temporaryBytes:8*GiB,message:''};
+  // Preparing another installer beside one that didn't finish.
+  state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',stagedRecovery:{operations:[other,mine],recordErrors:[]}}));
+  const view=render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('region',{name:'Preparing the installer'})).toBeInTheDocument();
+  expect(screen.getAllByRole('article')).toHaveLength(1);
+  expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
+  view.unmount();
+  // Removing one installer.
+  state.set({pending:false,stagedTarget:{action:'cleanup',operationId:mine.operationId},snapshot:{status:'running',stagedTesting:true,stagedRecovery:{operations:[other,{...mine,status:'cleaning'}],recordErrors:[]}}});
+  const home=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
+  // Another command, such as the USB route's disk check, changes neither.
+  state.set({pending:false,stagedTarget:null,snapshot:{status:'inspecting',kind:'usb',stagedTesting:true,stagedRecovery:{operations:[other],recordErrors:[]}}});
+  await tick();
+  expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
+  home.unmount();
 });
 it('confirms a removal on the home screen, but leaves next steps to the card',async()=>{
   const removed='Temporary installer partitions and its firmware entry were removed.';

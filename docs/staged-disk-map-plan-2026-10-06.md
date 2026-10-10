@@ -453,13 +453,16 @@ and found these, fixed in PR 6 (`staged-vm-fixes`):
 
 - **Declined Review:** "Nothing was changed." shows beside **Review changes**.
   The store had it, but the screen showed only the provider's result message.
-- **Card while working:** an unfinished status means "under way" while a
-  command (not a disk check) runs, and "didn't finish" otherwise. The card
-  reads "Preparing the installer · Disk 0" or "Removing the temporary
-  installer · Disk 0" with "Keep this window open." and no actions; an
-  interrupted removal (`cleaning`) reads "Removing the temporary installer
-  didn't finish · Disk 0". In the flow, the preparing panel stands in for the
-  new installer's card.
+- **Card while working:** only the record a running command changes is under
+  way: the one its Review prepares (the review payload now carries the plan's
+  `operationId`) or the one being removed (the setup store's `stagedTarget`,
+  set when a staged command is sent and kept while answering its Review or
+  stopping it). Its card reads "Preparing the installer · Disk 0" or
+  "Removing the temporary installer · Disk 0" with "Keep this window open."
+  and no actions. Other records, and every record during a disk check or the
+  USB route, keep their own state; an interrupted removal (`cleaning`) reads
+  "Removing the temporary installer didn't finish · Disk 0". In the flow, the
+  preparing panel stands in for the new installer's card only.
 - **Result messages:** only a firmware restart's and a removal's results show.
   The provider's advice after preparing ("Restart into the installer…") and
   after setting the next restart contradicted the card's current step. On the

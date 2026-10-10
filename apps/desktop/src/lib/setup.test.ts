@@ -35,6 +35,22 @@ describe('setup error recovery', () => {
     // The failed snapshot is still the arming's, not a removal's.
     expect(get(setup).stagedAction).toBe('arm');
   });
+  it('names the target of a running staged command until another command starts', async () => {
+    const { setup } = await import('./setup');
+    invoke.mockResolvedValue({kind:null,status:'running'});
+    await setup.stagedIso('cleanup',null,'id');
+    expect(get(setup).stagedTarget).toEqual({action:'cleanup',operationId:'id'});
+    // Answering Review or stopping belongs to the same staged command.
+    await setup.respondStagedReview(true);
+    await setup.cancel();
+    expect(get(setup).stagedTarget).toEqual({action:'cleanup',operationId:'id'});
+    // A rejected command leaves the running one's target.
+    invoke.mockRejectedValueOnce('A setup operation is already running');
+    await setup.stagedIso('inspect');
+    expect(get(setup).stagedTarget).toEqual({action:'cleanup',operationId:'id'});
+    await setup.inspect('usb');
+    expect(get(setup).stagedTarget).toBeNull();
+  });
   it('clears a polling-only connection error after reconnecting', async () => {
     const { setup } = await import('./setup');
     invoke.mockRejectedValueOnce('Connection unavailable').mockResolvedValue({kind:'usb',status:'ready'});

@@ -32,14 +32,19 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // The review payload the helper will build from the same plan as the review
 // summary (see the disk map plan). It sits outside the confirmation binding, so
 // it is display-only.
-export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
+export interface StagedReviewPlan { operationId?:string;diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 // `stagedAction` is the staged-installer action whose operation the snapshot
 // reflects: set when a command is accepted, null after any other accepted
 // command, unchanged when a command is rejected before starting. It outlives
 // any one screen, so a failed operation can be traced to it from the home
 // screen too.
-const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null }>({ snapshot:null, pending:false, error:null, stagedAction:null });
+// `stagedTarget` is the staged-installer action a command carries out and the
+// recorded installer it acts on: set when a staged command is sent, kept while
+// answering its Review or stopping it, cleared by any other command, and
+// restored when a command is rejected. Screens read it only while busy.
+export interface StagedTarget { action:string; operationId:string|null }
+const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null; stagedTarget?: StagedTarget | null }>({ snapshot:null, pending:false, error:null, stagedAction:null, stagedTarget:null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
@@ -51,9 +56,12 @@ async function refresh() {
 }
 async function command(name: string, args: Record<string, unknown> = {}) {
   if (!isTauri() || get(state).pending) return;
-  epoch += 1; commandError=null; state.update(s => ({ ...s, pending:true, error:null }));
+  epoch += 1; commandError=null;
+  const previous = get(state).stagedTarget ?? null;
+  const stagedTarget = name==='staged_iso' ? {action:String(args.action),operationId:typeof args.operationId==='string' ? args.operationId : null} : name==='respond_staged_review' || name==='cancel_setup' ? previous : null;
+  state.update(s => ({ ...s, pending:true, error:null, stagedTarget }));
   try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot, stagedAction:name==='staged_iso' ? String(args.action) : null })); }
-  catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError })); }
+  catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError, stagedTarget:previous })); }
   finally { state.update(s => ({ ...s, pending:false })); }
 }
 export const setup = { subscribe:state.subscribe, refresh,
