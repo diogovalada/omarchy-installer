@@ -24,6 +24,17 @@ describe('setup error recovery', () => {
     await setup.inspect('usb');
     expect(get(setup).stagedAction).toBeNull();
   });
+  it("keeps the failed operation's action when the next command is rejected before starting", async () => {
+    const { setup } = await import('./setup');
+    invoke.mockResolvedValueOnce({kind:null,status:'running'}).mockResolvedValueOnce({kind:null,status:'failed',error:'Boot entry rejected'});
+    await setup.stagedIso('arm',null,'id');
+    await setup.refresh();
+    invoke.mockRejectedValueOnce('A setup operation is already running').mockResolvedValue({kind:null,status:'failed',error:'Boot entry rejected'});
+    await setup.stagedIso('cleanup',null,'id');
+    await setup.refresh();
+    // The failed snapshot is still the arming's, not a removal's.
+    expect(get(setup).stagedAction).toBe('arm');
+  });
   it('clears a polling-only connection error after reconnecting', async () => {
     const { setup } = await import('./setup');
     invoke.mockRejectedValueOnce('Connection unavailable').mockResolvedValue({kind:'usb',status:'ready'});
