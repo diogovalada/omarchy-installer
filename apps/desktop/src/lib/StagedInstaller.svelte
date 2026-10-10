@@ -152,11 +152,12 @@
     return {...current,disks,choices};
   }
   // Recorded installer actions; Prepare again removes it, then checks disks.
-  // Checking disks beside an installer is offered once removing it failed;
-  // after other failures, retrying is what helps. The setup store remembers
-  // the last action, so the offer survives moving between the home screen
-  // and this flow.
-  $: removalFailed=!!error && operations.length>0 && $setup.stagedAction==='cleanup';
+  // Checking disks beside an installer is offered once removing it failed:
+  // the last command was a removal and the operation itself ended as failed
+  // (not a polling or other error). After other failures, retrying is what
+  // helps. The setup store outlives this screen, so the offer carries from
+  // the home screen into the flow.
+  $: removalFailed=operations.length>0 && $setup.stagedAction==='cleanup' && $setup.snapshot?.status==='failed';
   function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
@@ -327,5 +328,5 @@
   progress::-webkit-progress-bar{border-radius:3px;background:var(--surface-raised)}progress::-webkit-progress-value{border-radius:3px;background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
-  @media(max-width:550px){h2{font-size:20px}.disk-row .hint{order:3;flex-basis:100%}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
+  @media(max-width:550px){h2{font-size:20px}.disk-row{flex-wrap:wrap}.disk-row .hint{order:3;flex-basis:100%}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
 </style>

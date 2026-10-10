@@ -611,6 +611,10 @@ it('offers checking disks after a removal failed elsewhere, such as on the home 
   state.set({pending:false,stagedAction:'arm',snapshot:{...card('staged',false).snapshot,status:'failed',error:'Firmware rejected the boot entry.'}});
   await tick();
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
+  // A polling error after a removal that succeeded isn't a failed removal.
+  state.set({pending:false,stagedAction:'cleanup',error:'Connection unavailable',snapshot:{...card('copying',true).snapshot,status:'complete'}});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
 });
 it('can check disks beside an installer that cannot be removed',async()=>{
   state.set(card('copying',true));
@@ -619,7 +623,7 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Remove temporary installer'}));
   // The real store records the action; the mock does not.
-  state.set({...card('copying',true),stagedAction:'cleanup',error:'The recorded staging disk cannot be identified uniquely.'});
+  state.set({pending:false,stagedAction:'cleanup',snapshot:{...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
   await tick();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Check disks again'}));

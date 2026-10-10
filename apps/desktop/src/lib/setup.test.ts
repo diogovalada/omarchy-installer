@@ -15,6 +15,15 @@ describe('setup error recovery', () => {
     await setup.inspect('usb');
     expect(get(setup).error).toBeNull();
   });
+  it('remembers the staged action of the last command only', async () => {
+    const { setup } = await import('./setup');
+    invoke.mockResolvedValue({kind:null,status:'running'});
+    await setup.stagedIso('cleanup',null,'id');
+    expect(get(setup).stagedAction).toBe('cleanup');
+    // Any other command, such as the USB route, clears it.
+    await setup.inspect('usb');
+    expect(get(setup).stagedAction).toBeNull();
+  });
   it('clears a polling-only connection error after reconnecting', async () => {
     const { setup } = await import('./setup');
     invoke.mockRejectedValueOnce('Connection unavailable').mockResolvedValue({kind:'usb',status:'ready'});
