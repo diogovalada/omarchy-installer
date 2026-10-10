@@ -14,14 +14,18 @@ const widths = [1180, 820, 390];
 const output = path.join(__dirname, '..', 'artifacts', 'staged-disk-map', label);
 
 // Words and size mentions in the whole visible section (navigation included;
-// closed disclosures don't count). Height to button runs from the first
-// section heading to the last primary button.
+// closed disclosures don't count). Height to button runs from the disk row
+// (or the first section heading) to the last primary button.
 function measure() {
   const root = document.querySelector('.staged');
   if (!root) return null;
+  // Screen-reader-only text isn't visible, so it doesn't count.
+  const hidden = [...root.querySelectorAll('.visually-hidden')];
+  hidden.forEach(el => { el.style.display = 'none'; });
   const text = root.innerText;
-  const visible = [...root.querySelectorAll('h3, button.primary')].filter(el => el.offsetParent);
-  const heading = visible.find(el => el.tagName === 'H3');
+  hidden.forEach(el => { el.style.display = ''; });
+  const visible = [...root.querySelectorAll('[data-measure-start], h3, button.primary')].filter(el => el.offsetParent);
+  const heading = visible.find(el => el.matches('[data-measure-start]')) ?? visible.find(el => el.tagName === 'H3');
   const button = visible.filter(el => el.matches('button.primary')).at(-1);
   return {
     words: text.split(/\s+/).filter(Boolean).length,
