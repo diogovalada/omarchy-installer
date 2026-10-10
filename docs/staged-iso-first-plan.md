@@ -2,6 +2,14 @@
 
 Decision date: 2026-09-06.
 
+**October 10 update — review:** the helper now sends a structured review
+beside the confirmed plan, and Review replaces the choose screen: Now and After
+bars drawn from the plan (only when it matches the inspected layout), short
+bullets, one test-build warning and the full summary under "Full details".
+Preparation progress shows in the same place. Declining Review is no longer a
+failure: the step ends as cancelled with nothing changed, and the choose screen
+returns intact. See the [disk map plan](staged-disk-map-plan-2026-10-06.md).
+
 **October 10 update — space editor:** below the disk map, a zoomed bar shows
 how the space source will be laid out: the partition's used space, the space
 Windows can't release, the temporary installer and Omarchy. When Windows is

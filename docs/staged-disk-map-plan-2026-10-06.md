@@ -552,7 +552,8 @@ Plumbing:
 
 - Add an optional extra field to `confirm()` and emit `review` beside `summary`
   in `confirmation_required`, **outside `plan`**, so the confirmation binding
-  hash is unchanged.
+  hash is unchanged. (Implemented as `confirm_reviewed()`, which `confirm()`
+  calls without a review, so the other confirmations are untouched.)
 - In `setup.rs`, pass `value["review"]` to `review_staged_write`, which stores
   `{"summary": …, "review": …}` in `stagedReview`.
 - Add `review?:StagedReviewPlan` to the `stagedReview` type in `setup.ts`.
@@ -593,10 +594,10 @@ New files, flat in `apps/desktop/src/lib/` to match the existing layout:
 | --- | --- |
 | `stagedLayout.ts` | Pure, DOM-free model and copy (below) |
 | `stagedLayout.test.ts` | Unit tests for it |
-| `StagedDiskMap.svelte` | Overview radio group; read-only mode for the Now and After bars |
+| `StagedDiskMap.svelte` | Overview radio group |
 | `StagedSpaceEditor.svelte` | Zoomed bar, range handle, number field, Keep/Replace toggle |
 | `StagedPartitionTable.svelte` | "All partitions (n)" disclosure |
-| `StagedReview.svelte` | Review screen and preparing panel |
+| `StagedReview.svelte` | Review screen with its own read-only Now and After bars (names only; the bullets give sizes); the preparing panel sits beside it in `StagedInstaller.svelte` |
 | `StagedSteps.svelte` | Card after preparing (PR 4) |
 
 `stagedLayout.ts` functions:

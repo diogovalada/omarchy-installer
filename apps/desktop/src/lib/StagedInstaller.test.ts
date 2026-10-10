@@ -248,11 +248,13 @@ it('keeps the space source when a later measurement would move the default',asyn
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*GiB});
 });
-it('locks the map while a reviewed plan waits',async()=>{
+it('replaces the choose screen while a reviewed plan waits',async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,status:'running',stage:'staged-installer',stagedReview:{summary:'Prepare the installer on Disk 0?'}}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  for(const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled();
+  expect(screen.getByRole('region',{name:'Review changes'})).toBeInTheDocument();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Refresh'})).not.toBeInTheDocument();
 });
 it('names a target that is not the Windows partition',async()=>{
   const data={...fullDisk,regions:[{...checkedC,label:'D:',isWindows:false}]};
@@ -407,11 +409,94 @@ it('offers only replacing when Windows cannot give enough space to keep it',asyn
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target});
 });
-it('tells users to leave Secure Boot on until the installer is prepared',async()=>{
+// The plan the helper reviews for keeping Windows with 64 GiB on `measured()`.
+const reviewed=(layoutSha256='layout')=>({summary:'EXPERIMENTAL TESTING BUILD: real disk changes.\n\nPrepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB. Leave 64 GiB unallocated for Omarchy after it.',review:{diskNumber:0,diskSizeBytes:500*GiB,layoutSha256,targetKind:'shrink',shrink:{label:'C:',partitionGuid:'guid',offsetBytes:MiB,beforeSizeBytes:500*GiB,afterSizeBytes:428*GiB},temporary:{offsetBytes:MiB+428*GiB,sizeBytes:8*GiB},omarchy:{offsetBytes:MiB+436*GiB,sizeBytes:64*GiB},largestFreeAfterBytes:64*GiB,minimumOmarchyBytes:32*GiB,bitLocker:['C:'],warning:'experimental'}});
+const reviewing=(stagedReview:object|null,extra:object={})=>{
+  const base=measured().snapshot;
+  return {pending:false,snapshot:{...base,status:'running',stage:'staged-installer',stagedIso:{...base.stagedIso,disks:[{...fullDisk,layoutSha256:'layout',regions:[checkedC]}]},stagedReview,...extra}};
+};
+it('moves the Secure Boot advice from the choose screen to Review',async()=>{
   state.set(measured());
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByRole('note')).toHaveTextContent("Secure Boot is on. Leave it on; you'll turn it off after preparing.");
+  expect(screen.queryByText(/Secure Boot/)).not.toBeInTheDocument();
+  state.set(reviewing(reviewed()));
+  await tick();
+  expect(screen.getByRole('region',{name:'Review changes'})).toHaveTextContent('Next: restart into firmware settings to turn off Secure Boot.');
+});
+it('reviews the plan with Now and After bars, short bullets and one warning',async()=>{
+  state.set(reviewing(reviewed()));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const review=screen.getByRole('region',{name:'Review changes'});
+  expect(screen.getByRole('heading',{name:'Prepare Disk 0?'})).toBeInTheDocument();
+  expect(review.querySelectorAll('.bar')).toHaveLength(2);
+  expect(screen.getAllByRole('listitem').map(item=>item.textContent)).toEqual([
+    'C: shrinks from 500 to 428 GiB. Your files stay.',
+    'Omarchy can use 64 GiB. The 8 GiB installer is removed later.',
+    'BitLocker on C: pauses until you resume it. Files stay encrypted.',
+    'Next: restart into firmware settings to turn off Secure Boot.'
+  ]);
+  expect(review).toHaveTextContent('Test build: real disk changes. This ISO may not start, or may refuse this disk.');
+  expect(screen.getByText('Full details')).toBeInTheDocument();
+  expect(review).toHaveTextContent('Shrink C: from 500.0 to 428.0 GiB.');
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+});
+it('shows the bullets without bars when the disk changed since the check',async()=>{
+  state.set(reviewing(reviewed('changed')));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const review=screen.getByRole('region',{name:'Review changes'});
+  expect(review.querySelector('.bars')).toBeNull();
+  expect(review).toHaveTextContent('C: shrinks from 500 to 428 GiB. Your files stay.');
+});
+it('returns to the choose screen with the selection intact when Review is declined',async()=>{
+  state.set({pending:false,snapshot:{...reviewing(null).snapshot,status:'complete',stage:'complete'}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.input(screen.getByRole('spinbutton',{name:'Space for Omarchy'}),{target:{value:'40'}});
+  state.set(reviewing(reviewed()));
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  expect(calls.respondStagedReview).toHaveBeenLastCalledWith(false);
+  // The helper stops; the app reports a cancelled step, not a failure.
+  state.set({pending:false,snapshot:{...reviewing(null).snapshot,status:'cancelled',stage:'staged-installer',message:'Nothing was changed.',error:null}});
+  await tick();
+  expect(screen.queryByRole('region',{name:'Review changes'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('spinbutton',{name:'Space for Omarchy'})).toHaveValue(40);
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+});
+it('shows preparation progress where the review was',async()=>{
+  state.set(reviewing(reviewed()));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Prepare installer'}));
+  expect(calls.respondStagedReview).toHaveBeenLastCalledWith(true);
+  state.set(reviewing(null,{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false}));
+  await tick();
+  const panel=screen.getByRole('region',{name:'Preparing the installer'});
+  expect(panel).toHaveTextContent('Copying and verifying the installer...');
+  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
+  expect(screen.getAllByRole('button',{name:'Stop preparing'})).toHaveLength(1);
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+});
+it('keeps progress and Stop on the home screen during preparation',async()=>{
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'copying',diskNumber:0,temporaryBytes:8*GiB,message:''};
+  state.set(reviewing({...reviewed(),approved:true},{kind:null,stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false,stagedRecovery:{operations:[op],recordErrors:[]}}));
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByText('Copying and verifying the installer...')).toBeInTheDocument();
+  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+});
+it('shows the preparing panel when opened during preparation',async()=>{
+  state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false}));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('region',{name:'Preparing the installer'})).toHaveTextContent('Copying and verifying the installer...');
+  expect(screen.queryByRole('region',{name:'Review changes'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 });
 it('reviews the staging plan in the app before any disk change',async()=>{
   state.set({pending:false,snapshot:{...measured().snapshot,status:'running',stagedReview:{summary:'Prepare the installer on Disk 0?\n\nShrink C: from 500.0 to 428.0 GiB.'}}});

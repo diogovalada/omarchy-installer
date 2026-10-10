@@ -3,8 +3,10 @@
 <body><div id="app"></div><script type="module">
 // In-memory desktop bridge: no host inspection or disk writes.
 // Scenarios: ?limited ?oem ?free ?two-ntfs ?two-disks ?failed ?replace-only
-// ?checking ?review, or ?layout=<name> for test-fixtures/staged-layouts/<name>.json
-// (a captured `stagedIso` value; see the README there).
+// ?checking ?review (?review=stale: the disk changed after the check), or
+// ?layout=<name> for test-fixtures/staged-layouts/<name>.json (a captured
+// `stagedIso` value; see the README there). In Review, Cancel ends as the app
+// reports a declined review, and Prepare installer shows copy progress.
 // Each check replays the provider's timeline and progress messages: the
 // layout first, then one partition measured at a time. A Recheck returns only
 // at the end, as the real resize query does. Captured layouts are published as
@@ -103,7 +105,7 @@ function reviewFor() {
   // The helper names a partition by drive letter, as the plan's review rules say.
   const name=c.label.match(/([A-Z]:)\)?$/)?.[1] ?? `Partition ${c.partitionNumber}`;
   const largest=Math.max(64*GiB+(next?.kind==='free' ? next.sizeBytes : 0),...disk.regions.filter((r,i)=>r.kind==='free' && i!==index+1).map(r=>r.sizeBytes));
-  const review={diskNumber:disk.diskNumber,diskSizeBytes:disk.diskSizeBytes,layoutSha256:disk.layoutSha256,targetKind:'shrink',
+  const review={diskNumber:disk.diskNumber,diskSizeBytes:disk.diskSizeBytes,layoutSha256:query.get('review')==='stale' ? 'changed' : disk.layoutSha256,targetKind:'shrink',
     shrink:{label:name,partitionGuid:c.partitionGuid,offsetBytes:c.offsetBytes,beforeSizeBytes:c.sizeBytes,afterSizeBytes:start-c.offsetBytes},
     temporary:{offsetBytes:start,sizeBytes:temporary},omarchy:{offsetBytes:start+temporary,sizeBytes:64*GiB},
     largestFreeAfterBytes:largest,minimumOmarchyBytes:minimum,bitLocker,warning:'experimental'};
@@ -154,7 +156,8 @@ function check(resize) {
   }
   if(scenario!=='checking') steps.push(()=>{
     Object.assign(snapshot,{status:'complete',stage:'complete',message:'Temporary installer updated.',stagedIso:result()});
-    if(query.has('review') && !resize) snapshot.stagedReview=reviewFor();
+    // The helper waits for the answer while a review is shown.
+    if(query.has('review') && !resize) Object.assign(snapshot,{status:'running',stage:'staged-installer',stagedReview:reviewFor()});
   });
   steps.forEach((step,index)=>timers.push(setTimeout(async()=>{
     step(); await setup.refresh();
@@ -165,6 +168,11 @@ window.isTauri=true;
 window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
   if(command==='setup_status')return structuredClone(snapshot);
   if(command==='staged_iso' && args.action==='inspect'){check(args.resize);return structuredClone(snapshot);}
+  if(command==='respond_staged_review'){
+    if(args.approved) Object.assign(snapshot,{stagedReview:{...snapshot.stagedReview,approved:true},stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false});
+    else Object.assign(snapshot,{stagedReview:null,status:'cancelled',message:'Nothing was changed.'});
+    return structuredClone(snapshot);
+  }
   throw new Error('Preview only: this action is not implemented.');
 }};
 check(null);

@@ -13,6 +13,12 @@ downloads. Published versions and their artifacts are immutable.
   space will be laid out, with a handle that sets Omarchy's size in step with
   the size field. Keep and Replace are a two-way toggle, and selecting the
   space Windows can't release explains why.
+- Install without USB (testing builds): Review replaces the choose screen with
+  Now and After bars drawn from the actual plan, four short bullets and one
+  test-build warning; the full summary is under "Full details". Preparation
+  progress shows in the same place. Cancelling Review returns to the choose
+  screen with the selection intact instead of reporting a failure. The Secure
+  Boot advice moved from the choose screen to Review's "Next" bullet.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
