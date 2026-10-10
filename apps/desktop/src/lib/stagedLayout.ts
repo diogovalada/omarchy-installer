@@ -14,7 +14,10 @@ const KEPT_REASON='System or unsupported partition; kept unchanged.';
 export type Tone='normal'|'dimmed'|'hatched'|'checking'|'outlined'|'outlined-dimmed';
 export type RegionAction='refresh'|'recheck'|null;
 // `detail` is the provider's own reason, for the All partitions table.
-export interface RegionStatus { tone:Tone;text:string;action:RegionAction;detail?:string }
+// `cause` says what blocks a partition, so help can fit it: files Windows
+// can't move, too little free space, or no usable measurement.
+export type BlockCause='files'|'space'|'measure';
+export interface RegionStatus { tone:Tone;text:string;action:RegionAction;detail?:string;cause?:BlockCause }
 export interface StatusContext { temporaryBytes:number;minimumBytes:number;usable:boolean;checking?:boolean }
 export interface OverviewSegment { key:string;regions:StagedRegion[];offsetBytes:number;sizeBytes:number;widthPercent:number;label:string }
 export type EditorMode='keep'|'replace';
@@ -174,12 +177,14 @@ export function cantReleaseLine(region:StagedRegion) {
 // Why a partition that fits only the installer can't keep Windows, with the
 // numbers, and what helps when the free-space reserve is the limit: freed
 // space then raises the release one for one. Files Windows can't move don't
-// yield to freeing space, so no advice then.
+// yield to freeing space, and no more can be freed than is in use, so no
+// advice then.
 export function cantKeepLine(region:StagedRegion,temporaryBytes:number,minimumBytes:number,name:string) {
   const release=region.maximumReleaseBytes ?? 0, reserve=region.reserveBytes ?? 0;
   const line=`${name} can give only ${formatSize(Math.max(0,release-temporaryBytes),'down')}; Omarchy needs ${formatSize(minimumBytes,'up')}.`;
-  const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
-  if(room!=null && room-release<ALIGNMENT_SLACK_BYTES) return `${line} Free up ${formatSize(temporaryBytes+minimumBytes-release,'up')} more in Windows, then refresh.`;
+  if(region.freeBytes==null || reserve<=0) return line;
+  const room=region.freeBytes-reserve, missing=temporaryBytes+minimumBytes-release;
+  if(room-release<ALIGNMENT_SLACK_BYTES && missing<=region.sizeBytes-region.freeBytes) return `${line} Free up ${formatSize(missing,'up')} more in Windows, then refresh.`;
   return line;
 }
 
@@ -269,7 +274,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       // Even an empty partition can't hold the installer plus the reserve.
       if(reserve>0 && region.sizeBytes<context.temporaryBytes+reserve) return status('hatched',`${name} is too small for the installer.`);
       const missing=reserve>0 && region.freeBytes!=null ? context.temporaryBytes+reserve-region.freeBytes : 0;
-      return status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh');
+      return {...status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
     }
     case 'unchecked':
       return context.checking ? status('checking',`Checking how much ${name} can shrink. This can take a few minutes.`) : status('dimmed',`${name} wasn't checked. Refresh to try again.`,'refresh');
@@ -277,7 +282,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       const release=region.maximumReleaseBytes ?? 0;
       if(context.usable) {
         const {maxGiB,canKeep}=limits(region,context.temporaryBytes,context.minimumBytes);
-        return status('normal',`${name} · ${canKeep ? `can give Omarchy up to ${maxGiB} GiB` : 'room for the installer only'}`);
+        return status('normal',`${name} ${canKeep ? `can give Omarchy up to ${maxGiB} GiB` : 'has room for the installer only'}`);
       }
       if(release<context.temporaryBytes) {
         // Freeing space helps when the reserve is the limit, or when only
@@ -287,9 +292,9 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
         if(room!=null && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
           const missing=context.temporaryBytes-(room<context.temporaryBytes ? room : release);
-          return status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck');
+          return {...status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
         }
-        if(room!=null) return status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck');
+        if(room!=null) return {...status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck'),cause:'files'};
         if(region.resizeReason) return status('hatched',region.resizeReason,'recheck');
         const needed=formatSize(context.temporaryBytes-release,'up');
         return status('hatched',release<MiB ? `Windows can't release space from ${name}. ${needed} is needed.` : `Windows can release only ${formatSize(release,'down')} from ${name}. ${needed} more is needed.`,'recheck');
@@ -297,7 +302,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       return status('hatched',region.resizeReason || `Windows can't shrink ${name}.`,'recheck');
     }
     case 'failed':
-      return {...status('hatched',`Windows couldn't measure ${name}.`,'recheck'),...(region.resizeReason ? {detail:region.resizeReason} : {})};
+      return {...status('hatched',`Windows couldn't measure ${name}.`,'recheck'),cause:'measure',...(region.resizeReason ? {detail:region.resizeReason} : {})};
     default:
       return !region.resizeReason || region.resizeReason===KEPT_REASON ? status('dimmed',`${name} · ${size} · kept as is`) : status('hatched',`${name} · ${size} · ${region.resizeReason}`);
   }

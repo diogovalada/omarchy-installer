@@ -165,7 +165,7 @@
   .temporary{background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--accent-hover) 55%,var(--surface-deep)) 0 3px,var(--surface-deep) 3px 7px);background-clip:padding-box}
   .omarchy{background-color:var(--accent)}
   /* Only the handle takes the pointer, so clicking a label doesn't move it. */
-  .handle{position:absolute;top:-5px;height:66px;margin:0;padding:0;background:transparent;appearance:none;-webkit-appearance:none;pointer-events:none;z-index:2}
+  .handle{position:absolute;top:-5px;height:66px;margin:0;padding:0;background:transparent;appearance:none;-webkit-appearance:none;pointer-events:none;cursor:ew-resize;z-index:2}.handle:disabled{cursor:default}
   .handle::-webkit-slider-thumb{pointer-events:auto;cursor:ew-resize}.handle::-moz-range-thumb{pointer-events:auto;cursor:ew-resize}
   .handle:disabled::-webkit-slider-thumb{cursor:default}
   .handle::-webkit-slider-runnable-track{height:66px;background:transparent}

@@ -63,7 +63,8 @@
   .text{position:relative;margin:0 6px;padding:1px 4px;border-radius:2px;background:rgb(19 20 28/.75);overflow:hidden;text-overflow:clip}
   .used{background:linear-gradient(to right,var(--border-strong) var(--used),var(--surface-raised) var(--used))}
   .dimmed{color:var(--text-dim)}.dimmed:not(.used){background:var(--border)}.outlined-dimmed{opacity:.6}
-  .hatched{background:repeating-linear-gradient(135deg,var(--border) 0 2px,var(--surface-deep) 2px 8px)}
+  /* The same hatching as the editor's reserved space. */
+  .hatched{background:repeating-linear-gradient(135deg,var(--border) 0 2px,var(--surface-raised) 2px 8px)}
   .checking{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-hover) 50%,var(--surface-raised) 100%) 0 0/200% 100%;animation:shimmer 1.6s linear infinite}
   .outlined,.outlined-dimmed{background:transparent;border:1px dashed var(--border-strong)}
   .selected{box-shadow:inset 0 0 0 2px var(--accent);opacity:1}

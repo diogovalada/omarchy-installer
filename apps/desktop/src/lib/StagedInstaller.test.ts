@@ -107,6 +107,8 @@ it('explains a partition that cannot provide enough space without waiting for a 
   expect(screen.getByRole('radio',{name:line})).toBeChecked();
   expect(screen.getByText(line,{selector:'p'})).toBeInTheDocument();
   expect(screen.getByText('No space can be used yet.')).toBeInTheDocument();
+  // The line already says to free up space; without the USB route there is no other help.
+  expect(screen.queryByText('What can help?')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Refresh disks'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
 });
@@ -122,7 +124,7 @@ it('shows a full disk while Windows measures its resize limit',async()=>{
   expect(calls.stagedIso).not.toHaveBeenCalled();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:40*GiB,temporaryBytes:8*GiB}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('status')).toHaveTextContent('Disk check finished.');
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:64*GiB});
@@ -140,11 +142,11 @@ it('keeps browsing available while measured limits arrive in one inspection',asy
   await tick();
   expect(calls.stagedIso).not.toHaveBeenCalled();
   await fireEvent.click(screen.getByRole('button',{name:'Disk 0 · 500 GiB'}));
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
   state.set({pending:false,snapshot:{status:'complete',stage:'complete',stagedTesting:true,stagedIso:{...base,choices:[encrypted],disks:[{...fullDisk,regions:[checkedC]},{...other,regions:[{...other.regions[0],resizeState:'checked',maximumReleaseBytes:10*GiB,reserveBytes:50*GiB}]}]}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
   expect(calls.stagedIso).not.toHaveBeenCalled();
 });
@@ -221,7 +223,7 @@ it('chooses free space first and selects partitions with the keyboard',async()=>
   expect(screen.getByText('Temporary installer 8 GiB')).toBeInTheDocument();
   expect(screen.queryByRole('slider')).not.toBeInTheDocument();
   await fireEvent.keyDown(freeSegment,{key:'ArrowLeft'});
-  const windows=screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'});
+  const windows=screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'});
   expect(windows).toBeChecked();
   expect(windows).toHaveFocus();
   await fireEvent.keyDown(windows,{key:'Home'});
@@ -361,7 +363,7 @@ it('keeps the space being edited when a later measurement would move the default
   await fireEvent.input(screen.getByRole('spinbutton',{name:'Space for Omarchy'}),{target:{value:'40'}});
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[encrypted,dataChoice],blocked:[],disks:[disk({...data,resizeState:'checked',maximumReleaseBytes:700*GiB,reserveBytes:100*GiB})],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',{diskNumber:0,diskUniqueId:'windows-disk',target:encrypted.target,linuxBytes:40*GiB});
 });
@@ -374,7 +376,7 @@ it('pins the source shown in the editor when it stands in for an earlier pick',a
   state.set(twoPartitions(dataMeasured,'complete'));
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  await fireEvent.click(screen.getByRole('radio',{name:'D: · can give Omarchy up to 692 GiB'}));
+  await fireEvent.click(screen.getByRole('radio',{name:'D: can give Omarchy up to 692 GiB'}));
   await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
   state.set(twoPartitions(dataRegion,'running'));
   await tick();
@@ -403,7 +405,7 @@ it('offers only replacing when Windows cannot give enough space to keep it',asyn
   state.set({pending:false,snapshot:{...measured().snapshot,stagedIso:{...measured().snapshot.stagedIso,disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:30*GiB}]}]}}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · room for the installer only'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: has room for the installer only'})).toBeChecked();
   // Keeping is shown but unavailable, with the numbers; Windows can't move
   // the files in the way, so freeing space isn't suggested.
   expect(screen.getByText('Windows can give only 22 GiB; Omarchy needs 32 GiB.')).toBeInTheDocument();
@@ -600,6 +602,12 @@ it('replaces the choose screen with the installer steps while one exists',async(
   await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
 });
+it('offers checking disks after a removal failed elsewhere, such as on the home screen',async()=>{
+  state.set({pending:false,snapshot:{...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('button',{name:'Check disks again'})).toBeEnabled();
+});
 it('can check disks beside an installer that cannot be removed',async()=>{
   state.set(card('copying',true));
   render(StagedInstaller,{sourceReady:true});
@@ -626,6 +634,8 @@ it('offers help and the USB route when no space can be used',async()=>{
   await tick();
   expect(screen.getByText('No space can be used yet.')).toBeInTheDocument();
   expect(screen.getByText('What can help?')).toBeInTheDocument();
+  // Files Windows can't move block C:, so the tip is about those.
+  expect(screen.getByText('Turning off hibernation and System Restore, then restarting, often lets Windows shrink C: further.')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'create a bootable USB'}));
   expect(useUsb).toHaveBeenCalledOnce();
 });
@@ -633,12 +643,12 @@ it('keeps a usable default when a later measurement finds more room, and says wh
   state.set(twoPartitions(dataRegion,'running'));
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.getByText('Still checking D:…')).toBeInTheDocument();
   state.set(twoPartitions(dataMeasured,'complete'));
   await tick();
   // D: could give more, but the selection doesn't jump from C: by itself.
-  expect(screen.getByRole('radio',{name:'C: · can give Omarchy up to 100 GiB'})).toBeChecked();
+  expect(screen.getByRole('radio',{name:'C: can give Omarchy up to 100 GiB'})).toBeChecked();
   expect(screen.queryByText(/Still checking/)).not.toBeInTheDocument();
   expect(screen.getByText('Select where the space comes from.')).toBeInTheDocument();
 });
@@ -648,6 +658,8 @@ it('explains a failed measurement plainly and keeps the reason in the table',asy
   render(StagedInstaller,{sourceReady:true});
   await tick();
   expect(screen.getByText("Windows couldn't measure C:.",{selector:'p'})).toBeInTheDocument();
+  expect(screen.getByText('Restart Windows, then recheck.')).toBeInTheDocument();
+  expect(screen.queryByText(/hibernation/)).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'All partitions (1)'}));
   expect(screen.getByRole('table')).toHaveTextContent("Windows couldn't measure C:. Windows returned unsupported NTFS shrink limits.");
 });

@@ -124,7 +124,7 @@ Disk 0 · 954 GiB     Disk 1 · 1.8 TiB · can't use               Refresh
 ┌─┬────────────────────────────────────────────────────────────────┬─┐
 │▪│ C:  Windows · 953 GiB                                           │▪│
 └─┴────────────────────────────────────────────────────────────────┴─┘
-C: · NTFS · can give Omarchy up to 92 GiB
+C: can give Omarchy up to 92 GiB
 
 ┌──────────┬//┬───────────────────┬──────────┃──┬────────────────────┐
 │        //│  │╳ can't release    │ free     ┃▒▒│ Omarchy 64 GiB      │
@@ -261,7 +261,7 @@ files (see the captured laptop layout). **Review changes** is hidden, as today.
 | `insufficient`, otherwise | hatched | "C: needs 5.4 GiB more free space. Free up space in Windows, then refresh." | Refresh |
 | `unchecked` while checking | shimmer (static under reduced motion) | "Checking how much C: can shrink. This can take a few minutes." | none |
 | `unchecked`, not checking | dimmed | "C: wasn't checked. Refresh to try again." | Refresh |
-| `checked`, enough | normal | "C: · NTFS · can give Omarchy up to 92 GiB" | editor |
+| `checked`, enough | normal | "C: can give Omarchy up to 92 GiB" | editor |
 | `checked`, short by alignment only (free minus reserve fits, release within a few MiB of it) | hatched | "C: needs 2 MiB more free space. Free up space in Windows, then recheck." | Recheck |
 | `checked`, short because Windows can't move files | hatched | "Windows can't move some files near the end of C:, so it can release only 3 GiB." (or "…so it can't shrink it.") | Recheck |
 | `failed` | hatched | provider reason, or "Windows couldn't measure C:." | Recheck |
@@ -413,14 +413,18 @@ above and in the Screen sections:
   partitions). A bracket under everything left of the handle names what stays:
   "Windows (C:) keeps 881.5 GiB". The reserved explanation shows right under
   the bar. Only the handle takes the pointer. The hatching is quieter.
-- **Choose screen:** "· NTFS" left the selected-partition line; "Space comes
-  from C:." moved into it; "Select where the space comes from." appears when
-  several spaces are usable; "Still checking D:…" sits beside a disabled
-  Review changes. Once a usable default is shown it stays while usable, so a
+- **Choose screen:** the selected-partition line reads "C: can give Omarchy
+  up to 92 GiB" (or "C: has room for the installer only"), without the file
+  system; "Space comes from C:." moved into it; "Select where the space comes
+  from." appears in the disk row when several spaces are usable; "Still
+  checking D:…" sits beside a disabled Review changes. Once a usable default is shown it stays while usable, so a
   later measurement doesn't move the selection. A failed measurement reads
   "Windows couldn't measure C:."; the provider's reason moved to the table.
-  No usable space offers "What can help?" and the USB route. Map labels name
-  Windows once.
+  No usable space offers "What can help?", fitted to the cause: turning off
+  hibernation and System Restore when files Windows can't move block it,
+  "Restart Windows, then recheck." when it couldn't be measured, and the USB
+  route either way. Map labels name Windows once, and the map and the editor
+  share one hatching.
 - **Replace only:** Keep is shown unavailable, with the numbers and, only when
   the reserve is the limit, how much to free.
 - **Review:** a legend names the temporary installer and Omarchy; the
@@ -434,7 +438,8 @@ above and in the Screen sections:
   link row while it can't help yet; needs attention reads "Preparing the
   installer didn't finish · Disk 0" / "Remove the temporary installer.
   Windows and any installed Omarchy stay." **Check disks again** shows only
-  after removing the installer failed.
+  after an action on a recorded installer failed (the error lasts in the
+  setup state, so it carries from the home screen into the flow).
 - **Not changed, by agreement:** zoom lines between the map and the editor,
   a Restart now button, Back acting as Cancel, a longer subtitle, and GiB
   versus GB (an app-wide decision).
@@ -465,8 +470,8 @@ whole GiB, or TiB with one decimal from 1 TiB.
 | Can't keep | Keep shown unavailable, Replace selected; "Windows can give only 22.5 GiB; Omarchy needs 32 GiB." plus "Free up 9.5 GiB more in Windows, then refresh." only when the reserve is the limit |
 | Free target | Omarchy can use 112 GiB. |
 | Free target, short | Only 20 GiB remains; Omarchy needs 32 GiB. Delete a partition in the installer to make room. |
-| No usable space | No space can be used yet. With a closed "What can help?": turning off hibernation and System Restore, then restarting; or create a bootable USB and replace Windows |
-| Several usable spaces | Select where the space comes from. (dim, above the map) |
+| No usable space | No space can be used yet. With a closed "What can help?" fitted to the cause: "Turning off hibernation and System Restore, then restarting, often lets Windows shrink C: further." (files) or "Restart Windows, then recheck." (no measurement), and "Or create a bootable USB and replace Windows." |
+| Several usable spaces | Select where the space comes from. (dim, in the disk row) |
 | Space source differs | "Space comes from C:." in the selected-partition line |
 | Waiting for the check | Still checking D:… (beside the disabled Review changes) |
 | Secure Boot (PR 1 and 2 only) | Secure Boot is on. Leave it on; you'll turn it off after preparing. |

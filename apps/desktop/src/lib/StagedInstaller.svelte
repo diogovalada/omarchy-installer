@@ -68,6 +68,10 @@
   $: selectedSegment=segments.find(s=>s.key===chosenSegment) ?? segments.find(s=>!!shownDefault && s.regions.includes(shownDefault)) ?? segments[0];
   $: sourceRegion=layout?.regions.find(r=>regionKey(r)===chosenSource && choiceFor(r,spaces)) ?? (shownDefault && choiceFor(shownDefault,spaces) ? shownDefault : undefined);
   $: usableCount=layout ? layout.regions.filter(r=>choiceFor(r,spaces)).length : 0;
+  // With no usable space, help fits what blocks the default partition
+  // (usually Windows): files it can't move, or a failed measurement.
+  $: blockCause=!choice && shownDefault ? statusFor([shownDefault],spaces,busy,analyzing,requiredBytes,installMinimum).cause : undefined;
+  $: blockName=shownDefault?.label ?? '';
   // Review waits for the disk check; say which partition it waits for.
   $: waitingFor=busy && browsing ? (inspection?.disks ?? []).flatMap(d=>d.regions).find(r=>analyzing ? r.partitionGuid===analyzing.partitionGuid : r.kind==='partition' && r.resizeState==='unchecked')?.label ?? '' : '';
   // Without a layout (an older provider), use the first choice as before.
@@ -148,12 +152,12 @@
     return {...current,disks,choices};
   }
   // Recorded installer actions; Prepare again removes it, then checks disks.
-  // Checking disks beside an installer is offered once its removal failed.
-  let removing='';
-  $: removalFailed=!!removing && !!error && operations.some(op=>op.operationId===removing);
+  // Checking disks beside an installer is offered once an action failed,
+  // typically removing it; the error lasts in the setup state, so the offer
+  // survives moving between the home screen and this flow.
+  $: actionFailed=!!error && operations.length>0;
   function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
-    if(action==='again' || action==='cleanup') removing=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }
   function inspect() {
@@ -237,12 +241,12 @@
         {#if !disks.length}<p class="empty">No internal disks found. Check Disk Management, then refresh.</p>
         {:else if disks.length===1}<h3>{diskName(disks[0])}</h3>
         {:else}<div class="disks" role="group" aria-label="Disks">{#each disks as item (item.id)}<button class="disk" class:selected={selectedDisk===item.id} aria-pressed={selectedDisk===item.id} disabled={!sourceReady || !browsing} onclick={()=>selectDisk(item.id)}>{diskName(item)}</button>{/each}</div>{/if}
+        {#if usableCount>1 && !disk?.blocked}<span class="hint">Select where the space comes from.</span>{/if}
         <button class="refresh" disabled={busy || !sourceReady || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
       </div>
       {#if disk?.blocked}
         <p class="blocked">{disk.blocked.reason}</p>
       {:else if layout}
-        {#if usableCount>1}<p class="hint">Select where the space comes from.</p>{/if}
         <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} disabled={!sourceReady || !(browsing || analyzing)} bind:width={mapWidth}/>
         {#if selectedSegment}
           {@const status=statuses[selectedSegment.key]}
@@ -264,11 +268,14 @@
           </div>
         {:else if layout && !checkingAny}
           <p class="no-space">No space can be used yet.</p>
-          <details class="help">
-            <summary>What can help?</summary>
-            <p>Windows can't move some system files. Turning off hibernation and System Restore, then restarting, often lets it shrink further.</p>
-            {#if useUsb}<p>Or <button class="text-action inline" disabled={busy} onclick={useUsb}>create a bootable USB</button> and replace Windows.</p>{/if}
-          </details>
+          {#if blockCause==='files' || blockCause==='measure' || useUsb}
+            <details class="help">
+              <summary>What can help?</summary>
+              {#if blockCause==='files'}<p>Turning off hibernation and System Restore, then restarting, often lets Windows shrink {blockName} further.</p>
+              {:else if blockCause==='measure'}<p>Restart Windows, then recheck.</p>{/if}
+              {#if useUsb}<p>Or <button class="text-action inline" disabled={busy} onclick={useUsb}>create a bootable USB</button> and replace Windows.</p>{/if}
+            </details>
+          {/if}
         {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
@@ -284,7 +291,7 @@
   {#each operations as op (op.operationId)}
     <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
   {/each}
-  {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
+  {#if !recoveryOnly && actionFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
@@ -307,7 +314,7 @@
   .line{margin:0;font-size:12px;color:var(--text)}.text-action{min-height:0;padding:0 0 0 6px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){border-color:transparent;background:transparent;color:var(--accent-hover)}
   .blocked{margin:14px 0 0;font-size:12px}
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
-  .hint{margin:14px 0 -6px;font-size:11px;color:var(--text-dim)}
+  .hint{margin:0 auto 0 0;font-size:11px;color:var(--text-dim)}
   .source-note{color:var(--text-dim)}.source-note::before{content:'·';margin:0 6px}
   .help{margin:0 0 8px}.help p{margin:0 0 6px;font-size:11px}.text-action.inline{padding:0}
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
