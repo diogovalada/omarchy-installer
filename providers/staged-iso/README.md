@@ -53,7 +53,10 @@ warn that booting and same-disk installation may fail in the official ISO.
    Planning accepts unlocked, fully encrypted or decrypted volumes; incomplete
    conversion and unknown status block preparation.
 2. Allocate only a 512 MiB FAT32 EFI partition and an NTFS source partition
-   sized to the ISO plus 1 GiB. When a shrink keeps Windows, it can also leave
+   sized to the ISO plus 1 GiB. The source partition has the Windows recovery
+   type, because Windows device encryption automatically encrypts new basic
+   data volumes and the Linux installer could not read an encrypted source.
+   When a shrink keeps Windows, it can also leave
    at least 32 GiB unallocated for Omarchy right after the temporary installer;
    Windows never creates Omarchy's partitions. The installer sits directly after
    the shrunk partition so Windows can reclaim it with Extend Volume later.

@@ -212,4 +212,13 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
         Assert (-not (Test-StagedInstallerWaiting $summary)) 'An unreadable summary hid Resume.'
     } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
 }
+# Task Scheduler reads the registered SID back as an account name.
+& {
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent(); $sid=$identity.User.Value
+    Assert (Test-TaskAccount $sid $sid) 'The registered SID itself was rejected.'
+    Assert (Test-TaskAccount $identity.Name $sid) 'The qualified account name was rejected.'
+    Assert (Test-TaskAccount ($identity.Name -split '\\')[-1] $sid) 'The bare account name was rejected.'
+    Assert (-not (Test-TaskAccount 'SYSTEM' $sid)) 'Another account was accepted.'
+    Assert (-not (Test-TaskAccount 'no-such-account-omarchy' $sid)) 'An unknown account was accepted.'
+}
 Write-Output 'Passed BitLocker follow-up policy and mocked preparation checks; no host changes.'

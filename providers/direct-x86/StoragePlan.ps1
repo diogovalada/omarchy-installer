@@ -56,7 +56,8 @@ function Get-Probe([string[]]$ProtectedPaths=@(), $RuntimeArchive=$null) {
         if ($disk.LogicalSectorSize -ne 512) { $blockers.Add('This image recipe requires 512-byte logical sectors.') }
         $physical=[long]$disk.PhysicalSectorSize
         if ($physical -lt 512 -or $physical -gt 65536 -or ($physical -band ($physical-1)) -ne 0) { $blockers.Add('The physical sector alignment is unsupported or unavailable.') }
-        if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { $blockers.Add('Only basic local NVMe/SATA/ATA/SCSI disks are supported.') }
+        # SAS is internal too; Hyper-V Generation 2 virtual machines report their disks as SAS.
+        if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI','SAS')) { $blockers.Add('Only basic local NVMe/SATA/ATA/SCSI/SAS disks are supported.') }
         if ([string]::IsNullOrWhiteSpace([string]$disk.UniqueId)) { $blockers.Add('A stable disk identity is required.') }
         try { [void](Get-AffectedBitLocker $bitLocker $disk.Number) } catch { $blockers.Add($_.Exception.Message) }
         $partitions=@(); $shrink=@(); $delete=@()

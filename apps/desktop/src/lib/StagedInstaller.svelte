@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, ArrowRight, HardDrive, Check, RefreshCw } from 'lucide-svelte';
   import BitLockerPreparation from './BitLockerPreparation.svelte';
-  import { setup, setupActive, type SetupSnapshot, type StagedBlockedDisk, type StagedDisk, type StagedRegion, type StagedResizeQuery } from './setup';
+  import { setup, setupActive, type SetupSnapshot, type StagedBlockedDisk, type StagedDisk, type StagedOperation, type StagedRegion, type StagedResizeQuery } from './setup';
   export let recoveryOnly=false;
   export let close:()=>void=()=>{};
   export let sourceReady=false;
@@ -22,14 +22,14 @@
   // The elevated check sends an initial layout, then updated resize limits.
   // Polling can return a new object every second; apply each version once.
   $: if(result?.disks && !error) {
-    const signature=JSON.stringify({disks:result.disks,choices:result.choices,blocked:result.blocked});
+    const signature=JSON.stringify({disks:result.disks,choices:result.choices,blocked:result.blocked,secureBoot:result.secureBoot});
     if(signature!==handledInspection) {
       handledInspection=signature;
       inspection=analyzing && !busy && inspection ? mergeInspection(inspection,result,analyzing) : result;
       analyzing=null;
     }
   } else if(result?.choices && !result.disks && !busy && !error) {
-    const signature=JSON.stringify({choices:result.choices,blocked:result.blocked});
+    const signature=JSON.stringify({choices:result.choices,blocked:result.blocked,secureBoot:result.secureBoot});
     if(signature!==handledInspection) { handledInspection=signature; inspection=result; }
   }
   $: if(error && analyzing) analyzing=null;
@@ -92,6 +92,17 @@
       if(region && oldDisks.get(old.diskUniqueId)?.regions.some(r=>r.partitionGuid===region.partitionGuid && r.freeBytes===region.freeBytes)) choices.push({...old,encryption:disk?.encryption});
     }
     return {...current,disks,choices};
+  }
+  // Emphasize only the next step: turn Secure Boot off, select the installer,
+  // or remove it once Windows has restarted after it was selected.
+  function nextAction(op:StagedOperation) {
+    if(op.status==='boot-scheduled') return op.restartedSinceScheduled ? 'cleanup' : null;
+    if(['staged','arming'].includes(op.status)) return inspection?.secureBoot ? 'firmware' : 'arm';
+    return null;
+  }
+  function heading(op:StagedOperation) {
+    if(op.status==='boot-scheduled') return op.restartedSinceScheduled ? 'Windows restarted after selecting the installer' : 'Installer selected for a restart';
+    return ['staged','arming'].includes(op.status) ? 'Temporary installer ready' : 'Installer preparation needs attention';
   }
   function inspect() {
     inspection=undefined; selectedSpace=''; analyzing=null;
@@ -212,8 +223,9 @@
   {/each}
   {#each operations as op}
     <article>
-      <h3>{op.status==='boot-scheduled' ? 'Installer selected for a restart' : ['staged','arming'].includes(op.status) ? 'Temporary installer ready' : 'Installer preparation needs attention'}</h3>
+      <h3>{heading(op)}</h3>
       <p>Disk {op.diskNumber} · {(op.temporaryBytes/1024**3).toFixed(1)} GiB temporary storage</p>
+      {#if op.status==='boot-scheduled'}<p>{op.restartedSinceScheduled ? 'If Omarchy is installed and starts on its own, resume BitLocker when reminded, then remove the temporary installer. To try again, select the installer for the next restart.' : 'Restart Windows to start the installer.'}</p>{/if}
       {#if ['staged','arming','boot-scheduled'].includes(op.status)}
         <details class="next-steps" open={!recoveryOnly}>
           <summary>What happens next</summary>
@@ -227,8 +239,8 @@
         </details>
       {/if}
       <details><summary>When should I remove it?</summary><p>Remove it after Omarchy boots independently, or to abandon this attempt. Windows and installed Omarchy are kept. These actions require administrator approval.</p></details>
-      <div class="operation-actions">{#if testing && ['staged','arming','boot-scheduled'].includes(op.status)}<button class="primary" disabled={busy} onclick={()=>{void setup.stagedIso('arm',null,op.operationId);}}>{op.status==='boot-scheduled' ? 'Start installer again on next restart' : 'Start installer on next restart'}</button>{#if secureBootMaybeOn}<button disabled={busy} onclick={()=>{void setup.stagedIso('firmware',null,op.operationId);}}>Restart to firmware settings</button>{/if}{/if}
-      <button disabled={busy} onclick={()=>{void setup.stagedIso('cleanup',null,op.operationId);}}>Remove temporary installer</button>
+      <div class="operation-actions">{#if testing && ['staged','arming','boot-scheduled'].includes(op.status)}{#if secureBootMaybeOn && nextAction(op)==='firmware'}<button class="primary" disabled={busy} onclick={()=>{void setup.stagedIso('firmware',null,op.operationId);}}>Restart to firmware settings</button>{/if}<button class:primary={nextAction(op)==='arm'} disabled={busy} onclick={()=>{void setup.stagedIso('arm',null,op.operationId);}}>{op.status==='boot-scheduled' ? 'Start installer again on next restart' : 'Start installer on next restart'}</button>{#if secureBootMaybeOn && nextAction(op)!=='firmware'}<button disabled={busy} onclick={()=>{void setup.stagedIso('firmware',null,op.operationId);}}>Restart to firmware settings</button>{/if}{/if}
+      <button class:primary={nextAction(op)==='cleanup'} disabled={busy} onclick={()=>{void setup.stagedIso('cleanup',null,op.operationId);}}>Remove temporary installer</button>
       {#if testing && sourceReady}<button disabled={busy} onclick={()=>{restarting=op.operationId;void setup.stagedIso('cleanup',null,op.operationId);}}>Prepare again</button>{/if}</div>
     </article>
   {/each}

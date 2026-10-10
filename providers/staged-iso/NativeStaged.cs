@@ -26,7 +26,9 @@ namespace Omarchy.DirectX86 {
             if (!string.Equals(actual.ToString(), volume, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Refusing to detach another volume");
             Check(DeleteVolumeMountPoint(path.TrimEnd('\\') + "\\"), "Cannot remove owned staging mount");
         }
-        static readonly Guid StageDataType = new Guid("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");
+        // Windows recovery type: Windows device encryption automatically encrypts
+        // new basic data volumes, which the Linux installer could not then read.
+        static readonly Guid StageDataType = new Guid("de94bba4-06d1-4d40-a16a-bfd50179d6ac");
         public static byte[] PlanStagingLayout(byte[] before, long start, long dataSize, Guid esp, Guid data) {
             const long espSize = 536870912;
             if (before.Length < Header || BitConverter.ToInt32(before, 0) != 1) throw new InvalidDataException("GPT required");
@@ -69,6 +71,10 @@ namespace Omarchy.DirectX86 {
                 byte[] before = Layout(h);
                 if (Hash(before) != expectedHash) throw new InvalidDataException("GPT changed before staging allocation");
                 byte[] next = PlanStagingLayout(before, start, dataSize, esp, data); int returned;
+                // The planned range is free space, which keeps any old boot sectors: a
+                // previous temporary installer at the same offsets would reappear as its
+                // old filesystems instead of the raw volumes that are formatted next.
+                ClearStagingStart(h, start); ClearStagingStart(h, start + 536870912);
                 Check(DeviceIoControl(h, SET_LAYOUT, next, next.Length, null, 0, out returned, IntPtr.Zero), "Cannot allocate staging partitions");
                 Check(FlushFileBuffers(h), "Cannot flush staging GPT");
                 Check(DeviceIoControl(h, UPDATE_PROPERTIES, null, 0, null, 0, out returned, IntPtr.Zero), "Cannot refresh staging partitions");
@@ -82,6 +88,18 @@ namespace Omarchy.DirectX86 {
                 }
                 return new[] { FindPartition(after, esp, start, 536870912, EspType), FindPartition(after, data, start + 536870912, dataSize, StageDataType) };
             }
+        }
+        static void ClearStagingStart(Microsoft.Win32.SafeHandles.SafeFileHandle h, long offset) {
+            const int length = 1048576;
+            IntPtr allocation = System.Runtime.InteropServices.Marshal.AllocHGlobal(length + 4095);
+            try {
+                IntPtr zeros = new IntPtr((allocation.ToInt64() + 4095) & ~4095L);
+                System.Runtime.InteropServices.Marshal.Copy(new byte[length], 0, zeros, length);
+                long position; int written;
+                Check(SetFilePointerEx(h, offset, out position, 0) && position == offset, "Cannot seek to the new staging space");
+                Check(WriteFile(h, zeros, length, out written, IntPtr.Zero), "Cannot clear the new staging space");
+                if (written != length) throw new IOException("Short staging space clear");
+            } finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(allocation); }
         }
         static int FindEntry(byte[] layout, Guid id) {
             for (int i = 0; i < BitConverter.ToInt32(layout, 4); i++) { int p = Header + i * Entry; if (GuidAt(layout, p + 48) == id) return p; }
@@ -147,6 +165,32 @@ namespace Omarchy.DirectX86 {
             Check(SetFirmwareEnvironmentVariableEx(name, EfiGlobal, option, (uint)option.Length, 7), "Cannot register temporary installer");
             if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || FirmwarePreflight() != expectedOrder) throw new InvalidDataException("Temporary entry readback failed; boot order was not changed by the installer");
         }
+        // Firmware may rewrite an entry's description or attributes, so an entry is
+        // ours when it still targets our EFI partition and loader.
+        public static bool SameStagingTarget(byte[] actual, byte[] option) {
+            byte[] a = LoadOptionPath(actual), b = LoadOptionPath(option);
+            return a != null && b != null && a.SequenceEqual(b);
+        }
+        static byte[] LoadOptionPath(byte[] option) {
+            if (option == null || option.Length < 8) return null;
+            int length = BitConverter.ToUInt16(option, 4), i = 6;
+            while (i + 1 < option.Length && (option[i] != 0 || option[i + 1] != 0)) i += 2;
+            i += 2;
+            return length == 0 || i + length > option.Length ? null : option.Skip(i).Take(length).ToArray();
+        }
+        // Firmware may drop, rewrite or reuse our entry: opening Hyper-V's settings
+        // replaced it with the firmware's own "FrontPage" entry. Rewrite the recorded
+        // slot while it is free or still ours; otherwise use a free slot. Returns the
+        // slot now holding the entry. The boot order is never changed.
+        public static string RestoreStagingBoot(string name, byte[] option) {
+            StagingIndex(name); FirmwarePrivilege();
+            byte[] existing = GetVariable(name);
+            if (existing != null && option.SequenceEqual(existing)) return name;
+            if (existing != null && !SameStagingTarget(existing, option)) name = ReserveStagingBootName();
+            Check(SetFirmwareEnvironmentVariableEx(name, EfiGlobal, option, (uint)option.Length, 7), "Cannot restore temporary installer entry");
+            if (!option.SequenceEqual(GetVariable(name) ?? new byte[0])) throw new InvalidDataException("Temporary entry readback failed");
+            return name;
+        }
         public static void ArmStagingBoot(string name, byte[] option) {
             ushort index = StagingIndex(name); FirmwarePrivilege();
             if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || GetVariable("BootNext") != null) throw new InvalidDataException("Firmware entry changed or another one-time boot is pending");
@@ -158,7 +202,8 @@ namespace Omarchy.DirectX86 {
             ushort index = StagingIndex(name); FirmwarePrivilege();
             byte[] current = GetVariable("BootCurrent"), existing = GetVariable(name);
             if (current == null || current.Length != 2 || BitConverter.ToUInt16(current, 0) == index) throw new InvalidDataException("Cannot remove the current boot source");
-            if (existing != null && !option.SequenceEqual(existing)) throw new InvalidDataException("Temporary firmware slot has been reused");
+            // Firmware reused the slot for its own entry, so ours no longer exists.
+            if (existing != null && !SameStagingTarget(existing, option)) return;
             byte[] next = GetVariable("BootNext");
             if (next != null && next.Length == 2 && BitConverter.ToUInt16(next, 0) == index)
                 Check(SetFirmwareEnvironmentVariableEx("BootNext", EfiGlobal, new byte[0], 0, 7), "Cannot clear owned one-time boot");

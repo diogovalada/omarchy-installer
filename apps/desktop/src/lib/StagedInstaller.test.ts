@@ -236,3 +236,26 @@ it('lets the installer be selected again after a restart and restarts to firmwar
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('firmware',null,op.operationId);
 });
+it('emphasizes only the next step for a prepared installer',async()=>{
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'staged',diskNumber:0,temporaryBytes:8*1024**3,message:''};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op],choices:[],blocked:[],secureBoot:true}}});
+  render(StagedInstaller,{recoveryOnly:true});
+  expect(screen.getByRole('button',{name:'Restart to firmware settings'})).toHaveClass('primary');
+  expect(screen.getByRole('button',{name:'Start installer on next restart'})).not.toHaveClass('primary');
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op],choices:[],blocked:[],secureBoot:false}}});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByRole('button',{name:'Start installer on next restart'})).toHaveClass('primary');
+  expect(screen.queryByRole('button',{name:'Restart to firmware settings'})).not.toBeInTheDocument();
+});
+it('asks for a restart after selecting the installer, then suggests removal',async()=>{
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:'',restartedSinceScheduled:false};
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[op],recordErrors:[]}}});
+  render(StagedInstaller,{recoveryOnly:true});
+  expect(screen.getByText('Restart Windows to start the installer.')).toBeInTheDocument();
+  for(const button of screen.getAllByRole('button')) expect(button).not.toHaveClass('primary');
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[{...op,restartedSinceScheduled:true}],recordErrors:[]}}});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText('Windows restarted after selecting the installer')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Remove temporary installer'})).toHaveClass('primary');
+  expect(screen.getByRole('button',{name:'Start installer again on next restart'})).not.toHaveClass('primary');
+});

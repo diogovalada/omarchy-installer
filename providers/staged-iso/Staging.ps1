@@ -56,7 +56,8 @@ function Get-StagingDisk([int]$Number,[string]$Identity) {
     $disk=Get-Disk -Number $Number -ErrorAction Stop
     if ([string]$disk.UniqueId -cne $Identity -or -not $Identity) { throw 'This disk changed. Refresh disks.' }
     if ($disk.IsOffline -or $disk.IsReadOnly) { throw 'This disk is offline or read-only in Windows.' }
-    if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI')) { throw ('Only internal NVMe and SATA disks are supported, not '+[string]$disk.BusType+' disks. Use a USB installer instead.') }
+    # SAS is internal too; Hyper-V Generation 2 virtual machines report their disks as SAS.
+    if ([string]$disk.BusType -notin @('NVMe','SATA','ATA','SCSI','SAS')) { throw ('Only internal NVMe and SATA disks are supported, not '+[string]$disk.BusType+' disks. Use a USB installer instead.') }
     if ($disk.PartitionStyle -eq 'MBR') { throw 'This disk uses the older MBR layout (legacy BIOS). Installing without USB needs a GPT disk; use a USB installer instead.' }
     if ($disk.PartitionStyle -ne 'GPT') { throw 'This disk is not initialized with a GPT partition table.' }
     if ($disk.LogicalSectorSize -ne 512) { throw 'Disks with 4K logical sectors are not supported yet. Use a USB installer instead.' }
@@ -250,7 +251,7 @@ function Get-StagingPlan($Request) {
     $minimumGiB=[Math]::Ceiling([decimal]$release.minimumLinuxBytes/1GB)
     # linuxBytes is space left unallocated, never a partition Windows creates.
     # The booted installer installs Omarchy into the largest free region.
-    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=$linux;largestFreeAfterStagingBytes=$largest;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';offsetBytes=$start+512MB;sizeBytes=$data});boot=$null;files=@();message="Restart into the installer. It needs at least $minimumGiB GiB of free space to install Omarchy. Keep the two temporary installer partitions until Omarchy starts on its own."}
+    return [ordered]@{schema=1;operationId=[guid]::NewGuid().ToString();status='planned';diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;serialNumber=[string]$disk.SerialNumber;logicalSectorBytes=512;layoutSha256=[Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number);windowsBoot=$windows;bitLocker=$bitLocker;sourceIsoPath=(Assert-Path $Request.sourceIsoPath);sourceSha256=$Request.sourceSha256;sourceLength=[long]$Request.sourceLength;release=$release;targetKind=$Request.targetKind;shrink=$shrink;linuxOffsetBytes=$start;linuxBytes=$linux;largestFreeAfterStagingBytes=$largest;partitions=@(@{role='efi';guid=$esp;gptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';offsetBytes=$start;sizeBytes=[long]512MB},@{role='source';guid=$source;gptType='{de94bba4-06d1-4d40-a16a-bfd50179d6ac}';offsetBytes=$start+512MB;sizeBytes=$data});boot=$null;files=@();message="Restart into the installer. It needs at least $minimumGiB GiB of free space to install Omarchy. Keep the two temporary installer partitions until Omarchy starts on its own."}
 }
 function Get-StagingRoot {
     $common=[Environment]::GetFolderPath('CommonApplicationData')
@@ -274,7 +275,9 @@ function Write-StagingSummary {
     # operations always re-read the protected ownership record in the helper.
     $status=Get-StagingStatus (ConvertFrom-Json '{}')
     $summary=@{operations=@($status.operations | Where-Object { $_.status -ne 'cleaned' } | ForEach-Object {
-        @{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
+        $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
+        if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
+        $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'
     $pending=$path+'.'+[guid]::NewGuid().ToString('N')+'.pending'
@@ -323,7 +326,7 @@ function Get-StagingVolume($Part) {
     $paths=@($Part.AccessPaths | Where-Object { $_ -match '^\\\\\?\\Volume\{[0-9a-fA-F-]{36}\}\\$' })
     if ($paths.Count -ne 1) { throw 'Staging partition has no unique volume GUID path.' }
     # Get-Partition | Get-Volume omits ESPs on Windows. Win32_Volume includes
-    # their GUID paths and offers the same documented Format method.
+    # their GUID paths.
     $volumes=@(Get-CimInstance Win32_Volume -ErrorAction Stop | Where-Object { $_.DeviceID -ieq $paths[0] })
     if ($volumes.Count -ne 1) { throw 'Staging volume could not be identified.' }
     return $volumes[0]
@@ -355,7 +358,8 @@ function Get-IsoInventory([string]$Root) {
         Assert-StagingRelativePath $relative
         if (-not $seen.Add($relative) -or $items.Count -ge 10000) { throw 'Duplicate or excessive ISO files.' }
         # Hashes are recorded while copying; the whole ISO was verified already.
-        $items.Add(@{path=$relative;sizeBytes=[long]$item.Length;sha256=''})
+        # Objects, not hashtables: Windows PowerShell's Measure-Object cannot read hashtable keys.
+        $items.Add([pscustomobject]@{path=$relative;sizeBytes=[long]$item.Length;sha256=''})
     }
     return $items.ToArray()
 }
@@ -465,7 +469,11 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
             $volume=Get-StagingVolume $part
             if ([string]$volume.FileSystem -notin @('','Unknown','RAW')) { throw 'New staging partition is not an empty raw volume.' }
             $fs=if ($owned.role -eq 'efi') { 'FAT32' } else { 'NTFS' }
-            $formatted=Invoke-CimMethod -InputObject $volume -MethodName Format -Arguments @{FileSystem=$fs;QuickFormat=$true;Label='OMARCHY_TMP'} -ErrorAction Stop
+            # Win32_Volume.Format fails with "unknown error" on EFI system
+            # partitions; the Storage module's volume formats both (quick by default).
+            $storageVolumes=@(Get-CimInstance -Namespace root/Microsoft/Windows/Storage -ClassName MSFT_Volume -ErrorAction Stop | Where-Object { $_.Path -ieq $volume.DeviceID })
+            if ($storageVolumes.Count -ne 1) { throw 'Staging volume could not be identified.' }
+            $formatted=Invoke-CimMethod -InputObject $storageVolumes[0] -MethodName Format -Arguments @{FileSystem=$fs;FileSystemLabel='OMARCHY_TMP'} -ErrorAction Stop
             if ($formatted.ReturnValue -ne 0 -or (Get-StagingVolume (Get-OwnedStagingPartition $Plan $owned)).FileSystem -cne $fs) { throw 'Staging filesystem format failed or did not verify.' }
             $mount=Mount-StagingPartition $Plan $owned
             try {
@@ -500,10 +508,12 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         [Omarchy.DirectX86.NativeDisk]::RegisterStagingBoot($Plan.boot.name,$option,$Plan.windowsBoot.bootOrderSha256)
         $Plan.status='staged'; Save-StagingState $Plan
         return Get-StagingSummary $Plan
-    } finally { try { if ($mounted) { Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop } } finally { $lease.Dispose() } }
+    } finally { try { if ($mounted) { [void](Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop) } } finally { $lease.Dispose() } }
 }
 function Get-StagingSummary($State) {
-    return @{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
+    $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
+    if ($State.status -eq 'boot-scheduled' -and $State.PSObject.Properties['scheduledBootUnixSeconds']) { $summary.scheduledBootUnixSeconds=[long]$State.scheduledBootUnixSeconds }
+    return $summary
 }
 function Set-TestingBootPaths($Release,$Files) {
     if (-not $script:testingBuild) { throw 'Unqualified ISO staging requires a testing build.' }
@@ -546,7 +556,13 @@ function Invoke-StagingArm($State) {
         } finally { Dismount-StagingPartition $State $owned $mount }
     }
     $State.status='arming'; Save-StagingState $State
-    [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,[Convert]::FromBase64String($State.boot.option))
+    $option=[Convert]::FromBase64String($State.boot.option)
+    $name=[Omarchy.DirectX86.NativeDisk]::RestoreStagingBoot($State.boot.name,$option)
+    if ($name -cne $State.boot.name) { $State.boot.name=$name; Save-StagingState $State }
+    [Omarchy.DirectX86.NativeDisk]::ArmStagingBoot($State.boot.name,$option)
+    # The app compares this with the current boot to tell whether the selected restart happened.
+    $boot=(Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+    $State | Add-Member -NotePropertyName scheduledBootUnixSeconds -NotePropertyValue ([DateTimeOffset]$boot).ToUnixTimeSeconds() -Force
     $State.status='boot-scheduled'; Save-StagingState $State
     return @{operationId=$State.operationId;status=$State.status;message='Restart Windows when ready. The next startup selects the official installer once; the existing boot order is unchanged. Returning to Windows does not prove Linux installation completed.'}
 }
@@ -559,8 +575,11 @@ function Invoke-StagingFirmware($State) {
         return @{operationId=$State.operationId;status=$State.status;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
-    & $shutdown /r /fw /t 0
-    if ($LASTEXITCODE -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
+    # When the OsIndications variable does not exist yet, shutdown.exe creates
+    # it but exits with 203 without restarting; the second attempt restarts.
+    $process=Start-Process -FilePath $shutdown -ArgumentList '/r /fw /t 0' -WindowStyle Hidden -Wait -PassThru
+    if ($process.ExitCode -eq 203) { $process=Start-Process -FilePath $shutdown -ArgumentList '/r /fw /t 0' -WindowStyle Hidden -Wait -PassThru }
+    if ($process.ExitCode -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
     return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }
 function Invoke-StagingCleanup($State) {

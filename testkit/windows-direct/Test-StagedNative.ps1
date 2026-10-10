@@ -18,6 +18,7 @@ Assert ([BitConverter]::ToInt32($after,4) -eq 3) 'Must create only two staging p
 Assert ([Convert]::ToBase64String($before,48,144) -ceq [Convert]::ToBase64String($after,48,144)) 'Existing Windows partition metadata must survive byte-for-byte.'
 Assert ([BitConverter]::ToInt64($after,48+144+8) -eq 200GB) 'EFI start must match approved extent.'
 Assert ([BitConverter]::ToInt64($after,48+288+8) -eq 200GB+512MB) 'Source follows EFI without overlap.'
+Assert ((New-Object guid (,[byte[]]$after[(48+288+32)..(48+288+47)])) -eq [guid]'de94bba4-06d1-4d40-a16a-bfd50179d6ac') 'The source must use a type Windows device encryption skips.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,50GB,8GB,$esp,$data) } 'Existing Windows overlap accepted.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,499GB,8GB,$esp,$data) } 'GPT end overrun accepted.'
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingLayout($before,200GB,8GB,$existing,$data) } 'Reused GUID accepted.'
@@ -30,4 +31,10 @@ Assert ([Convert]::ToBase64String($before,48,144) -ceq [Convert]::ToBase64String
 Reject { [Omarchy.DirectX86.NativeDisk]::PlanStagingDeletion($after,$number,$esp,201GB,512MB,[guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b') } 'Cleanup accepted a moved partition.'
 Assert ([Text.Encoding]::Unicode.GetString($option).Contains('\EFI\BOOT\BOOTX64.EFI')) 'Firmware entry must target the temporary EFI loader.'
 Assert ([BitConverter]::ToInt32($option,0) -eq 1) 'Temporary firmware option must be active.'
+# Firmware renamed the entry: same target, so still ours. Another partition is not.
+$pathLength=[BitConverter]::ToUInt16($option,4); $pathBytes=[byte[]]$option[($option.Length-$pathLength)..($option.Length-1)]
+$renamed=[byte[]](@(0,0,0,0) + [BitConverter]::GetBytes([uint16]$pathLength) + [Text.Encoding]::Unicode.GetBytes("FrontPage`0") + $pathBytes)
+Assert ([Omarchy.DirectX86.NativeDisk]::SameStagingTarget($renamed,$option)) 'A renamed entry targeting the temporary loader must remain ours.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([Omarchy.DirectX86.NativeDisk]::StagingBootOption(5,200GB,$esp),$option)) 'An entry for another partition was treated as ours.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([byte[]](1,0,0,0),$option)) 'A truncated entry was treated as ours.'
 Write-Output 'Passed staged GPT and EFI binary tests. No host disks or firmware were accessed.'

@@ -144,6 +144,12 @@ function New-ProtectedRecoveryDirectory([string]$Path) {
     [void][IO.Directory]::CreateDirectory($Path,$acl)
     Assert-ProtectedDirectory $Path
 }
+# Task Scheduler reads the registered SID back as an account name, which can
+# be qualified or localized, so compare the account it resolves to.
+function Test-SystemAccount([string]$Account) {
+    if ($Account -ceq 'S-1-5-18') { return $true }
+    try { return ([Security.Principal.NTAccount]$Account).Translate([Security.Principal.SecurityIdentifier]).Value -ceq 'S-1-5-18' } catch { return $false }
+}
 function New-BitLockerRecovery($Plan) {
     $toSuspend=@($Plan.bitLocker.volumes | Where-Object { $_.isOsVolume -and $_.conversionStatus -eq 1 -and $_.protectionStatus -eq 1 })
     if ($toSuspend.Count -eq 0) { return $null }
@@ -185,7 +191,7 @@ function New-BitLockerRecovery($Plan) {
     # prevents the ordinary desktop user from replacing a SYSTEM action.
     $task=$folder.RegisterTask($taskName,$xml,2,'SYSTEM',$null,5,'D:P(A;;FA;;;SY)(A;;FA;;;BA)')
     $actual=$folder.GetTask($taskName)
-    if ($actual.Definition.Actions.Count -ne 1 -or $actual.Definition.Actions.Item(1).Path -ine $exe -or $actual.Definition.Actions.Item(1).Arguments -cne $arguments -or $actual.Definition.Principal.UserId -notin @('SYSTEM','S-1-5-18') -or -not $actual.Enabled) { Fail 'recovery_task_failed' 'BitLocker recovery task did not read back with the fixed SYSTEM action.' }
+    if ($actual.Definition.Actions.Count -ne 1 -or $actual.Definition.Actions.Item(1).Path -ine $exe -or $actual.Definition.Actions.Item(1).Arguments -cne $arguments -or -not (Test-SystemAccount $actual.Definition.Principal.UserId) -or -not $actual.Enabled) { Fail 'recovery_task_failed' 'BitLocker recovery task did not read back with the fixed SYSTEM action.' }
     $security=New-Object Security.AccessControl.RawSecurityDescriptor($actual.GetSecurityDescriptor(4))
     foreach ($ace in $security.DiscretionaryAcl) {
         if ($ace.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and $ace.SecurityIdentifier.Value -notin @('S-1-5-18','S-1-5-32-544')) { Fail 'recovery_task_failed' 'BitLocker recovery task grants an unexpected identity access.' }

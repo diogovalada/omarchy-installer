@@ -15,6 +15,10 @@ foreach ($profile in @(@(7,11),@(0,1,2,4,11),@(0,2,4,5,11),@())) {
 foreach ($type in @(0,7,9,10,99)) {
     Assert (@(Get-OsProtectorBlockers @([pscustomobject]@{type=$type;pcrProfile=@()})).Count -gt 0) 'Unknown protector was accepted.'
 }
+# The recovery task reads back SYSTEM by name, qualified name, or SID.
+$system=([Security.Principal.SecurityIdentifier]'S-1-5-18').Translate([Security.Principal.NTAccount]).Value
+foreach ($account in @('S-1-5-18',$system,($system -split '\\')[-1])) { Assert (Test-SystemAccount $account) "The SYSTEM account read back as '$account' was rejected." }
+foreach ($account in @('S-1-5-32-544',[Security.Principal.WindowsIdentity]::GetCurrent().Name,'no-such-account-omarchy')) { Assert (-not (Test-SystemAccount $account)) "Account '$account' was accepted as SYSTEM." }
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'providers/direct-x86/BitLockerRecovery.ps1'),[ref]$tokens,[ref]$errors)
 Assert ($errors.Count -eq 0) 'Recovery worker must parse.'

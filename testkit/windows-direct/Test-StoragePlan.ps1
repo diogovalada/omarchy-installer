@@ -88,6 +88,11 @@ foreach ($physical in @(0,511,768,131072)) {
  Assert (-not (Get-Probe).disks[0].eligible) 'Unknown or unsupported physical alignment must block installation.'
 }
 $script:disk.PhysicalSectorSize=4096
+$script:disk.BusType='SAS'
+Assert (Get-Probe).disks[0].eligible 'Internal SAS disks, as in Hyper-V virtual machines, must be accepted.'
+$script:disk.BusType='USB'
+Assert (-not (Get-Probe).disks[0].eligible) 'USB disks must block installation.'
+$script:disk.BusType='NVMe'
 
 $savedProgramData=$env:ProgramData
 try {

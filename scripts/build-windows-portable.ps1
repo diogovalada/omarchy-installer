@@ -34,7 +34,9 @@ if (-not (Test-Path -LiteralPath $nsisCompiler)) { throw 'The packaging machine 
 $appExe=Join-Path $root "apps/desktop/src-tauri/target/$buildProfile/omarchy-setup-desktop.exe"
 $buildInfo=(& $appExe --build-info | Out-String) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or $null -eq $buildInfo.stagedIsoTesting -or $buildInfo.stagedIsoTesting -ne [bool]$StagedIsoTesting) { throw 'Executable testing mode does not match the requested package. Rebuild it explicitly.' }
-& cargo build --manifest-path (Join-Path $PSScriptRoot 'portable-cache-helper/Cargo.toml') --release --locked
+# The launcher runs this verifier first, so link the C runtime statically: clean
+# Windows installations do not include the Visual C++ runtime DLLs.
+& cargo build --manifest-path (Join-Path $PSScriptRoot 'portable-cache-helper/Cargo.toml') --release --locked --config "target.x86_64-pc-windows-msvc.rustflags=['-C','target-feature=+crt-static']"
 if ($LASTEXITCODE -ne 0) { throw 'Portable cache verifier build failed.' }
 $cacheHelper=Join-Path $PSScriptRoot 'portable-cache-helper/target/release/omarchy-portable-cache.exe'
 $prepared=& node (Join-Path $PSScriptRoot 'stage-windows-portable.mjs') $buildProfile $(if($ReuseVerifiedBuild){'reuse'}else{'built'}) $VerifiedPortableRecord
