@@ -681,6 +681,10 @@ it('says a removal is under way, or that it did not finish',async()=>{
   await tick();
   expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
+  // While the next command is pending, the failed removal's snapshot stays.
+  state.set({pending:true,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  await tick();
+  expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
 });
 it('keeps other recorded installers as they are while one is prepared or removed',async()=>{
   const other={operationId:'22222222-2222-4222-8222-222222222222',status:'copying',diskNumber:1,temporaryBytes:8*GiB,message:''};

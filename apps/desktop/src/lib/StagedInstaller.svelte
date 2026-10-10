@@ -129,7 +129,9 @@
   // prepares, or the one being removed. Others keep their own state, and a
   // disk check changes none.
   $: preparingId=busy ? $setup.snapshot?.stagedReview?.review?.operationId ?? null : null;
-  $: removingId=busy && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
+  // The target describes the snapshot's own operation, so it counts only while
+  // that runs (not while the next command is pending).
+  $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
   $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
   // Declining Review changes nothing; the helper reports it as cancelled
   // without an error.
