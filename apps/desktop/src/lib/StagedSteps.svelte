@@ -8,6 +8,8 @@
   export let testing=false;
   export let canPrepareAgain=false;
   export let busy=false;
+  // A running command may be changing recorded installers (not a disk check).
+  export let changing=false;
   export let act:(action:'arm'|'firmware'|'cleanup'|'again')=>void=()=>{};
   type Action='arm'|'firmware'|'cleanup'|'again';
   // Shown before restarting, since the app can't be seen from the installer.
@@ -19,6 +21,11 @@
     'Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.'
   ];
   $: ready=['staged','arming','boot-scheduled'].includes(op.status);
+  // An unfinished status is under way while a command changes it, and was
+  // interrupted otherwise; removal sets `cleaning` first.
+  $: underway=!ready && changing;
+  $: removal=op.status==='cleaning';
+  $: heading=ready ? 'Temporary installer' : removal ? (underway ? 'Removing the temporary installer' : "Removing the temporary installer didn't finish") : underway ? 'Preparing the installer' : "Preparing the installer didn't finish";
   $: scheduled=op.status==='boot-scheduled';
   // 0 Turn off Secure Boot, 1 Start installer, 2 Install Omarchy, 3 Clean up;
   // -1 when preparation needs attention.
@@ -26,15 +33,15 @@
   $: steps=[secureBoot==null ? "Turn off Secure Boot if it's on" : 'Turn off Secure Boot','Set next restart','Install Omarchy','Clean up'];
   // Startup selection and firmware restarts exist only in testing builds.
   $: available={arm:testing && ready,firmware:testing && ready && secureBoot!==false,cleanup:true,again:canPrepareAgain} as Record<Action,boolean>;
-  $: primary=([current===0 ? 'firmware' : current===1 ? 'arm' : current===2 ? null : 'cleanup'] as (Action|null)[]).find(action=>action && available[action]) ?? null;
+  $: primary=underway ? null : ([current===0 ? 'firmware' : current===1 ? 'arm' : current===2 ? null : 'cleanup'] as (Action|null)[]).find(action=>action && available[action]) ?? null;
   // Starting the installer comes last while it can't help yet: before
   // Secure Boot is off, or once it is already set for the next restart.
-  $: secondary=((current===0 || scheduled ? ['firmware','cleanup','again','arm'] : ['arm','firmware','cleanup','again']) as Action[]).filter(action=>available[action] && action!==primary);
+  $: secondary=((current===0 || scheduled ? ['firmware','cleanup','again','arm'] : ['arm','firmware','cleanup','again']) as Action[]).filter(action=>!underway && available[action] && action!==primary);
   $: labels={arm:scheduled ? 'Start installer again on next restart' : 'Start installer on next restart',firmware:'Restart to firmware settings',cleanup:'Remove temporary installer',again:'Prepare again'} as Record<Action,string>;
 </script>
 
 <article aria-label={`Temporary installer on Disk ${op.diskNumber}`}>
-  <h3>{ready ? 'Temporary installer' : "Preparing the installer didn't finish"} · Disk {op.diskNumber}</h3>
+  <h3>{heading} · Disk {op.diskNumber}</h3>
   {#if ready}
     <ol class="steps" aria-label="Steps">
       {#each steps as step,index}
@@ -44,6 +51,8 @@
     <p>{TEXT[current]}</p>
     {#if current===0}<details class="how"><summary>How?</summary><p>Look for a Security or Boot tab, set Secure Boot to Disabled, then save and exit.</p></details>{/if}
     {#if current===1 || current===2}<p>{INSTALLER}</p>{/if}
+  {:else if underway}
+    <p>Keep this window open.</p>
   {:else}
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>
   {/if}

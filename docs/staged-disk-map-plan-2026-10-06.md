@@ -445,6 +445,38 @@ above and in the Screen sections:
   a Restart now button, Back acting as Cancel, a longer subtitle, and GiB
   versus GB (an app-wide decision).
 
+## VM run fixes (2026-10-10)
+
+A full run in a Hyper-V VM (BitLocker on, Secure Boot on; prepare, firmware
+restart, a real Omarchy install keeping Windows, clean-up) passed every step,
+and found these, fixed in PR 6 (`staged-vm-fixes`):
+
+- **Declined Review:** "Nothing was changed." shows beside **Review changes**.
+  The store had it, but the screen showed only the provider's result message.
+- **Card while working:** an unfinished status means "under way" while a
+  command (not a disk check) runs, and "didn't finish" otherwise. The card
+  reads "Preparing the installer · Disk 0" or "Removing the temporary
+  installer · Disk 0" with "Keep this window open." and no actions; an
+  interrupted removal (`cleaning`) reads "Removing the temporary installer
+  didn't finish · Disk 0". In the flow, the preparing panel stands in for the
+  new installer's card.
+- **Result messages:** only a firmware restart's and a removal's results show.
+  The provider's advice after preparing ("Restart into the installer…") and
+  after setting the next restart contradicted the card's current step. On the
+  home screen the section stays to confirm a removal.
+- **Review wait:** "Planning the changes…" sits beside the button until Review
+  appears, instead of "Loading Windows disk tools…" under the table.
+- **Wording:** Stop during a disk check reads **Stop checking**. The helper's
+  full summary drops "Next, select the installer for the next restart" (Review's
+  Next bullet says what's next), and the firmware dialog ends "Then open this
+  app again to set the next restart." The provider's verifying stage reads
+  "Verifying the installer image before disk changes..." (it said "qualified
+  official ISO" for a local test image too).
+- **Not changed:** the helper still writes `failure.json` for a declined
+  confirmation, as for every non-success outcome; it isn't shown, and changing
+  helper record keeping is outside this plan. Opening the reserved
+  explanation still moves the controls below it, like any disclosure.
+
 ## Copy
 
 Final English strings. Sizes drop a trailing `.0`: "953 GiB", "881.5 GiB",

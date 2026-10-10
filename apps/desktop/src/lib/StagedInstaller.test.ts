@@ -80,6 +80,11 @@ it('shows a placeholder map while the first disk read runs',async()=>{
   expect(screen.getByText('Reading disks…')).toBeInTheDocument();
   // The provider's progress stays out of sight but reaches screen readers.
   expect(screen.getByRole('status')).toHaveTextContent('Loading Windows disk tools...');
+  // Stopping a check isn't stopping a preparation.
+  state.set({pending:false,snapshot:{status:'running',stage:'loading',message:'Loading Windows disk tools...',stagedTesting:true,cancelAvailable:true,cancelRequested:false}});
+  await tick();
+  expect(screen.getByRole('button',{name:'Stop checking'})).toBeEnabled();
+  expect(screen.queryByRole('button',{name:'Stop preparing'})).not.toBeInTheDocument();
 });
 const GiB=1024**3, MiB=1024**2;
 const encrypted={diskNumber:0,diskUniqueId:'windows-disk',label:'Shrink partition 3',largestFreeAfterStagingBytes:0,target:{target_kind:'shrink',partition_number:3,partition_guid:'guid'},encryption:[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}]};
@@ -471,6 +476,20 @@ it('returns to the choose screen with the selection intact when Review is declin
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.getByRole('spinbutton',{name:'Space for Omarchy'})).toHaveValue(40);
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  expect(screen.getByText('Nothing was changed.')).toBeInTheDocument();
+});
+it('says what Review waits for beside the button',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  state.set({...reviewing(null),snapshot:{...reviewing(null).snapshot,message:'Loading Windows disk tools...'}});
+  await tick();
+  expect(screen.getByText('Planning the changes…')).toBeInTheDocument();
+  expect(screen.queryByText('Loading Windows disk tools...')).not.toBeInTheDocument();
+  state.set(reviewing(reviewed()));
+  await tick();
+  expect(screen.queryByText('Planning the changes…')).not.toBeInTheDocument();
 });
 it('shows preparation progress where the review was',async()=>{
   state.set(reviewing(reviewed()));
@@ -494,12 +513,19 @@ it('keeps progress and Stop on the home screen during preparation',async()=>{
   expect(screen.getByText('Copying and verifying the installer...')).toBeInTheDocument();
   expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
   expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+  // The installer being prepared isn't one that didn't finish.
+  expect(screen.getByRole('heading',{name:'Preparing the installer · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByText('Keep this window open.')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Remove temporary installer'})).not.toBeInTheDocument();
 });
 it('shows the preparing panel when opened during preparation',async()=>{
-  state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false}));
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'copying',diskNumber:0,temporaryBytes:8*GiB,message:''};
+  state.set(reviewing({...reviewed(),approved:true},{stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false,stagedRecovery:{operations:[op],recordErrors:[]}}));
   render(StagedInstaller,{sourceReady:true});
   await tick();
   expect(screen.getByRole('region',{name:'Preparing the installer'})).toHaveTextContent('Copying and verifying the installer...');
+  // The panel stands in for the new installer's card.
+  expect(screen.queryByRole('article')).not.toBeInTheDocument();
   expect(screen.queryByRole('region',{name:'Review changes'})).not.toBeInTheDocument();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 });
@@ -635,6 +661,35 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+});
+it('says a removal is under way, or that it did not finish',async()=>{
+  const removing={...card('cleaning',null).snapshot,status:'running',stage:'staged-installer',message:'Loading Windows disk tools...'};
+  state.set({pending:false,stagedAction:'cleanup',snapshot:removing});
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
+  expect(screen.getByText('Keep this window open.')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Remove temporary installer'})).not.toBeInTheDocument();
+  state.set({pending:false,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  await tick();
+  expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
+});
+it('confirms a removal on the home screen, but leaves next steps to the card',async()=>{
+  const removed='Temporary installer partitions and its firmware entry were removed.';
+  state.set({pending:false,stagedAction:'cleanup',snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'11111111-1111-4111-8111-111111111111',status:'cleaned',message:removed}}});
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByRole('region',{name:'Temporary installer'})).toHaveTextContent(removed);
+  // After preparing (the last command answered Review) or setting the next
+  // restart, the provider's own advice would contradict the card.
+  for(const stagedAction of [null,'arm']) {
+    const prepared=card('staged',true).snapshot;
+    state.set({pending:false,stagedAction,snapshot:{...prepared,stagedIso:{...prepared.stagedIso,operationId:'11111111-1111-4111-8111-111111111111',status:'staged',message:'Restart into the installer.'}}});
+    await tick();
+    expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
+    expect(screen.queryByText('Restart into the installer.')).not.toBeInTheDocument();
+  }
 });
 it('offers help and the USB route when no space can be used',async()=>{
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:0}]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});

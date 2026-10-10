@@ -32,6 +32,12 @@ downloads. Published versions and their artifacts are immutable.
   shows why Windows can't be kept. Review names the installer and Omarchy in
   its bars. The after-preparing card has clearer steps and help for turning
   off Secure Boot.
+- Install without USB (testing builds): fixes from a full VM run. Cancelling
+  Review says "Nothing was changed."; the card no longer says preparing
+  "didn't finish" while it is still running, and says when a removal is under
+  way; the home screen confirms a removal; status messages no longer
+  contradict the current step; the Review wait and the disk check's Stop
+  button are labelled for what they do.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
