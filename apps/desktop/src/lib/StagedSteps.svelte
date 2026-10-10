@@ -8,6 +8,8 @@
   export let testing=false;
   export let canPrepareAgain=false;
   export let busy=false;
+  // Set while a running command prepares or removes this installer.
+  export let underway:'preparing'|'removing'|null=null;
   export let act:(action:'arm'|'firmware'|'cleanup'|'again')=>void=()=>{};
   type Action='arm'|'firmware'|'cleanup'|'again';
   // Shown before restarting, since the app can't be seen from the installer.
@@ -19,6 +21,9 @@
     'Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.'
   ];
   $: ready=['staged','arming','boot-scheduled'].includes(op.status);
+  // Without a command on it, an unfinished status was interrupted; an
+  // interrupted removal is left `cleaning`.
+  $: heading=underway==='removing' ? 'Removing the temporary installer' : underway==='preparing' ? 'Preparing the installer' : ready ? 'Temporary installer' : op.status==='cleaning' ? "Removing the temporary installer didn't finish" : "Preparing the installer didn't finish";
   $: scheduled=op.status==='boot-scheduled';
   // 0 Turn off Secure Boot, 1 Start installer, 2 Install Omarchy, 3 Clean up;
   // -1 when preparation needs attention.
@@ -26,16 +31,18 @@
   $: steps=[secureBoot==null ? "Turn off Secure Boot if it's on" : 'Turn off Secure Boot','Set next restart','Install Omarchy','Clean up'];
   // Startup selection and firmware restarts exist only in testing builds.
   $: available={arm:testing && ready,firmware:testing && ready && secureBoot!==false,cleanup:true,again:canPrepareAgain} as Record<Action,boolean>;
-  $: primary=([current===0 ? 'firmware' : current===1 ? 'arm' : current===2 ? null : 'cleanup'] as (Action|null)[]).find(action=>action && available[action]) ?? null;
+  $: primary=underway ? null : ([current===0 ? 'firmware' : current===1 ? 'arm' : current===2 ? null : 'cleanup'] as (Action|null)[]).find(action=>action && available[action]) ?? null;
   // Starting the installer comes last while it can't help yet: before
   // Secure Boot is off, or once it is already set for the next restart.
-  $: secondary=((current===0 || scheduled ? ['firmware','cleanup','again','arm'] : ['arm','firmware','cleanup','again']) as Action[]).filter(action=>available[action] && action!==primary);
+  $: secondary=((current===0 || scheduled ? ['firmware','cleanup','again','arm'] : ['arm','firmware','cleanup','again']) as Action[]).filter(action=>!underway && available[action] && action!==primary);
   $: labels={arm:scheduled ? 'Start installer again on next restart' : 'Start installer on next restart',firmware:'Restart to firmware settings',cleanup:'Remove temporary installer',again:'Prepare again'} as Record<Action,string>;
 </script>
 
 <article aria-label={`Temporary installer on Disk ${op.diskNumber}`}>
-  <h3>{ready ? 'Temporary installer' : "Preparing the installer didn't finish"} · Disk {op.diskNumber}</h3>
-  {#if ready}
+  <h3>{heading} · Disk {op.diskNumber}</h3>
+  {#if underway}
+    <p>Keep this window open.</p>
+  {:else if ready}
     <ol class="steps" aria-label="Steps">
       {#each steps as step,index}
         <li class:done={index<current && !(index===0 && secureBoot==null)} class:maybe={index===0 && secureBoot==null && current>0} class:current={index===current} aria-current={index===current ? 'step' : undefined}>{step}</li>
@@ -48,10 +55,10 @@
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>
   {/if}
   {#if primary}<button class="primary" disabled={busy} onclick={()=>act(primary)}>{labels[primary]}</button>{/if}
-  {#if ready}
+  {#if ready && !underway}
     <details>
       <summary>Starting Windows later</summary>
-      <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once to add Windows to its menu.</p>
+      <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once and choose Windows Boot Manager to add it to the menu.</p>
       <p>If you replace Windows, the temporary installer stays on the disk.</p>
     </details>
   {/if}

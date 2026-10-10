@@ -121,6 +121,21 @@
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
   $: testing=$setup.snapshot?.stagedTesting===true;
+  // The steps card says what to do after preparing or setting the next
+  // restart, so only a firmware restart's or a removal's own result shows;
+  // a removed installer's card is gone.
+  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup'].includes($setup.stagedAction ?? '') ? result?.message ?? '' : '';
+  // The recorded installer a running command changes: the one its Review
+  // prepares, or the one being removed. Others keep their own state, and a
+  // disk check changes none.
+  $: preparingId=busy ? $setup.snapshot?.stagedReview?.review?.operationId ?? null : null;
+  // The target describes the snapshot's own operation, so it counts only while
+  // that runs (not while the next command is pending).
+  $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
+  $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
+  // Declining Review changes nothing; the helper reports it as cancelled
+  // without an error.
+  $: declined=!busy && !error && $setup.snapshot?.status==='cancelled' ? $setup.snapshot.message : '';
   $: if(restarting && !busy && result?.operationId===restarting && result.status==='cleaned') {
     restarting=null; selectedDisk=''; prepareAgain(); inspect();
   }
@@ -201,15 +216,20 @@
     analyzing=query;
     void setup.stagedIso('inspect',null,null,query);
   }
+  // Review takes a while after Windows asks for access; say so beside the
+  // button rather than at the page bottom.
+  let requesting=false;
+  $: if(review || !busy) requesting=false;
   async function stage() {
     if(!testing || !sourceReady || !choice || busy || error) return;
+    requesting=true;
     const selection:Record<string,unknown>={diskNumber:choice.diskNumber,diskUniqueId:choice.diskUniqueId,target:choice.target};
     if(linuxBytes>0) selection.linuxBytes=linuxBytes;
     await setup.stagedIso('stage',selection);
   }
 </script>
 
-{#if !recoveryOnly || operations.length || recordErrors.length}
+{#if !recoveryOnly || operations.length || recordErrors.length || resultNote}
 <section class="staged" aria-label="Temporary installer">
   {#if !recoveryOnly}
     <div class="navigation"><button class="back" disabled={busy} onclick={close}><ArrowLeft size={15}/>Back</button>{#if testing}<span class="badge">Test build</span>{/if}</div>
@@ -281,7 +301,7 @@
         {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
-          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
+          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">Planning the changes…</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
         </div>
       {/if}
     {/if}
@@ -291,13 +311,16 @@
     <details><summary>Details</summary><p>{record.operationId}: {record.message}</p></details>
   {/each}
   {#each operations as op (op.operationId)}
-    <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
+    <!-- While preparing, the panel above stands in for the new installer's card. -->
+    {#if !(preparing && op.operationId===preparingId)}
+      <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
+    {/if}
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
-  {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
+  {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
-  {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
-  {#if !busy && result?.message}<p role="status">{result.message}</p>{/if}
+  {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
+  {#if resultNote}<p role="status">{resultNote}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}
 </section>

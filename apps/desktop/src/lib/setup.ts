@@ -11,6 +11,9 @@ export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
   stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
+  // The running staged action and the recorded installer it acts on; set when
+  // a staged command starts, and cleared when any other operation starts.
+  stagedTarget?:{action:string;operationId:string|null}|null;
   // After approval, the review stays marked approved until the operation ends.
   stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;
@@ -32,7 +35,7 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // The review payload the helper will build from the same plan as the review
 // summary (see the disk map plan). It sits outside the confirmation binding, so
 // it is display-only.
-export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
+export interface StagedReviewPlan { operationId?:string;diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
 // `stagedAction` is the staged-installer action whose operation the snapshot
 // reflects: set when a command is accepted, null after any other accepted

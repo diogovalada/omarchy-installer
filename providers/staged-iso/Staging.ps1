@@ -445,7 +445,7 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
     $lease=New-Object Omarchy.DirectX86.NativeSource($Plan.sourceIsoPath,[long]$Plan.sourceLength)
     $mounted=$false
     try {
-        Emit 'progress' 'verifying-source' @{message='Verifying the qualified official ISO before disk changes...'}
+        Emit 'progress' 'verifying-source' @{message='Verifying the installer image before disk changes...'}
         if ((Sha $Plan.sourceIsoPath) -cne $Plan.sourceSha256) { throw 'Official ISO changed after verification.' }
         $image=Get-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop
         if ($image.Attached) { throw 'Unmount this ISO before staging; the installer only removes mounts it creates.' }

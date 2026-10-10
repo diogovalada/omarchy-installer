@@ -310,7 +310,7 @@ fn staged_review(
         Some(_) => "EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\n",
         None => "",
     };
-    let summary = format!("{prefix}Prepare the installer on Disk {disk_number}?\n\n{shrink}{omarchy_space} Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. {space_note}{encryption}\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.");
+    let summary = format!("{prefix}Prepare the installer on Disk {disk_number}?\n\n{shrink}{omarchy_space} Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. {space_note}{encryption}\n\nThis does not install Omarchy yet. Keep the temporary installer until Omarchy starts on its own.");
     // The two temporary partitions are adjacent: the EFI loader, then the
     // installer files. Omarchy's space, if kept, starts where they end.
     let efi = &plan["partitions"][0];
@@ -323,6 +323,8 @@ fn staged_review(
         Value::Null
     };
     let review = json!({
+        // The record preparation creates, so the app can tell it from others.
+        "operationId": plan["operationId"],
         "diskNumber": disk_number,
         "diskSizeBytes": bytes(&plan["diskSizeBytes"], "the disk size")?,
         "layoutSha256": plan["layoutSha256"].as_str().ok_or("The staging plan is missing the layout fingerprint")?,
@@ -561,6 +563,7 @@ mod staged_review_tests {
     fn plan(shrink: bool, linux: u64) -> Value {
         let start = 300 * MIB + 953 * GIB - 7 * GIB - 512 * MIB - linux;
         json!({
+            "operationId": "11111111-1111-4111-8111-111111111111",
             "diskNumber": 0,
             "diskSizeBytes": 954 * GIB,
             "layoutSha256": "layout",
@@ -588,6 +591,10 @@ mod staged_review_tests {
         let start = 300 * MIB + 881 * GIB + 512 * MIB;
         assert_eq!(review["targetKind"], "shrink");
         assert_eq!(review["layoutSha256"], "layout");
+        assert_eq!(
+            review["operationId"],
+            "11111111-1111-4111-8111-111111111111"
+        );
         assert_eq!(
             review["shrink"],
             json!({"label":"C:","partitionGuid":"guid","offsetBytes":300 * MIB,"beforeSizeBytes":953 * GIB,"afterSizeBytes":start - 300 * MIB})
@@ -1290,7 +1297,7 @@ fn execute(
             let (name, kind, summary) = if *action == StagedAction::Arm {
                 ("arm", "staged_arm", "Select the installer for the next restart only? Restart Windows when you're ready. This doesn't restart now or change the normal boot order.")
             } else if *action == StagedAction::Firmware {
-                ("firmware", "staged_firmware", "Restart into firmware settings now to turn off Secure Boot? Save your work first. BitLocker protection is suspended, so this won't ask for your recovery key. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.")
+                ("firmware", "staged_firmware", "Restart into firmware settings now to turn off Secure Boot? Save your work first. BitLocker protection is suspended, so this won't ask for your recovery key. Turn off Secure Boot, save, and return to Windows. Then open this app again to set the next restart.")
             } else {
                 ("cleanup", "staged_cleanup", "Remove this temporary installer and all files on its two recorded partitions? Continue only after booting the installed Omarchy independently, or if you are abandoning this installation. Linux completion is not inferred. Windows and installed Linux partitions are preserved; reclaimed space stays unallocated.")
             };
