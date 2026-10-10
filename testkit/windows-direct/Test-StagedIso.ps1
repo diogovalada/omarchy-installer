@@ -40,6 +40,10 @@ function Assert($Value,[string]$Message) { if (-not $Value) { throw $Message } }
     Assert (-not $legacy.volumes[0].supported) 'Retained image deployment lost its original protector checks.'
 }
 . (Join-Path $root 'providers/staged-iso/Staging.ps1')
+# Windows disk primitives, stubbed: inspection and planning read the layout fingerprint.
+if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
+    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static System.Collections.Generic.Queue<string> Layouts = new System.Collections.Generic.Queue<string>(); public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return Layouts.Count > 0 ? Layouts.Dequeue() : "layout"; } } }'
+}
 function Reject($Work,[string]$Message) { $failed=$false; try { & $Work | Out-Null } catch { $failed=$true }; Assert $failed $Message }
 Assert-Fields (ConvertFrom-Json '{}') @() @()
 Reject { Assert-Fields (ConvertFrom-Json '{"unexpected":true}') @() @() } 'Status accepted unknown fields.'
@@ -152,7 +156,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 # bound to the exact selected disk/partition. All OS calls here are mocked.
 & {
     $disk=[pscustomobject]@{Number=0;UniqueId='small-data';Size=[long](22GB+2MB)}
-    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=5;Guid='55555555-5555-5555-5555-555555555555';Offset=[long]1MB;Size=[long]22GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=5;Guid='55555555-5555-5555-5555-555555555555';Offset=[long]1MB;Size=[long]22GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsBoot=$false}
     function Emit { }
     function Get-Disk { return $disk }
     function Get-StagingDisk { return $disk }
@@ -166,7 +170,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 }
 & {
     $disk=[pscustomobject]@{Number=0;UniqueId='disk';Size=[long]200GB}
-    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long](200GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+    $part=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long](200GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$false}
     $script:shrinkCalls=0; $script:shrinkLimit=[long]120GB
     $script:minimumBytes=[long]40GB
     function Emit { }
@@ -174,8 +178,8 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     function Get-StagingDisk($Number,$Identity) { if ($Number -ne 0 -or $Identity -cne 'disk') { throw 'Changed disk' }; return $disk }
     function Get-InspectedPartitions { return @($part) }
     function Get-BitLockerSnapshot { return @{known=$true;volumes=@()} }
-    $script:volumeLetter='C'; $script:volumeLabel=''
-    function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter=$script:volumeLetter;FileSystemLabel=$script:volumeLabel;FileSystemType='NTFS';Size=$part.Size;SizeRemaining=[long]100GB;HealthStatus='Healthy';OperationalStatus=@('OK')} }
+    $script:volumeLetter='C'; $script:volumeLabel=''; $script:volumeFree=[long]100GB
+    function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter=$script:volumeLetter;FileSystemLabel=$script:volumeLabel;FileSystemType='NTFS';Size=$part.Size;SizeRemaining=$script:volumeFree;HealthStatus='Healthy';OperationalStatus=@('OK')} }
     function Get-PartitionSupportedSize { $script:shrinkCalls++; return @{SizeMin=$script:shrinkLimit} }
     $release=[pscustomobject]@{sizeBytes=6GB;minimumLinuxBytes=40GB}
     $found=Get-StagingChoices $release
@@ -184,6 +188,13 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $region=$found.disks[0].regions[0]
     Assert ($region.freeBytes -eq 100GB -and $region.resizeState -eq 'unchecked') 'Unused filesystem space must remain distinct from unallocated space.'
     Assert ($found.disks[0].unallocatedBytes -eq 0) 'Filesystem free bytes became unallocated disk space.'
+    Assert ($found.disks[0].layoutSha256 -eq 'layout') 'Inspection did not record the layout fingerprint the plan checks.'
+    [Omarchy.DirectX86.NativeDisk]::Layouts.Enqueue('before'); [Omarchy.DirectX86.NativeDisk]::Layouts.Enqueue('after')
+    Assert ((Get-StagingChoices $release).disks[0].layoutSha256 -eq '') 'A layout that changed during inspection vouched for the regions read before it.'
+    Assert ($region.isWindows -eq $false) 'A data partition was marked as the Windows partition.'
+    $part.IsBoot=$true
+    Assert ((Get-StagingChoices $release).disks[0].regions[0].isWindows -eq $true) 'The Windows boot partition was not marked.'
+    $part.IsBoot=$false
     $script:volumeLetter=''; $script:volumeLabel='RESTORE'
     $labeled=Get-StagingChoices $release
     Assert ($labeled.disks[0].regions[0].label -eq 'RESTORE (Partition 3)') 'A volume label without a drive letter was hidden.'
@@ -191,6 +202,13 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $labeled=Get-StagingChoices $release
     Assert ($labeled.disks[0].regions[0].label -eq 'OS (C:)') 'The drive letter and filesystem label were not shown together.'
     $script:volumeLabel=''
+    $script:volumeFree=[long]20GB
+    $short=(Get-StagingChoices $release).disks[0].regions[0]
+    Assert ($short.resizeState -eq 'insufficient' -and $short.resizeReason -like 'Not enough space*Free up space*') 'A partition short of free space did not ask to free space.'
+    $size=$part.Size; $part.Size=[long]22GB; $script:volumeFree=[long]8GB
+    $short=(Get-StagingChoices $release).disks[0].regions[0]
+    Assert ($short.resizeState -eq 'insufficient' -and $short.resizeReason -eq 'This partition is too small for the temporary installer.') 'A partition too small for the installer asked to free space.'
+    $part.Size=$size; $script:volumeFree=[long]100GB
     $query=[pscustomobject]@{diskNumber=0;diskUniqueId='disk';partitionNumber=3;partitionGuid=$part.Guid}
     $found=Get-StagingChoices $release $query
     Assert ($script:shrinkCalls -eq 1 -and $found.choices.Count -eq 1) 'Selected resize analysis did not expose a usable allocation.'
@@ -198,6 +216,7 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $script:shrinkLimit=195GB
     $found=Get-StagingChoices $release $query
     Assert ($found.choices.Count -eq 0 -and $found.disks[0].regions[0].resizeState -eq 'checked' -and $found.disks[0].regions[0].maximumReleaseBytes -eq 5GB-2MB) 'Insufficient shrink space must retain the measured limit and partition.'
+    Assert ($found.disks[0].regions[0].resizeReason -like 'Windows cannot move some files*') 'A Windows shrink limit was blamed on the free-space reserve.'
     $query.partitionGuid='44444444-4444-4444-4444-444444444444'
     Reject { Get-StagingChoices $release $query } 'Resize query accepted a replaced partition.'
     Assert ($script:shrinkCalls -eq 2) 'Changed partition reached shrink analysis.'
@@ -208,8 +227,8 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
 & {
     $script:streamDisk=[pscustomobject]@{Number=0;UniqueId='stream-disk';Size=[long]400GB}
     $partitions=@(
-        [pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false},
-        [pscustomobject]@{DiskNumber=0;PartitionNumber=4;Guid='44444444-4444-4444-4444-444444444444';Offset=[long]181GB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='33333333-3333-3333-3333-333333333333';Offset=[long]1MB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$true},
+        [pscustomobject]@{DiskNumber=0;PartitionNumber=4;Guid='44444444-4444-4444-4444-444444444444';Offset=[long]181GB;Size=[long]180GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false;IsBoot=$false}
     )
     $script:minimumBytes=[long]40GB; $script:shrinkCalls=0; $script:partial=@(); $script:streamFree=[long]5GB
     function Emit($Type,$Stage,$Fields) {
@@ -395,9 +414,6 @@ try {
 }
 # Planning never consults Secure Boot, and a reviewed shrink can also leave
 # room for Omarchy right after the temporary installer.
-if (-not ('Omarchy.DirectX86.NativeDisk' -as [type])) {
-    Add-Type -TypeDefinition 'namespace Omarchy.DirectX86 { public static class NativeDisk { public static string Firmware() { return "uefi"; } public static object InspectWindowsBoot() { return null; } public static string LayoutHash(int disk) { return "layout"; } } }'
-}
 & {
     $planDisk=[pscustomobject]@{Number=0;UniqueId='plan-disk';Size=[long]500GB;SerialNumber='serial'}
     $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='66666666-6666-6666-6666-666666666666';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}

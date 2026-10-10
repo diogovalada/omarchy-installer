@@ -103,6 +103,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
             }
             Emit 'progress' 'inspecting' @{message=('Reading partitions on Disk '+$disk.Number+'...')}
             $diskChoices=@(); $regions=@(); $unallocated=[long]0; $largest=[long]0
+            $layoutBefore=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
             $parts=@(Get-InspectedPartitions $disk | Sort-Object Offset); $cursor=[long]1MB
             foreach ($p in @($parts)+@([pscustomobject]@{Offset=(Align-Down ([long]$disk.Size-1MB));Size=0;GptType=''})) {
                 $gap=[Math]::Max([long]0,(Align-Down ([long]$p.Offset))-$cursor)
@@ -114,7 +115,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 if ($available -ge 0) { $diskChoices+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;label=('Unallocated space ('+[Math]::Round($gap/1GB,1)+' GiB)');target=@{target_kind='free';start_offset_bytes=$cursor}} }
                 $cursor=Align-Up ([long]$p.Offset+[long]$p.Size)
                 if ($p.Size -eq 0) { continue }
-                $region=@{kind='partition';partitionNumber=[int]$p.PartitionNumber;partitionGuid=[string]$p.Guid;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size;label=('Partition '+$p.PartitionNumber);fileSystem='';freeBytes=$null;resizeState='unavailable';resizeReason='System or unsupported partition; kept unchanged.';maximumReleaseBytes=$null;reserveBytes=$null}
+                $region=@{kind='partition';partitionNumber=[int]$p.PartitionNumber;partitionGuid=[string]$p.Guid;offsetBytes=[long]$p.Offset;sizeBytes=[long]$p.Size;label=('Partition '+$p.PartitionNumber);fileSystem='';freeBytes=$null;resizeState='unavailable';resizeReason='System or unsupported partition; kept unchanged.';maximumReleaseBytes=$null;reserveBytes=$null;isWindows=[bool]$p.IsBoot}
                 switch ([string]$p.GptType) {
                     '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' { $region.label='EFI system' }
                     '{e3c9e316-0b5c-4db8-817d-f92df00215ae}' { $region.label='Microsoft reserved' }
@@ -140,7 +141,8 @@ function Get-StagingChoices($Release,$Resize=$null) {
                             if ($region.freeBytes -lt $overhead+$reserve) {
                                 $region.resizeState='insufficient'
                                 $region.reserveBytes=$reserve
-                                $region.resizeReason='Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.'
+                                # Freeing space can't help when even an empty volume is too small.
+                                $region.resizeReason=if ([long]$v.Size -lt $overhead+$reserve) { 'This partition is too small for the temporary installer.' } else { 'Not enough space can be released while keeping the Windows free-space reserve. Free up space in Windows, then refresh.' }
                             } else { $region.resizeState='unchecked'; $region.resizeReason='' }
                         }
                         else { $region.resizeReason='Only NTFS partitions can be resized here.' }
@@ -158,7 +160,13 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 }
                 $regions+=$region
             }
-            $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption}
+            # The fingerprint Get-StagingPlan records, so the app can tell
+            # whether a reviewed plan still matches the layout it showed. It
+            # vouches for these regions only if the layout didn't change while
+            # they were read; otherwise it stays empty and Review draws no bars.
+            $layoutAfter=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
+            $layout=if ($layoutBefore -and $layoutBefore -ceq $layoutAfter) { $layoutBefore } else { '' }
+            $disks+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;regions=$regions;unallocatedBytes=$unallocated;largestFreeBytes=$largest;encryption=$encryption;layoutSha256=$layout}
             foreach ($choice in $diskChoices) {
                 $choice.diskSizeBytes=[long]$disk.Size; $choice.encryption=$encryption
                 $remaining=@(foreach ($region in $regions) {

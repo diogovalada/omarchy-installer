@@ -113,4 +113,25 @@ $request.allocationBytes=64GB+1
 Reject { Select-Allocation $planProbe $request } 'An unaligned allocation was accepted.'
 $request.allocationBytes=64GB; $request.diskUniqueId='changed'
 Reject { Select-Allocation $planProbe $request } 'A changed disk identity was accepted.'
-Write-Output 'Passed blank-disk, failed-inventory, protected-environment and exact allocation regressions; all host boundaries mocked.'
+
+# A shrink blocker names the limit that applies: the free-space reserve, or
+# files Windows can't move (Get-PartitionSupportedSize's SizeMin).
+& {
+ $shrinkPart=[pscustomobject]@{DiskNumber=9;PartitionNumber=3;Guid='{33333333-3333-3333-3333-333333333333}';Offset=[long]1MB;Size=[long]200GB;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';IsReadOnly=$false}
+ function Get-Volume { return [pscustomobject]@{Path='volume';DriveLetter='C';FileSystemType='NTFS';Size=[long]200GB;SizeRemaining=$script:shrinkFree;HealthStatus='Healthy';OperationalStatus=@('OK')} }
+ function Get-PartitionSupportedSize { return @{SizeMin=$script:shrinkSizeMin} }
+ $reserveMessage='Windows cannot release the minimum installation size while retaining the free-space reserve.'
+ $script:shrinkFree=[long]50GB; $script:shrinkSizeMin=[long]100GB
+ $candidate=Get-ShrinkCandidate $shrinkPart
+ Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage) 'A reserve-bound shrink did not blame the reserve.'
+ $script:shrinkSizeMin=[long]195GB
+ $candidate=Get-ShrinkCandidate $shrinkPart
+ Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage) 'A shrink bound by both limits did not name the reserve first.'
+ $script:shrinkFree=[long]100GB
+ $candidate=Get-ShrinkCandidate $shrinkPart
+ Assert (-not $candidate.eligible -and @($candidate.blockers)[0] -like 'Windows cannot move some files*') 'A shrink bound by unmovable files blamed the reserve.'
+ $script:shrinkSizeMin=[long]50GB
+ $candidate=Get-ShrinkCandidate $shrinkPart
+ Assert ($candidate.eligible -and $candidate.maximumAllocationBytes -eq 80GB) 'An unconstrained shrink lost its measured limit.'
+}
+Write-Output 'Passed blank-disk, failed-inventory, protected-environment, exact allocation and shrink-limit regressions; all host boundaries mocked.'

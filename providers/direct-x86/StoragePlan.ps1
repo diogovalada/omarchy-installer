@@ -29,8 +29,13 @@ function Get-ShrinkCandidate($Partition) {
         $reserve=Align-Up ([long][Math]::Max(20GB,[decimal]$volume.Size/10))
         $used=[long]$volume.Size-$free
         $minimum=Align-Up ([long][Math]::Max($sizeMin,$used+$reserve))
-        $maximum=[Math]::Max([long]0,(Align-Down ([long]$Partition.Offset+[long]$Partition.Size))-([long]$Partition.Offset+$minimum))
-        if ($maximum -lt $script:minimumBytes) { $issues.Add('Windows cannot release the minimum installation size while retaining the free-space reserve.') }
+        $end=Align-Down ([long]$Partition.Offset+[long]$Partition.Size)
+        $maximum=[Math]::Max([long]0,$end-([long]$Partition.Offset+$minimum))
+        # Name the limit that applies: the reserve, or files Windows can't move.
+        if ($maximum -lt $script:minimumBytes) {
+            if ($end-([long]$Partition.Offset+(Align-Up ($used+$reserve))) -ge $script:minimumBytes) { $issues.Add('Windows cannot move some files near the end of this partition, so it cannot release the minimum installation size.') }
+            else { $issues.Add('Windows cannot release the minimum installation size while retaining the free-space reserve.') }
+        }
     } catch { $issues.Add($_.Exception.Message) }
     return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
 }
