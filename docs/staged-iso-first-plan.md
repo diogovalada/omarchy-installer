@@ -2,6 +2,15 @@
 
 Decision date: 2026-09-06.
 
+**October 10 update — space editor:** below the disk map, a zoomed bar shows
+how the space source will be laid out: the partition's used space, the space
+Windows can't release, the temporary installer and Omarchy. When Windows is
+kept, a handle on the bar and the size field set Omarchy's size together;
+Keep and Replace became a two-way toggle. Selecting the space Windows can't
+release explains why. Editing the size fixes the space source, so a later
+measurement can't move it. See the
+[disk map plan](staged-disk-map-plan-2026-10-06.md).
+
 **October 9 update — disk map:** the choose-space screen now shows each disk as
 a to-scale map. Selecting a partition shows one line about it and, when the
 partition is usable, chooses it as the space source; free space that fits is

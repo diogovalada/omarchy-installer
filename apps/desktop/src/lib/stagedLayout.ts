@@ -115,30 +115,46 @@ export function limits(region:StagedRegion|undefined,temporaryBytes:number,minim
 // The selected region as it will be laid out, in provider order: the shrunk
 // partition (used space, space Windows can't release, space it keeps free),
 // the temporary installer, then Omarchy. A free region starts with the
-// installer and leaves the rest to Omarchy, so `mode` applies only to
-// shrinking. Used space is a fixed stub.
-export function editorSegments(region:StagedRegion,{temporaryBytes,omarchyBytes=0,mode}:{temporaryBytes:number;omarchyBytes?:number;mode:EditorMode}):EditorSegment[] {
+// installer and leaves the rest to Omarchy, whose size the free-target line
+// gives, so `mode` applies only to shrinking. Used space is a fixed stub
+// without a label; the editor names the partition below the bar. The
+// installer is at least minPx of a barPx-wide bar; only it is raised, so where
+// it starts stays proportional to Omarchy's size.
+export function editorSegments(region:StagedRegion,{temporaryBytes,omarchyBytes=0,mode,barPx=760,minPx=24}:{temporaryBytes:number;omarchyBytes?:number;mode:EditorMode;barPx?:number;minPx?:number}):EditorSegment[] {
+  const minimum=Math.min(100,minPx/barPx*100);
   const segment=(kind:EditorSegment['kind'],offsetBytes:number|null,sizeBytes:number,label:string):EditorSegment => ({kind,offsetBytes,sizeBytes:Math.max(0,sizeBytes),widthPercent:0,label});
   const installer=`installer ${formatSize(temporaryBytes,'up')} · temporary`;
   if(region.kind==='free') {
     const segments=[segment('temporary',region.offsetBytes,temporaryBytes,installer)];
     const rest=region.sizeBytes-temporaryBytes;
-    if(rest>0) segments.push(segment('omarchy',region.offsetBytes+temporaryBytes,rest,`Omarchy ${formatSize(rest,'down')}`));
-    return scaleWidths(segments,0);
+    if(rest>0) segments.push(segment('omarchy',region.offsetBytes+temporaryBytes,rest,'Omarchy'));
+    return withInstaller(segments,minimum,100);
   }
   const linux=mode==='keep' ? omarchyBytes : 0;
   const start=alignDown(region.offsetBytes+region.sizeBytes)-temporaryBytes-linux;
   const free=region.freeBytes ?? 0;
   const used=region.sizeBytes-free;
   const releasable=Math.min(free,region.maximumReleaseBytes ?? free);
-  const segments=[segment('used',region.offsetBytes,used,`${formatSize(used)} used`)];
-  if(free-releasable>0) segments.push(segment('cant-release',null,free-releasable,`can't release ${formatSize(free-releasable)}`));
-  if(releasable-temporaryBytes-linux>0) segments.push(segment('free',null,releasable-temporaryBytes-linux,`free ${formatSize(releasable-temporaryBytes-linux,'down')}`));
+  const segments=[segment('used',region.offsetBytes,used,'')];
+  if(free-releasable>0) segments.push(segment('cant-release',null,free-releasable,"can't release"));
+  if(releasable-temporaryBytes-linux>0) segments.push(segment('free',null,releasable-temporaryBytes-linux,'free'));
   segments.push(segment('temporary',start,temporaryBytes,installer));
   if(linux>0) segments.push(segment('omarchy',start+temporaryBytes,linux,`Omarchy ${formatSize(linux)}`));
   const [stub,...rest]=segments;
   stub.widthPercent=15;
-  scaleWidths(rest,0,85);
+  withInstaller(rest,minimum,85);
+  return segments;
+}
+
+// Proportional widths summing to `total`, with the installer raised to
+// `minimum` and the others sharing what is left.
+function withInstaller(segments:EditorSegment[],minimum:number,total:number) {
+  scaleWidths(segments,0,total);
+  const installer=segments.find(s=>s.kind==='temporary');
+  if(installer && installer.widthPercent<minimum) {
+    installer.widthPercent=Math.min(minimum,total);
+    scaleWidths(segments.filter(s=>s!==installer),0,total-installer.widthPercent);
+  }
   return segments;
 }
 
