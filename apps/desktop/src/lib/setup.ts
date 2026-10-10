@@ -34,7 +34,9 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // it is display-only.
 export interface StagedReviewPlan { diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
-const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null }>({ snapshot:null, pending:false, error:null });
+// `stagedAction` is the last staged-installer action asked for. It outlives
+// any one screen, so a failure can be traced to it from the home screen too.
+const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null }>({ snapshot:null, pending:false, error:null, stagedAction:null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
@@ -56,7 +58,10 @@ export const setup = { subscribe:state.subscribe, refresh,
   inspectUsb:(choiceId:string,elevated=false) => command('inspect_usb_choice',{choiceId,elevated}),
   prepare:(action:'firmware'|'runtime') => command('prepare_setup', {action}),
   prepareBitLocker:(reminderOnly:boolean) => command('prepare_bitlocker', {reminderOnly}),
-  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'firmware'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
+  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'firmware'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => {
+    if(isTauri() && !get(state).pending) state.update(s => ({ ...s, stagedAction:action }));
+    return command('staged_iso',{action,selection,operationId,resize});
+  },
   reviewUsb:(choiceId:string,mode:'erase'|'preserve') => command('review_usb_setup',{choiceId,mode}),
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),

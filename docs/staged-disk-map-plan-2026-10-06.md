@@ -438,8 +438,9 @@ above and in the Screen sections:
   link row while it can't help yet; needs attention reads "Preparing the
   installer didn't finish · Disk 0" / "Remove the temporary installer.
   Windows and any installed Omarchy stay." **Check disks again** shows only
-  after an action on a recorded installer failed (the error lasts in the
-  setup state, so it carries from the home screen into the flow).
+  after removing a recorded installer failed; the setup store remembers the
+  last action, so this carries from the home screen into the flow. After
+  other failures, retrying is what helps.
 - **Not changed, by agreement:** zoom lines between the map and the editor,
   a Restart now button, Back acting as Cancel, a longer subtitle, and GiB
   versus GB (an app-wide decision).

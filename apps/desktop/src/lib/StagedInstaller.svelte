@@ -152,10 +152,11 @@
     return {...current,disks,choices};
   }
   // Recorded installer actions; Prepare again removes it, then checks disks.
-  // Checking disks beside an installer is offered once an action failed,
-  // typically removing it; the error lasts in the setup state, so the offer
-  // survives moving between the home screen and this flow.
-  $: actionFailed=!!error && operations.length>0;
+  // Checking disks beside an installer is offered once removing it failed;
+  // after other failures, retrying is what helps. The setup store remembers
+  // the last action, so the offer survives moving between the home screen
+  // and this flow.
+  $: removalFailed=!!error && operations.length>0 && $setup.stagedAction==='cleanup';
   function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
@@ -273,7 +274,7 @@
               <summary>What can help?</summary>
               {#if blockCause==='files'}<p>Turning off hibernation and System Restore, then restarting, often lets Windows shrink {blockName} further.</p>
               {:else if blockCause==='measure'}<p>Restart Windows, then recheck.</p>{/if}
-              {#if useUsb}<p>Or <button class="text-action inline" disabled={busy} onclick={useUsb}>create a bootable USB</button> and replace Windows.</p>{/if}
+              {#if useUsb}<p>{#if blockCause==='files' || blockCause==='measure'}Or <button class="text-action inline" disabled={busy} onclick={useUsb}>create a bootable USB</button>{:else}<button class="text-action inline" disabled={busy} onclick={useUsb}>Create a bootable USB</button>{/if} and replace Windows.</p>{/if}
             </details>
           {/if}
         {/if}
@@ -291,7 +292,7 @@
   {#each operations as op (op.operationId)}
     <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} act={action=>operate(op,action)}/>
   {/each}
-  {#if !recoveryOnly && actionFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
+  {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
@@ -326,5 +327,5 @@
   progress::-webkit-progress-bar{border-radius:3px;background:var(--surface-raised)}progress::-webkit-progress-value{border-radius:3px;background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
   @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
-  @media(max-width:550px){h2{font-size:20px}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
+  @media(max-width:550px){h2{font-size:20px}.disk-row .hint{order:3;flex-basis:100%}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
 </style>
