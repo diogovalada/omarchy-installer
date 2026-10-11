@@ -483,6 +483,28 @@ and found these, fixed in PR 6 (`staged-vm-fixes`):
   helper record keeping is outside this plan. Opening the reserved
   explanation still moves the controls below it, like any disclosure.
 
+## Second VM run fixes (2026-10-11)
+
+A VM re-check of the PR 6 screens passed, and found:
+
+- **Declined dialogs:** declining the firmware, next-restart or removal
+  confirmation showed "Couldn't complete this step." with "Operation was not
+  confirmed". Every confirmation in a staged operation comes before any
+  change, so `record_failure` now treats a declined confirmation as cancelled
+  ("Nothing was changed.") whenever the snapshot has a `stagedTarget`; the
+  Review-only `staged_review_declined` flag is gone. Outside a staged
+  operation (USB) it stays a failure. The note shows by Review changes after
+  Review, and under the card otherwise.
+- **After a reload:** the removal confirmation and **Check disks again**
+  depended on the frontend-only `stagedAction`, lost on reloading the window.
+  They now read the snapshot's `stagedTarget.action`, and `stagedAction` is
+  removed.
+- **Review planning:** the bottom Stop button no longer shows while Review is
+  being planned (it read "Stop preparing").
+- **Home card:** with no disk check of its own, it showed Secure Boot as
+  unknown although the check knew it was on, so it suggested the wrong step.
+  The setup store keeps the last check's Secure Boot state for the session.
+
 ## Copy
 
 Final English strings. Sizes drop a trailing `.0`: "953 GiB", "881.5 GiB",

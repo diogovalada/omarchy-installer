@@ -121,10 +121,16 @@
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
   $: testing=$setup.snapshot?.stagedTesting===true;
+  // The snapshot names the staged action it reflects, even after reloading.
+  $: lastAction=$setup.snapshot?.stagedTarget?.action ?? '';
+  // Declining any confirmation of a staged action changes nothing; the helper
+  // reports it as cancelled without an error. Review's shows by its button.
+  $: cancelledNote=!busy && !error && $setup.snapshot?.status==='cancelled' ? $setup.snapshot.message : '';
+  $: declined=lastAction==='stage' ? cancelledNote : '';
   // The steps card says what to do after preparing or setting the next
   // restart, so only a firmware restart's or a removal's own result shows;
   // a removed installer's card is gone.
-  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup'].includes($setup.stagedAction ?? '') ? result?.message ?? '' : '';
+  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup'].includes(lastAction) ? result?.message ?? '' : lastAction!=='stage' ? cancelledNote : '';
   // The recorded installer a running command changes: the one its Review
   // prepares, or the one being removed. Others keep their own state, and a
   // disk check changes none.
@@ -133,9 +139,6 @@
   // that runs (not while the next command is pending).
   $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
   $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
-  // Declining Review changes nothing; the helper reports it as cancelled
-  // without an error.
-  $: declined=!busy && !error && $setup.snapshot?.status==='cancelled' ? $setup.snapshot.message : '';
   $: if(restarting && !busy && result?.operationId===restarting && result.status==='cleaned') {
     restarting=null; selectedDisk=''; prepareAgain(); inspect();
   }
@@ -172,7 +175,7 @@
   // (not a polling or other error). After other failures, retrying is what
   // helps. The setup store outlives this screen, so the offer carries from
   // the home screen into the flow.
-  $: removalFailed=operations.length>0 && $setup.stagedAction==='cleanup' && $setup.snapshot?.status==='failed';
+  $: removalFailed=operations.length>0 && lastAction==='cleanup' && $setup.snapshot?.status==='failed';
   function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
@@ -313,13 +316,13 @@
   {#each operations as op (op.operationId)}
     <!-- While preparing, the panel above stands in for the new installer's card. -->
     {#if !(preparing && op.operationId===preparingId)}
-      <StagedSteps {op} secureBoot={inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
+      <StagedSteps {op} secureBoot={inspection?.secureBoot ?? $setup.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
     {/if}
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
-  {#if busy && $setup.snapshot?.cancelAvailable && !preparing}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
+  {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}

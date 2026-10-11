@@ -101,7 +101,6 @@ struct Inner {
     cancel: Arc<AtomicBool>,
     staged_review: Option<std::sync::mpsc::Sender<bool>>,
     // The user declined the staged write's review in this operation.
-    staged_review_declined: bool,
 }
 #[derive(Clone)]
 pub struct Setup {
@@ -139,16 +138,16 @@ impl Default for Setup {
                 writer: None,
                 cancel: Arc::new(AtomicBool::new(false)),
                 staged_review: None,
-                staged_review_declined: false,
             })),
         }
     }
 }
-// Declining the staged review isn't a failure: the helper stops before
-// changing anything, and the inspection stays so the choose screen returns.
+// Declining a confirmation in a staged operation (Review, or the arm,
+// firmware and removal dialogs) isn't a failure: every one comes before any
+// change, and the inspection stays so the choose screen returns.
 fn record_failure(inner: &mut Inner, error: String) {
     inner.snapshot.staged_review = None;
-    if inner.staged_review_declined && crate::setup_helper::declined(&error) {
+    if inner.snapshot.staged_target.is_some() && crate::setup_helper::declined(&error) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
@@ -306,7 +305,6 @@ impl Setup {
         inner.snapshot.total_bytes = 0;
         inner.snapshot.cancel_requested = false;
         inner.snapshot.cancel_available = false;
-        inner.staged_review_declined = false;
         inner.snapshot.staged_review = None;
         inner.snapshot.staged_target = None;
         inner.snapshot.stage = status.into();
@@ -1294,7 +1292,6 @@ fn review_staged_write(
         inner.staged_review = None;
         inner.snapshot.staged_review =
             approved.then(|| json!({"summary": summary, "review": review, "approved": true}));
-        inner.staged_review_declined = !approved;
     });
     approved
 }
@@ -1570,13 +1567,14 @@ fn run_elevated(
 mod usb_review_tests {
     use super::*;
     #[test]
-    fn a_declined_staged_review_is_cancelled_without_an_error() {
+    fn a_declined_staged_confirmation_is_cancelled_without_an_error() {
         let setup = Setup::default();
         {
             let mut inner = setup.inner.lock().unwrap();
             inner.snapshot.status = "running".into();
             inner.snapshot.staged_iso = Some(json!({"disks":[]}));
-            inner.staged_review_declined = true;
+            // Review, or any other confirmation of a staged action.
+            inner.snapshot.staged_target = Some(json!({"action":"firmware","operationId":"id"}));
             // As the helper reports it, with its operation files.
             let reported = crate::setup_helper::operation_failure(
                 crate::setup_helper::NOT_CONFIRMED,
@@ -1603,13 +1601,11 @@ mod usb_review_tests {
             inner.snapshot.staged_review = Some(json!({"summary":"Prepare?","approved":true}));
             inner.snapshot.status = "failed".into();
         }
-        // A new operation forgets the declined and the approved review, and
-        // the previous staged target.
-        setup.inner.lock().unwrap().snapshot.staged_target =
-            Some(json!({"action":"cleanup","operationId":"id"}));
+        // A new operation forgets the approved review and the previous staged
+        // target, so a declined confirmation outside a staged operation (USB)
+        // stays a failure.
         setup.begin("direct", "running").unwrap();
         let mut inner = setup.inner.lock().unwrap();
-        assert!(!inner.staged_review_declined);
         assert_eq!(inner.snapshot.staged_review, None);
         assert_eq!(inner.snapshot.staged_target, None);
         record_failure(&mut inner, crate::setup_helper::NOT_CONFIRMED.into());

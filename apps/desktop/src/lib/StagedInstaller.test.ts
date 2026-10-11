@@ -470,7 +470,7 @@ it('returns to the choose screen with the selection intact when Review is declin
   await fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
   expect(calls.respondStagedReview).toHaveBeenLastCalledWith(false);
   // The helper stops; the app reports a cancelled step, not a failure.
-  state.set({pending:false,snapshot:{...reviewing(null).snapshot,status:'cancelled',stage:'staged-installer',message:'Nothing was changed.',error:null}});
+  state.set({pending:false,snapshot:{...reviewing(null).snapshot,status:'cancelled',stage:'staged-installer',message:'Nothing was changed.',error:null,stagedTarget:{action:'stage',operationId:null}}});
   await tick();
   expect(screen.queryByRole('region',{name:'Review changes'})).not.toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -629,16 +629,16 @@ it('replaces the choose screen with the installer steps while one exists',async(
   expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
 });
 it('offers checking disks after a removal failed elsewhere, such as on the home screen',async()=>{
-  state.set({pending:false,stagedAction:'cleanup',snapshot:{...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
+  state.set({pending:false,snapshot:{stagedTarget:{action:'cleanup',operationId:null},...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
   expect(screen.getByRole('button',{name:'Check disks again'})).toBeEnabled();
   // After another action fails, retrying it is what helps.
-  state.set({pending:false,stagedAction:'arm',snapshot:{...card('staged',false).snapshot,status:'failed',error:'Firmware rejected the boot entry.'}});
+  state.set({pending:false,snapshot:{stagedTarget:{action:'arm',operationId:null},...card('staged',false).snapshot,status:'failed',error:'Firmware rejected the boot entry.'}});
   await tick();
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
   // A polling error after a removal that succeeded isn't a failed removal.
-  state.set({pending:false,stagedAction:'cleanup',error:'Connection unavailable',snapshot:{...card('copying',true).snapshot,status:'complete'}});
+  state.set({pending:false,error:'Connection unavailable',snapshot:{stagedTarget:{action:'cleanup',operationId:null},...card('copying',true).snapshot,status:'complete'}});
   await tick();
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
 });
@@ -649,7 +649,7 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   expect(screen.queryByRole('button',{name:'Check disks again'})).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Remove temporary installer'}));
   // The real store records the action; the mock does not.
-  state.set({pending:false,stagedAction:'cleanup',snapshot:{...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
+  state.set({pending:false,snapshot:{stagedTarget:{action:'cleanup',operationId:null},...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
   await tick();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Check disks again'}));
@@ -672,17 +672,17 @@ it('says a removal is under way, or that it did not finish',async()=>{
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.queryByText('Starting Windows later')).not.toBeInTheDocument();
-  state.set({pending:false,stagedAction:'cleanup',snapshot:removing});
+  state.set({pending:false,snapshot:removing});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Keep this window open.')).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Remove temporary installer'})).not.toBeInTheDocument();
-  state.set({pending:false,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  state.set({pending:false,snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
   await tick();
   expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
   // While the next command is pending, the failed removal's snapshot stays.
-  state.set({pending:true,stagedAction:'cleanup',snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
+  state.set({pending:true,snapshot:{...removing,status:'failed',error:'Windows could not delete the partition.'}});
   await tick();
   expect(screen.getByRole('heading',{name:"Removing the temporary installer didn't finish · Disk 0"})).toBeInTheDocument();
 });
@@ -711,19 +711,45 @@ it('keeps other recorded installers as they are while one is prepared or removed
 });
 it('confirms a removal on the home screen, but leaves next steps to the card',async()=>{
   const removed='Temporary installer partitions and its firmware entry were removed.';
-  state.set({pending:false,stagedAction:'cleanup',snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'11111111-1111-4111-8111-111111111111',status:'cleaned',message:removed}}});
+  state.set({pending:false,snapshot:{stagedTarget:{action:'cleanup',operationId:null},status:'complete',stagedTesting:true,stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'11111111-1111-4111-8111-111111111111',status:'cleaned',message:removed}}});
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByRole('region',{name:'Temporary installer'})).toHaveTextContent(removed);
   // After preparing (the last command answered Review) or setting the next
   // restart, the provider's own advice would contradict the card.
-  for(const stagedAction of [null,'arm']) {
+  for(const action of ['stage','arm']) {
     const prepared=card('staged',true).snapshot;
-    state.set({pending:false,stagedAction,snapshot:{...prepared,stagedIso:{...prepared.stagedIso,operationId:'11111111-1111-4111-8111-111111111111',status:'staged',message:'Restart into the installer.'}}});
+    state.set({pending:false,snapshot:{...prepared,stagedTarget:{action,operationId:null},stagedIso:{...prepared.stagedIso,operationId:'11111111-1111-4111-8111-111111111111',status:'staged',message:'Restart into the installer.'}}});
     await tick();
     expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
     expect(screen.queryByText('Restart into the installer.')).not.toBeInTheDocument();
   }
+});
+it('says nothing changed when another staged confirmation is declined',async()=>{
+  // As the helper reports a declined firmware restart: cancelled, no error.
+  state.set({pending:false,snapshot:{...card('staged',true).snapshot,status:'cancelled',message:'Nothing was changed.',error:null,stagedTarget:{action:'firmware',operationId:'11111111-1111-4111-8111-111111111111'}}});
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('region',{name:'Temporary installer'})).toHaveTextContent('Nothing was changed.');
+  expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
+});
+it('uses the last disk check\'s Secure Boot state on the home screen',async()=>{
+  state.set({...card('staged',null),secureBoot:true});
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByText('Turn off Secure Boot')).toHaveAttribute('aria-current','step');
+  expect(screen.getByRole('button',{name:'Restart to firmware settings'})).toHaveClass('primary');
+});
+it('offers no Stop while Review is planned',async()=>{
+  state.set(measured());
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  state.set({...reviewing(null),snapshot:{...reviewing(null).snapshot,cancelAvailable:true,cancelRequested:false}});
+  await tick();
+  expect(screen.getByText('Planning the changes…')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:/^Stop/})).not.toBeInTheDocument();
 });
 it('offers help and the USB route when no space can be used',async()=>{
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[{...fullDisk,regions:[{...checkedC,maximumReleaseBytes:0}]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB}}});
