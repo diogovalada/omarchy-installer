@@ -31,7 +31,7 @@ export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBy
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
 export interface StagedResizeQuery { diskNumber:number;diskUniqueId:string;partitionNumber:number;partitionGuid:string }
-export interface StagedRegion { kind:'free'|'partition';offsetBytes:number;sizeBytes:number;label:string;partitionNumber?:number;partitionGuid?:string;fileSystem?:string;freeBytes?:number|null;resizeState?:'unchecked'|'checked'|'failed'|'insufficient'|'unavailable';resizeReason?:string;maximumReleaseBytes?:number|null;reserveBytes?:number|null;limitedByFiles?:boolean;isWindows?:boolean }
+export interface StagedRegion { kind:'free'|'partition';offsetBytes:number;sizeBytes:number;label:string;partitionNumber?:number;partitionGuid?:string;fileSystem?:string;freeBytes?:number|null;resizeState?:'unchecked'|'checked'|'failed'|'insufficient'|'unavailable';resizeReason?:string;maximumReleaseBytes?:number|null;reserveBytes?:number|null;limitedByFiles?:boolean;filesReleaseBytes?:number|null;isWindows?:boolean }
 export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes:number;unallocatedBytes:number;largestFreeBytes:number;regions:StagedRegion[];encryption?:StagedEncryption[];layoutSha256?:string }
 // The review payload the helper will build from the same plan as the review
 // summary (see the disk map plan). It sits outside the confirmation binding, so

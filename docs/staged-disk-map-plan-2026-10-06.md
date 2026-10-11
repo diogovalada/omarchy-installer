@@ -514,8 +514,10 @@ A VM re-check of the PR 6 screens passed, and found:
   reserve, not files, limits the release (the provider's new `limitedByFiles`,
   from `Get-ShrinkCandidate`: Windows' own minimum is above used space plus
   the reserve; then both figures count from the measured release, alignment
-  included), and the partition can hold the installer, Omarchy and the
-  reserve at all.
+  included), Windows' own minimum would still allow the installer plus
+  Omarchy once space is freed (the provider's new `filesReleaseBytes`), and
+  the partition can hold the installer, Omarchy and the reserve at all. The
+  replace-only "Free up N more" advice follows the same rule.
 - **Removal:** the card reads "Removing the temporary installer" only once
   its confirmation is approved. The backend marks the snapshot's
   `stagedTarget` `confirmed` when an arm, firmware or removal confirmation is

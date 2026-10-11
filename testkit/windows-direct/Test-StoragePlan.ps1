@@ -123,7 +123,7 @@ Reject { Select-Allocation $planProbe $request } 'A changed disk identity was ac
  $reserveMessage='Windows cannot release the minimum installation size while retaining the free-space reserve.'
  $script:shrinkFree=[long]50GB; $script:shrinkSizeMin=[long]100GB
  $candidate=Get-ShrinkCandidate $shrinkPart
- Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage -and -not $candidate.limitedByFiles) 'A reserve-bound shrink did not blame the reserve.'
+ Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage -and -not $candidate.limitedByFiles -and $candidate.filesReleaseBytes -eq 100GB) 'A reserve-bound shrink did not blame the reserve, or lost what files alone allow.'
  $script:shrinkSizeMin=[long]195GB
  $candidate=Get-ShrinkCandidate $shrinkPart
  Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage) 'A shrink bound by both limits did not name the reserve first.'

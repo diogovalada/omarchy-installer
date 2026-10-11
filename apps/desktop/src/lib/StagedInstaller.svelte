@@ -159,7 +159,7 @@
       return {...latest,regions:latest.regions.map(region=>{
         if(latest.diskUniqueId===query.diskUniqueId && region.partitionNumber===query.partitionNumber && region.partitionGuid===query.partitionGuid) return region;
         const saved=old.regions.find(r=>r.partitionGuid===region.partitionGuid && r.offsetBytes===region.offsetBytes && r.sizeBytes===region.sizeBytes);
-        return saved?.resizeState==='checked' && saved.freeBytes===region.freeBytes ? {...region,resizeState:saved.resizeState,resizeReason:saved.resizeReason,maximumReleaseBytes:saved.maximumReleaseBytes,reserveBytes:saved.reserveBytes,limitedByFiles:saved.limitedByFiles} : region;
+        return saved?.resizeState==='checked' && saved.freeBytes===region.freeBytes ? {...region,resizeState:saved.resizeState,resizeReason:saved.resizeReason,maximumReleaseBytes:saved.maximumReleaseBytes,reserveBytes:saved.reserveBytes,limitedByFiles:saved.limitedByFiles,filesReleaseBytes:saved.filesReleaseBytes} : region;
       })};
     });
     const choices=[...(current.choices ?? [])];
