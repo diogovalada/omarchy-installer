@@ -580,7 +580,7 @@ function Invoke-StagingFirmware($State) {
     # Turning Secure Boot off is safe only while BitLocker is suspended.
     Assert-StagingEncryption $disk
     if (-not (Confirm-SecureBootUEFI -ErrorAction Stop)) {
-        return @{operationId=$State.operationId;status=$State.status;message='Secure Boot is already off. Select the installer for the next restart.'}
+        return @{operationId=$State.operationId;status=$State.status;secureBoot=$false;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
     # When the OsIndications variable does not exist yet, shutdown.exe creates

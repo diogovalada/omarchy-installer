@@ -38,6 +38,10 @@ downloads. Published versions and their artifacts are immutable.
   way; the home screen confirms a removal; status messages no longer
   contradict the current step; the Review wait and the disk check's Stop
   button are labelled for what they do.
+- Install without USB (testing builds): declining the firmware, next-restart
+  or removal confirmation says "Nothing was changed." instead of reporting a
+  failure; the removal message survives reloading the window; the home
+  screen's steps know whether Secure Boot is on.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

@@ -37,25 +37,26 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // it is display-only.
 export interface StagedReviewPlan { operationId?:string;diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
-// `stagedAction` is the staged-installer action whose operation the snapshot
-// reflects: set when a command is accepted, null after any other accepted
-// command, unchanged when a command is rejected before starting. It outlives
-// any one screen, so a failed operation can be traced to it from the home
-// screen too.
-const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; stagedAction?: string | null }>({ snapshot:null, pending:false, error:null, stagedAction:null });
+// `secureBoot` is the latest known Secure Boot state (from a disk check, or a
+// firmware action finding it already off), so a screen without its own check
+// (the home screen) knows it too; unknown after relaunching, which is also
+// right after a firmware restart.
+const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; secureBoot?: boolean | null }>({ snapshot:null, pending:false, error:null, secureBoot:null });
+const withSnapshot = (secureBoot: boolean | null | undefined, snapshot: SetupSnapshot) =>
+  ({ snapshot, secureBoot: snapshot?.stagedIso && 'secureBoot' in snapshot.stagedIso ? snapshot.stagedIso.secureBoot ?? null : secureBoot ?? null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
   if (!isTauri() || reading || get(state).pending) return;
   reading = true; const generation = epoch;
-  try { const snapshot = await invoke<SetupSnapshot>('setup_status'); if (generation === epoch) state.update(s => ({ ...s, snapshot, error:commandError })); }
+  try { const snapshot = await invoke<SetupSnapshot>('setup_status'); if (generation === epoch) state.update(s => ({ ...s, ...withSnapshot(s.secureBoot, snapshot), error:commandError })); }
   catch (error) { if (generation === epoch) state.update(s => ({ ...s, error:String(error) })); }
   finally { reading=false; }
 }
 async function command(name: string, args: Record<string, unknown> = {}) {
   if (!isTauri() || get(state).pending) return;
   epoch += 1; commandError=null; state.update(s => ({ ...s, pending:true, error:null }));
-  try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, snapshot, stagedAction:name==='staged_iso' ? String(args.action) : null })); }
+  try { const snapshot = await invoke<SetupSnapshot>(name, args); state.update(s => ({ ...s, ...withSnapshot(s.secureBoot, snapshot) })); }
   catch (error) { commandError=String(error); state.update(s => ({ ...s, error:commandError })); }
   finally { state.update(s => ({ ...s, pending:false })); }
 }
