@@ -42,6 +42,10 @@ downloads. Published versions and their artifacts are immutable.
   or removal confirmation says "Nothing was changed." instead of reporting a
   failure; the removal message survives reloading the window; the home
   screen's steps know whether Secure Boot is on.
+- Install without USB (testing builds): a partition without enough free space
+  also says how much keeping Windows needs; removing the temporary installer
+  reads plainly, shows as under way only once confirmed, and says when
+  BitLocker stays paused.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

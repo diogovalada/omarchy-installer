@@ -263,6 +263,9 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
     target=target[0];
   }
   const region=target, name=region.label, size=formatSize(region.sizeBytes);
+  // Freeing the shortfall makes room for the installer (Replace); keeping the
+  // partition also needs Omarchy's minimum, so name both.
+  const shortfall=(missing:number) => `${name} needs ${formatSize(missing,'up')} more free space (${formatSize(missing+context.minimumBytes,'up')} to keep ${region.isWindows===false ? name : 'Windows'})`;
   // The provider reports a reserve of 0 when it has no usable measurement.
   const reserve=region.reserveBytes ?? 0;
   if(region.kind==='free') {
@@ -274,7 +277,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       // Even an empty partition can't hold the installer plus the reserve.
       if(reserve>0 && region.sizeBytes<context.temporaryBytes+reserve) return status('hatched',`${name} is too small for the installer.`);
       const missing=reserve>0 && region.freeBytes!=null ? context.temporaryBytes+reserve-region.freeBytes : 0;
-      return {...status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
+      return {...status('hatched',missing>0 ? `${shortfall(missing)}. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
     }
     case 'unchecked':
       return context.checking ? status('checking',`Checking how much ${name} can shrink. This can take a few minutes.`) : status('dimmed',`${name} wasn't checked. Refresh to try again.`,'refresh');
@@ -292,7 +295,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
         if(room!=null && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
           const missing=context.temporaryBytes-(room<context.temporaryBytes ? room : release);
-          return {...status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
+          return {...status('hatched',`${shortfall(missing)}. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
         }
         if(room!=null) return {...status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck'),cause:'files'};
         if(region.resizeReason) return status('hatched',region.resizeReason,'recheck');

@@ -108,7 +108,7 @@ it('explains a partition that cannot provide enough space without waiting for a 
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{choices:[],blocked:[],disks:[scarce],minimumLinuxBytes:40*GiB,temporaryBytes:7.3*GiB}}});
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  const line='C: needs 55.4 GiB more free space. Free up space in Windows, then refresh.';
+  const line='C: needs 55.4 GiB more free space (95.4 GiB to keep Windows). Free up space in Windows, then refresh.';
   expect(screen.getByRole('radio',{name:line})).toBeChecked();
   expect(screen.getByText(line,{selector:'p'})).toBeInTheDocument();
   expect(screen.getByText('No space can be used yet.')).toBeInTheDocument();
@@ -663,7 +663,13 @@ it('can check disks beside an installer that cannot be removed',async()=>{
   expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
 });
 it('says a removal is under way, or that it did not finish',async()=>{
-  const stagedTarget={action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'};
+  // Before its confirmation is approved, the card stays as it was.
+  state.set({pending:false,snapshot:{...card('boot-scheduled',null,true).snapshot,status:'running',stagedTarget:{action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'}}});
+  const confirming=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
+  confirming.unmount();
+  const stagedTarget={action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111',confirmed:true};
   const removing={...card('cleaning',null).snapshot,status:'running',stage:'staged-installer',message:'Loading Windows disk tools...',stagedTarget};
   // Once the removal starts, before the record says `cleaning`; the store
   // starts empty, as after reloading the window.
@@ -698,7 +704,7 @@ it('keeps other recorded installers as they are while one is prepared or removed
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 1"})).toBeInTheDocument();
   view.unmount();
   // Removing one installer.
-  state.set({pending:false,snapshot:{status:'running',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:mine.operationId},stagedRecovery:{operations:[other,{...mine,status:'cleaning'}],recordErrors:[]}}});
+  state.set({pending:false,snapshot:{status:'running',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:mine.operationId,confirmed:true},stagedRecovery:{operations:[other,{...mine,status:'cleaning'}],recordErrors:[]}}});
   const home=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();

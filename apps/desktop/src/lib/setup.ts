@@ -13,7 +13,8 @@ export interface SetupSnapshot {
   stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
   // The running staged action and the recorded installer it acts on; set when
   // a staged command starts, and cleared when any other operation starts.
-  stagedTarget?:{action:string;operationId:string|null}|null;
+  // `confirmed` once the user approves the action's confirmation.
+  stagedTarget?:{action:string;operationId:string|null;confirmed?:boolean}|null;
   // After approval, the review stays marked approved until the operation ends.
   stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;

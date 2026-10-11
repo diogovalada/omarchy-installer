@@ -1467,6 +1467,19 @@ fn run_elevated(
                         ))
                         .blocking_show()
                 };
+                // The app shows a staged action as under way once confirmed.
+                if approved
+                    && matches!(
+                        operation,
+                        "staged_arm" | "staged_firmware" | "staged_cleanup"
+                    )
+                {
+                    service.update(app, |inner| {
+                        if let Some(target) = inner.snapshot.staged_target.as_mut() {
+                            target["confirmed"] = json!(true);
+                        }
+                    });
+                }
                 write_frame(
                     &mut *writer
                         .lock()

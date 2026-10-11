@@ -610,7 +610,12 @@ function Invoke-StagingCleanup($State) {
         Remove-OwnedStagingPartition $part $owned $before
         Confirm-StagingDeletion $before $part.DiskNumber $owned
     }
-    $State.status='cleaned'; $State.message='Temporary installer partitions and its firmware entry were removed. The reclaimed space remains unallocated; no Windows or Linux filesystem was resized.'; Save-StagingState $State
+    # Volumes whose protection was on when preparing were suspended by it.
+    # Older records may not have it.
+    $volumes=if ($State.PSObject.Properties['bitLocker']) { @($State.bitLocker) } else { @() }
+    $paused=@($volumes | Where-Object { $_ -and $_.PSObject.Properties['protectionStatus'] -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ($_.PSObject.Properties['driveLetter'] -and [string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
+    $note=if ($paused.Count) { ' BitLocker on '+($paused -join ', ')+' stays paused until you resume it; Windows reminds you at sign-in.' } else { '' }
+    $State.status='cleaned'; $State.message='The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.'+$note; Save-StagingState $State
     return Get-StagingSummary $State
 }
 function Read-StagingLayout([int]$Disk) { return ,[Omarchy.DirectX86.NativeDisk]::ReadLayout($Disk) }

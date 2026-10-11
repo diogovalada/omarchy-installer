@@ -1299,7 +1299,7 @@ fn execute(
             } else if *action == StagedAction::Firmware {
                 ("firmware", "staged_firmware", "Restart into firmware settings now to turn off Secure Boot? Save your work first. BitLocker protection is suspended, so this won't ask for your recovery key. Turn off Secure Boot, save, and return to Windows. Then open this app again to set the next restart.")
             } else {
-                ("cleanup", "staged_cleanup", "Remove this temporary installer and all files on its two recorded partitions? Continue only after booting the installed Omarchy independently, or if you are abandoning this installation. Linux completion is not inferred. Windows and installed Linux partitions are preserved; reclaimed space stays unallocated.")
+                ("cleanup", "staged_cleanup", "Remove the temporary installer? Its two partitions and their files are deleted, and their space stays unallocated. Windows and any installed Omarchy stay. Continue once your PC starts Omarchy by itself, or if you're giving up on this installation.")
             };
             confirm(
                 output,
