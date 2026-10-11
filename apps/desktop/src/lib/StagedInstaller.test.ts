@@ -762,6 +762,20 @@ it('ends Prepare again when its removal is declined',async()=>{
   await tick();
   expect(prepareAgain).not.toHaveBeenCalled();
 });
+it('keeps a retried Prepare again while the declined snapshot is still shown',async()=>{
+  const declined={pending:false,snapshot:{...card('staged',true).snapshot,status:'cancelled',message:'Nothing was changed.',error:null,stagedTarget:{action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'}}};
+  state.set(declined);
+  const prepareAgain=vi.fn();
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true,prepareAgain});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
+  // The retry is pending; the older cancelled snapshot hasn't been replaced yet.
+  state.set({...declined,pending:true});
+  await tick();
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'11111111-1111-4111-8111-111111111111',status:'cleaned',message:'Removed.'}}});
+  await tick();
+  expect(prepareAgain).toHaveBeenCalledOnce();
+});
 it('offers no Stop while Review is planned, even after reloading',async()=>{
   // After a reload the component starts fresh; the snapshot says Review is being planned.
   state.set({pending:false,snapshot:{...card('copying',null).snapshot,status:'running',cancelAvailable:true,cancelRequested:false,stagedTarget:{action:'stage',operationId:null}}});
