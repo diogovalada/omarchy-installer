@@ -143,8 +143,11 @@ describe('staged space editor', () => {
 
   it("says why Windows can't be kept, and when freeing space helps", () => {
     // The reserve is the limit: what is freed can be released.
-    expect(cantKeepLine({...windows,freeBytes:reserveBytes+30*GiB,maximumReleaseBytes:30*GiB},temporaryBytes,minimumBytes,'Windows'))
+    expect(cantKeepLine({...windows,freeBytes:reserveBytes+30*GiB,maximumReleaseBytes:30*GiB,limitedByFiles:false,filesReleaseBytes:200*GiB},temporaryBytes,minimumBytes,'Windows'))
       .toBe('Windows can give only 22.5 GiB; Omarchy needs 32 GiB. Free up 9.5 GiB more in Windows, then refresh.');
+    // The reserve limits it now, but files would cap it below what keeping needs: no advice.
+    expect(cantKeepLine({...windows,freeBytes:reserveBytes+30*GiB,maximumReleaseBytes:30*GiB,limitedByFiles:false,filesReleaseBytes:35*GiB},temporaryBytes,minimumBytes,'Windows'))
+      .toBe('Windows can give only 22.5 GiB; Omarchy needs 32 GiB.');
     // Files Windows can't move are the limit: freeing space doesn't help.
     expect(cantKeepLine({...windows,maximumReleaseBytes:30*GiB},temporaryBytes,minimumBytes,'Data (D:)'))
       .toBe('Data (D:) can give only 22.5 GiB; Omarchy needs 32 GiB.');
@@ -222,9 +225,13 @@ describe('staged region status', () => {
 
   it('asks for more free space when the precheck fails', () => {
     const full:StagedRegion={...windows,sizeBytes:100*GiB,freeBytes:22.1*GiB,resizeState:'insufficient',maximumReleaseBytes:null,reserveBytes:20*GiB};
-    expect(regionStatus(full,context)).toEqual({tone:'hatched',text:'C: needs 5.4 GiB more free space. Free up space in Windows, then refresh.',action:'refresh',cause:'space'});
-    expect(regionStatus({...full,freeBytes:22.06*GiB},context).text).toBe('C: needs 5.5 GiB more free space. Free up space in Windows, then refresh.');
-    expect(regionStatus({...full,freeBytes:27.5*GiB-100},context).text).toBe('C: needs 1 MiB more free space. Free up space in Windows, then refresh.');
+    expect(regionStatus(full,context)).toEqual({tone:'hatched',text:'C: needs 5.4 GiB more free space (37.4 GiB to keep Windows). Free up space in Windows, then refresh.',action:'refresh',cause:'space'});
+    expect(regionStatus({...full,freeBytes:22.06*GiB},context).text).toBe('C: needs 5.5 GiB more free space (37.5 GiB to keep Windows). Free up space in Windows, then refresh.');
+    expect(regionStatus({...full,freeBytes:27.5*GiB-100},context).text).toBe('C: needs 1 MiB more free space (32.1 GiB to keep Windows). Free up space in Windows, then refresh.');
+    // Even empty, a 40 GiB partition can't keep Windows beside the installer, Omarchy and the reserve.
+    expect(regionStatus({...full,sizeBytes:40*GiB,freeBytes:22.1*GiB},context).text).toBe('C: needs 5.4 GiB more free space. Free up space in Windows, then refresh.');
+    // A data partition is named by its label.
+    expect(regionStatus({...full,label:'D:',isWindows:false},context).text).toBe('D: needs 5.4 GiB more free space (37.4 GiB to keep D:). Free up space in Windows, then refresh.');
   });
 
   it("says when a partition can't hold the installer even if empty", () => {
@@ -243,8 +250,15 @@ describe('staged region status', () => {
     expect(regionStatus({...windows,maximumReleaseBytes:20*GiB},{...context,usable:true}).text).toBe('C: has room for the installer only');
     expect(regionStatus({...windows,maximumReleaseBytes:3*GiB},context)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of C:, so it can release only 3 GiB.",action:'recheck',cause:'files'});
     expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't move some files near the end of C:, so it can't shrink it.");
+    // Files also limit the release (4 GiB of 5 GiB room), so freeing space may not be enough to keep Windows.
     expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:4*GiB},context)).toEqual({tone:'hatched',text:'C: needs 2.5 GiB more free space. Free up space in Windows, then recheck.',action:'recheck',cause:'space'});
-    expect(regionStatus({...windows,freeBytes:reserveBytes+temporaryBytes+MiB,maximumReleaseBytes:temporaryBytes-MiB},context).text).toBe('C: needs 1 MiB more free space. Free up space in Windows, then recheck.');
+    // Within alignment of the room, but Windows' own minimum (files) sets it: freeing space won't help.
+    expect(regionStatus({...windows,sizeBytes:100*GiB,freeBytes:27.5*GiB+MiB,reserveBytes:20*GiB,maximumReleaseBytes:7.5*GiB-MiB,limitedByFiles:true},context)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of C:, so it can release only 7.4 GiB.",action:'recheck',cause:'files'});
+    // The release tracks the room, short by alignment: both figures count from the release.
+    expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:5*GiB-MiB,limitedByFiles:false,filesReleaseBytes:200*GiB},context).text).toBe('C: needs 2.6 GiB more free space (34.6 GiB to keep Windows). Free up space in Windows, then recheck.');
+    // The reserve limits it now, but files would cap it at 20 GiB once space is freed: no keeping amount.
+    expect(regionStatus({...windows,sizeBytes:100*GiB,freeBytes:27.5*GiB,reserveBytes:20*GiB,maximumReleaseBytes:7.5*GiB-MiB,limitedByFiles:false,filesReleaseBytes:20*GiB},context).text).toBe('C: needs 1 MiB more free space. Free up space in Windows, then recheck.');
+    expect(regionStatus({...windows,freeBytes:reserveBytes+temporaryBytes+MiB,maximumReleaseBytes:temporaryBytes-MiB,limitedByFiles:false,filesReleaseBytes:200*GiB},context).text).toBe('C: needs 1 MiB more free space (32.1 GiB to keep Windows). Free up space in Windows, then recheck.');
     expect(regionStatus({...windows,reserveBytes:0,maximumReleaseBytes:0,resizeReason:'Windows returned unsupported NTFS shrink limits.'},context).text).toBe('Windows returned unsupported NTFS shrink limits.');
     expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:7.46*GiB},context).text).toBe('Windows can release only 7.4 GiB from C:. 41 MiB more is needed.');
     expect(regionStatus({...windows,reserveBytes:null,maximumReleaseBytes:0},context).text).toBe("Windows can't release space from C:. 7.5 GiB is needed.");

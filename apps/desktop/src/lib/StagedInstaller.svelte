@@ -137,7 +137,8 @@
   $: preparingId=busy ? $setup.snapshot?.stagedReview?.review?.operationId ?? null : null;
   // The target describes the snapshot's own operation, so it counts only while
   // that runs (not while the next command is pending).
-  $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' ? $setup.snapshot.stagedTarget.operationId : null;
+  // A removal is under way once its confirmation is approved.
+  $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' && $setup.snapshot.stagedTarget.confirmed ? $setup.snapshot.stagedTarget.operationId : null;
   $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
   $: if(restarting && !busy && result?.operationId===restarting && result.status==='cleaned') {
     restarting=null; selectedDisk=''; prepareAgain(); inspect();
@@ -158,7 +159,7 @@
       return {...latest,regions:latest.regions.map(region=>{
         if(latest.diskUniqueId===query.diskUniqueId && region.partitionNumber===query.partitionNumber && region.partitionGuid===query.partitionGuid) return region;
         const saved=old.regions.find(r=>r.partitionGuid===region.partitionGuid && r.offsetBytes===region.offsetBytes && r.sizeBytes===region.sizeBytes);
-        return saved?.resizeState==='checked' && saved.freeBytes===region.freeBytes ? {...region,resizeState:saved.resizeState,resizeReason:saved.resizeReason,maximumReleaseBytes:saved.maximumReleaseBytes,reserveBytes:saved.reserveBytes} : region;
+        return saved?.resizeState==='checked' && saved.freeBytes===region.freeBytes ? {...region,resizeState:saved.resizeState,resizeReason:saved.resizeReason,maximumReleaseBytes:saved.maximumReleaseBytes,reserveBytes:saved.reserveBytes,limitedByFiles:saved.limitedByFiles,filesReleaseBytes:saved.filesReleaseBytes} : region;
       })};
     });
     const choices=[...(current.choices ?? [])];

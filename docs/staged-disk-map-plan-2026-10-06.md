@@ -258,11 +258,11 @@ files (see the captured laptop layout). **Review changes** is hidden, as today.
 | `unavailable`, system partition | dimmed | "EFI system · 260 MiB · kept as is" | none |
 | `unavailable`, other reason | hatched | label, size and provider reason | none |
 | `insufficient`, too small even if empty (size under installer plus reserve) | hatched | "RESTORE (Partition 5) is too small for the installer." | none |
-| `insufficient`, otherwise | hatched | "C: needs 5.4 GiB more free space. Free up space in Windows, then refresh." | Refresh |
+| `insufficient`, otherwise | hatched | "C: needs 5.4 GiB more free space (37.4 GiB to keep Windows). Free up space in Windows, then refresh." | Refresh |
 | `unchecked` while checking | shimmer (static under reduced motion) | "Checking how much C: can shrink. This can take a few minutes." | none |
 | `unchecked`, not checking | dimmed | "C: wasn't checked. Refresh to try again." | Refresh |
 | `checked`, enough | normal | "C: can give Omarchy up to 92 GiB" | editor |
-| `checked`, short by alignment only (free minus reserve fits, release within a few MiB of it) | hatched | "C: needs 2 MiB more free space. Free up space in Windows, then recheck." | Recheck |
+| `checked`, short by alignment only (free minus reserve fits, release within a few MiB of it) | hatched | "C: needs 2 MiB more free space (32.1 GiB to keep Windows). Free up space in Windows, then recheck." | Recheck |
 | `checked`, short because Windows can't move files | hatched | "Windows can't move some files near the end of C:, so it can release only 3 GiB." (or "…so it can't shrink it.") | Recheck |
 | `failed` | hatched | provider reason, or "Windows couldn't measure C:." | Recheck |
 | free, enough | outlined | "Free space · 120 GiB" | editor |
@@ -504,6 +504,32 @@ A VM re-check of the PR 6 screens passed, and found:
 - **Home card:** with no disk check of its own, it showed Secure Boot as
   unknown although the check knew it was on, so it suggested the wrong step.
   The setup store keeps the last check's Secure Boot state for the session.
+
+## Polish (2026-10-11)
+
+- **Shortfall:** "needs N more free space" made room for the installer only
+  (Replace). It now also names what keeping the partition needs: "C: needs
+  41.6 GiB more free space (73.6 GiB to keep Windows)" (a data partition by
+  its label). The keeping amount shows only when freeing it would work: the
+  reserve, not files, limits the release (the provider's new `limitedByFiles`,
+  from `Get-ShrinkCandidate`: Windows' own minimum is above used space plus
+  the reserve; then both figures count from the measured release, alignment
+  included), Windows' own minimum would still allow the installer plus
+  Omarchy once space is freed (the provider's new `filesReleaseBytes`), and
+  the partition can hold the installer, Omarchy and the reserve at all. The
+  replace-only "Free up N more" advice follows the same rule.
+- **Removal:** the card reads "Removing the temporary installer" only once
+  its confirmation is approved. The backend marks the snapshot's
+  `stagedTarget` `confirmed` when an arm, firmware or removal confirmation is
+  approved. The confirmation reads "Remove the temporary installer? Its two
+  partitions and their files are deleted, and their space stays unallocated.
+  Windows and any installed Omarchy stay. Continue once your PC starts
+  Omarchy by itself, or if you're giving up on this installation."
+- **Removed:** the provider's result reads "The temporary installer was
+  removed. Its space stays unallocated; Windows and any installed Omarchy
+  were not changed.", plus "If BitLocker on C: is still paused, resume it in
+  Windows." for volumes protected when preparing (it may have been resumed
+  since).
 
 ## Copy
 

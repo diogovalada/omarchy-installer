@@ -174,6 +174,11 @@ export function cantReleaseLine(region:StagedRegion) {
   return zone-reserve<GiB ? `${keeps}.` : `${keeps}, and some files near the end of ${region.label} can't be moved.`;
 }
 
+// Whether freeing space could let a measured partition release `bytes`:
+// Windows' own minimum (files it can't move) caps the release however much is
+// freed; the provider reports that cap.
+const filesAllow=(region:StagedRegion,bytes:number) => region.filesReleaseBytes!=null && region.filesReleaseBytes>=bytes;
+
 // Why a partition that fits only the installer can't keep Windows, with the
 // numbers, and what helps when the free-space reserve is the limit: freed
 // space then raises the release one for one. Files Windows can't move don't
@@ -184,7 +189,7 @@ export function cantKeepLine(region:StagedRegion,temporaryBytes:number,minimumBy
   const line=`${name} can give only ${formatSize(Math.max(0,release-temporaryBytes),'down')}; Omarchy needs ${formatSize(minimumBytes,'up')}.`;
   if(region.freeBytes==null || reserve<=0) return line;
   const room=region.freeBytes-reserve, missing=temporaryBytes+minimumBytes-release;
-  if(room-release<ALIGNMENT_SLACK_BYTES && missing<=region.sizeBytes-region.freeBytes) return `${line} Free up ${formatSize(missing,'up')} more in Windows, then refresh.`;
+  if(room-release<ALIGNMENT_SLACK_BYTES && !region.limitedByFiles && filesAllow(region,temporaryBytes+minimumBytes) && missing<=region.sizeBytes-region.freeBytes) return `${line} Free up ${formatSize(missing,'up')} more in Windows, then refresh.`;
   return line;
 }
 
@@ -265,6 +270,12 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
   const region=target, name=region.label, size=formatSize(region.sizeBytes);
   // The provider reports a reserve of 0 when it has no usable measurement.
   const reserve=region.reserveBytes ?? 0;
+  // Freeing the shortfall makes room for the installer (Replace). Keeping the
+  // partition also needs Omarchy's minimum; that amount is named only when
+  // freeing it would work: the reserve, not files, limits the release, and
+  // the partition can hold the installer, Omarchy and the reserve at all.
+  const keepFits=region.sizeBytes>=context.temporaryBytes+context.minimumBytes+reserve;
+  const shortfall=(missing:number,keepMissing:number|null) => `${name} needs ${formatSize(missing,'up')} more free space${keepMissing!=null && keepFits ? ` (${formatSize(keepMissing,'up')} to keep ${region.isWindows===false ? name : 'Windows'})` : ''}`;
   if(region.kind==='free') {
     const free=formatSize(region.sizeBytes,'down');
     return context.usable ? status('outlined',`Free space · ${free}`) : status('outlined-dimmed',`Free space · ${free} · too small`);
@@ -274,7 +285,7 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
       // Even an empty partition can't hold the installer plus the reserve.
       if(reserve>0 && region.sizeBytes<context.temporaryBytes+reserve) return status('hatched',`${name} is too small for the installer.`);
       const missing=reserve>0 && region.freeBytes!=null ? context.temporaryBytes+reserve-region.freeBytes : 0;
-      return {...status('hatched',missing>0 ? `${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
+      return {...status('hatched',missing>0 ? `${shortfall(missing,missing+context.minimumBytes)}. Free up space in Windows, then refresh.` : `${name} doesn't have enough free space. Free up space in Windows, then refresh.`,'refresh'),cause:'space'};
     }
     case 'unchecked':
       return context.checking ? status('checking',`Checking how much ${name} can shrink. This can take a few minutes.`) : status('dimmed',`${name} wasn't checked. Refresh to try again.`,'refresh');
@@ -289,10 +300,17 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         // alignment keeps the release short. Otherwise free space minus the
         // reserve fits the installer, and the limit is files Windows can't
         // move near the end of the partition.
+        // The provider says when files set the limit; without that, a release
+        // within alignment of the room tracks it.
         const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
-        if(room!=null && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
-          const missing=context.temporaryBytes-(room<context.temporaryBytes ? room : release);
-          return {...status('hatched',`${name} needs ${formatSize(missing,'up')} more free space. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
+        if(room!=null && !region.limitedByFiles && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
+          // When the release tracks the room (the reserve is the limit), it
+          // grows with freed space, alignment included; otherwise files also
+          // limit it, and freeing space may not be enough to keep the partition.
+          const tracks=region.limitedByFiles===false || room-release<ALIGNMENT_SLACK_BYTES;
+          const missing=context.temporaryBytes-(tracks ? release : room);
+          const keep=context.temporaryBytes+context.minimumBytes;
+          return {...status('hatched',`${shortfall(missing,tracks && filesAllow(region,keep) ? keep-release : null)}. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
         }
         if(room!=null) return {...status('hatched',`Windows can't move some files near the end of ${name}, so it ${release<MiB ? "can't shrink it" : `can release only ${formatSize(release,'down')}`}.`,'recheck'),cause:'files'};
         if(region.resizeReason) return status('hatched',region.resizeReason,'recheck');

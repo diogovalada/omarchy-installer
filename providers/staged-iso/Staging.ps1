@@ -152,6 +152,8 @@ function Get-StagingChoices($Release,$Resize=$null) {
                         $candidate=Get-ShrinkCandidate $p
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
                         $region.reserveBytes=[long]$candidate.reserveBytes
+                        $region.limitedByFiles=[bool]$candidate.limitedByFiles
+                        $region.filesReleaseBytes=if ($null -ne $candidate.filesReleaseBytes) { [long]$candidate.filesReleaseBytes } else { $null }
                         $region.resizeState=if ($candidate.windowsMinimumSizeBytes -gt 0) { 'checked' } else { 'failed' }
                         $region.resizeReason=($candidate.blockers -join ' ')
                         $available=$candidate.maximumAllocationBytes-$overhead
@@ -610,8 +612,17 @@ function Invoke-StagingCleanup($State) {
         Remove-OwnedStagingPartition $part $owned $before
         Confirm-StagingDeletion $before $part.DiskNumber $owned
     }
-    $State.status='cleaned'; $State.message='Temporary installer partitions and its firmware entry were removed. The reclaimed space remains unallocated; no Windows or Linux filesystem was resized.'; Save-StagingState $State
+    $State.status='cleaned'; $State.message='The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.'+(Get-StagingBitLockerNote $State); Save-StagingState $State
     return Get-StagingSummary $State
+}
+# Volumes whose protection was on when preparing were suspended by it; it may
+# have been resumed since, so the advice is conditional. Older records may not
+# have the field.
+function Get-StagingBitLockerNote($State) {
+    $volumes=if ($State.PSObject.Properties['bitLocker']) { @($State.bitLocker) } else { @() }
+    $paused=@($volumes | Where-Object { $_ -and $_.PSObject.Properties['protectionStatus'] -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ($_.PSObject.Properties['driveLetter'] -and [string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
+    if ($paused.Count) { return ' If BitLocker on '+($paused -join ', ')+' is still paused, resume it in Windows.' }
+    return ''
 }
 function Read-StagingLayout([int]$Disk) { return ,[Omarchy.DirectX86.NativeDisk]::ReadLayout($Disk) }
 function Remove-OwnedStagingPartition($Part,$Owned,[byte[]]$Before) {

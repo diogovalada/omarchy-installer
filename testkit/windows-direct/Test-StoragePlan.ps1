@@ -123,13 +123,13 @@ Reject { Select-Allocation $planProbe $request } 'A changed disk identity was ac
  $reserveMessage='Windows cannot release the minimum installation size while retaining the free-space reserve.'
  $script:shrinkFree=[long]50GB; $script:shrinkSizeMin=[long]100GB
  $candidate=Get-ShrinkCandidate $shrinkPart
- Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage) 'A reserve-bound shrink did not blame the reserve.'
+ Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage -and -not $candidate.limitedByFiles -and $candidate.filesReleaseBytes -eq 100GB) 'A reserve-bound shrink did not blame the reserve, or lost what files alone allow.'
  $script:shrinkSizeMin=[long]195GB
  $candidate=Get-ShrinkCandidate $shrinkPart
  Assert (-not $candidate.eligible -and @($candidate.blockers) -ceq $reserveMessage) 'A shrink bound by both limits did not name the reserve first.'
  $script:shrinkFree=[long]100GB
  $candidate=Get-ShrinkCandidate $shrinkPart
- Assert (-not $candidate.eligible -and @($candidate.blockers)[0] -like 'Windows cannot move some files*') 'A shrink bound by unmovable files blamed the reserve.'
+ Assert (-not $candidate.eligible -and @($candidate.blockers)[0] -like 'Windows cannot move some files*' -and $candidate.limitedByFiles) 'A shrink bound by unmovable files blamed the reserve.'
  $script:shrinkSizeMin=[long]50GB
  $candidate=Get-ShrinkCandidate $shrinkPart
  Assert ($candidate.eligible -and $candidate.maximumAllocationBytes -eq 80GB) 'An unconstrained shrink lost its measured limit.'
