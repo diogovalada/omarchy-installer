@@ -249,6 +249,8 @@ describe('staged region status', () => {
     expect(regionStatus({...windows,maximumReleaseBytes:0},context).text).toBe("Windows can't move some files near the end of C:, so it can't shrink it.");
     // Files also limit the release (4 GiB of 5 GiB room), so freeing space may not be enough to keep Windows.
     expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:4*GiB},context)).toEqual({tone:'hatched',text:'C: needs 2.5 GiB more free space. Free up space in Windows, then recheck.',action:'recheck',cause:'space'});
+    // Within alignment of the room, but Windows' own minimum (files) sets it: freeing space won't help.
+    expect(regionStatus({...windows,sizeBytes:100*GiB,freeBytes:27.5*GiB+MiB,reserveBytes:20*GiB,maximumReleaseBytes:7.5*GiB-MiB,limitedByFiles:true},context)).toEqual({tone:'hatched',text:"Windows can't move some files near the end of C:, so it can release only 7.4 GiB.",action:'recheck',cause:'files'});
     // The release tracks the room, short by alignment: both figures count from the release.
     expect(regionStatus({...windows,freeBytes:25*GiB,reserveBytes:20*GiB,maximumReleaseBytes:5*GiB-MiB},context).text).toBe('C: needs 2.6 GiB more free space (34.6 GiB to keep Windows). Free up space in Windows, then recheck.');
     expect(regionStatus({...windows,freeBytes:reserveBytes+temporaryBytes+MiB,maximumReleaseBytes:temporaryBytes-MiB},context).text).toBe('C: needs 1 MiB more free space (32.1 GiB to keep Windows). Free up space in Windows, then recheck.');

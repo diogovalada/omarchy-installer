@@ -295,12 +295,14 @@ export function regionStatus(target:StagedRegion|StagedRegion[],context:StatusCo
         // alignment keeps the release short. Otherwise free space minus the
         // reserve fits the installer, and the limit is files Windows can't
         // move near the end of the partition.
+        // The provider says when files set the limit; without that, a release
+        // within alignment of the room tracks it.
         const room=region.freeBytes!=null && reserve>0 ? region.freeBytes-reserve : null;
-        if(room!=null && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
+        if(room!=null && !region.limitedByFiles && (room<context.temporaryBytes || room-release<ALIGNMENT_SLACK_BYTES)) {
           // When the release tracks the room (the reserve is the limit), it
           // grows with freed space, alignment included; otherwise files also
           // limit it, and freeing space may not be enough to keep the partition.
-          const tracks=room-release<ALIGNMENT_SLACK_BYTES;
+          const tracks=region.limitedByFiles===false || room-release<ALIGNMENT_SLACK_BYTES;
           const missing=context.temporaryBytes-(tracks ? release : room);
           return {...status('hatched',`${shortfall(missing,tracks ? context.temporaryBytes+context.minimumBytes-release : null)}. Free up space in Windows, then recheck.`,'recheck'),cause:'space'};
         }

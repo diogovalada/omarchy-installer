@@ -11,6 +11,7 @@ function Get-InspectedPartitions($Disk) {
     return $partitions
 }
 function Get-ShrinkCandidate($Partition) {
+    $limitedByFiles=$false
     $issues=New-Object 'Collections.Generic.List[string]'
     $sizeMin=[long]0; $reserve=[long]0; $minimum=[long]$Partition.Size; $maximum=[long]0; $volumeId=''; $letter=''; $fs=''; $free=[long]0
     try {
@@ -29,6 +30,8 @@ function Get-ShrinkCandidate($Partition) {
         $reserve=Align-Up ([long][Math]::Max(20GB,[decimal]$volume.Size/10))
         $used=[long]$volume.Size-$free
         $minimum=Align-Up ([long][Math]::Max($sizeMin,$used+$reserve))
+        # Windows' own minimum (files it can't move) sets the limit, not the reserve.
+        $limitedByFiles=(Align-Up $sizeMin) -gt (Align-Up ($used+$reserve))
         $end=Align-Down ([long]$Partition.Offset+[long]$Partition.Size)
         $maximum=[Math]::Max([long]0,$end-([long]$Partition.Offset+$minimum))
         # Name the limit that applies: the reserve, or files Windows can't move.
@@ -37,7 +40,7 @@ function Get-ShrinkCandidate($Partition) {
             else { $issues.Add('Windows cannot release the minimum installation size while retaining the free-space reserve.') }
         }
     } catch { $issues.Add($_.Exception.Message) }
-    return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
+    return [ordered]@{partitionNumber=[int]$Partition.PartitionNumber;partitionGuid=[string]$Partition.Guid;volumeId=$volumeId;driveLetter=$letter;fileSystem=$fs;offsetBytes=[long]$Partition.Offset;sizeBytes=[long]$Partition.Size;windowsMinimumSizeBytes=$sizeMin;minimumSizeBytes=$minimum;reserveBytes=$reserve;freeBytes=$free;maximumAllocationBytes=[long]$maximum;limitedByFiles=[bool]$limitedByFiles;eligible=($issues.Count -eq 0);blockers=@($issues.ToArray())}
 }
 function Get-Probe([string[]]$ProtectedPaths=@(), $RuntimeArchive=$null) {
     Emit 'progress' 'inspecting' @{message='Checking firmware and Windows encryption...';cancelAvailable=$false}

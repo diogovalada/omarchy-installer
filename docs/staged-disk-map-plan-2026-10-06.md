@@ -511,9 +511,11 @@ A VM re-check of the PR 6 screens passed, and found:
   (Replace). It now also names what keeping the partition needs: "C: needs
   41.6 GiB more free space (73.6 GiB to keep Windows)" (a data partition by
   its label). The keeping amount shows only when freeing it would work: the
-  reserve, not files, limits the release (then both figures count from the
-  measured release, alignment included), and the partition can hold the
-  installer, Omarchy and the reserve at all.
+  reserve, not files, limits the release (the provider's new `limitedByFiles`,
+  from `Get-ShrinkCandidate`: Windows' own minimum is above used space plus
+  the reserve; then both figures count from the measured release, alignment
+  included), and the partition can hold the installer, Omarchy and the
+  reserve at all.
 - **Removal:** the card reads "Removing the temporary installer" only once
   its confirmation is approved. The backend marks the snapshot's
   `stagedTarget` `confirmed` when an arm, firmware or removal confirmation is

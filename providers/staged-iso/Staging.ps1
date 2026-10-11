@@ -152,6 +152,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
                         $candidate=Get-ShrinkCandidate $p
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
                         $region.reserveBytes=[long]$candidate.reserveBytes
+                        $region.limitedByFiles=[bool]$candidate.limitedByFiles
                         $region.resizeState=if ($candidate.windowsMinimumSizeBytes -gt 0) { 'checked' } else { 'failed' }
                         $region.resizeReason=($candidate.blockers -join ' ')
                         $available=$candidate.maximumAllocationBytes-$overhead
