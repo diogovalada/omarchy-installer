@@ -610,13 +610,17 @@ function Invoke-StagingCleanup($State) {
         Remove-OwnedStagingPartition $part $owned $before
         Confirm-StagingDeletion $before $part.DiskNumber $owned
     }
-    # Volumes whose protection was on when preparing were suspended by it.
-    # Older records may not have it.
+    $State.status='cleaned'; $State.message='The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.'+(Get-StagingBitLockerNote $State); Save-StagingState $State
+    return Get-StagingSummary $State
+}
+# Volumes whose protection was on when preparing were suspended by it; it may
+# have been resumed since, so the advice is conditional. Older records may not
+# have the field.
+function Get-StagingBitLockerNote($State) {
     $volumes=if ($State.PSObject.Properties['bitLocker']) { @($State.bitLocker) } else { @() }
     $paused=@($volumes | Where-Object { $_ -and $_.PSObject.Properties['protectionStatus'] -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ($_.PSObject.Properties['driveLetter'] -and [string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
-    $note=if ($paused.Count) { ' BitLocker on '+($paused -join ', ')+' stays paused until you resume it; Windows reminds you at sign-in.' } else { '' }
-    $State.status='cleaned'; $State.message='The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.'+$note; Save-StagingState $State
-    return Get-StagingSummary $State
+    if ($paused.Count) { return ' If BitLocker on '+($paused -join ', ')+' is still paused, resume it in Windows.' }
+    return ''
 }
 function Read-StagingLayout([int]$Disk) { return ,[Omarchy.DirectX86.NativeDisk]::ReadLayout($Disk) }
 function Remove-OwnedStagingPartition($Part,$Owned,[byte[]]$Before) {

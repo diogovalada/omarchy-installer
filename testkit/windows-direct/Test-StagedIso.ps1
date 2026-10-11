@@ -336,6 +336,11 @@ Assert ($script:removed.Count -eq 0) 'Cleanup deleted something before validatin
 $script:parts[1].Size--
 [void](Invoke-StagingCleanup $state)
 Assert (($script:removed -join ',') -eq '5,4' -and $state.status -eq 'cleaned') 'Interrupted copy cleanup must remove only owned source/EFI partitions.'
+Assert ($state.message -ceq 'The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.') 'A record without BitLocker data must not mention BitLocker.'
+$noted=Get-StagingBitLockerNote ([pscustomobject]@{bitLocker=@([pscustomobject]@{driveLetter='C:';protectionStatus=1},[pscustomobject]@{driveLetter='D:';protectionStatus=0},[pscustomobject]@{driveLetter='';protectionStatus=1})})
+Assert ($noted -ceq ' If BitLocker on C:, a volume is still paused, resume it in Windows.') "BitLocker note must name only volumes protected when preparing: $noted"
+Assert ((Get-StagingBitLockerNote ([pscustomobject]@{bitLocker=@([pscustomobject]@{driveLetter='C:';protectionStatus=0})})) -ceq '') 'Volumes already unprotected when preparing must not be mentioned.'
+Assert ((Get-StagingBitLockerNote ([pscustomobject]@{bitLocker=$null})) -ceq '') 'An empty BitLocker record must not be mentioned.'
 [void](Invoke-StagingCleanup $state)
 Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
 

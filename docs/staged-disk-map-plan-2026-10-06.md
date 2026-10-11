@@ -510,7 +510,10 @@ A VM re-check of the PR 6 screens passed, and found:
 - **Shortfall:** "needs N more free space" made room for the installer only
   (Replace). It now also names what keeping the partition needs: "C: needs
   41.6 GiB more free space (73.6 GiB to keep Windows)" (a data partition by
-  its label).
+  its label). The keeping amount shows only when freeing it would work: the
+  reserve, not files, limits the release (then both figures count from the
+  measured release, alignment included), and the partition can hold the
+  installer, Omarchy and the reserve at all.
 - **Removal:** the card reads "Removing the temporary installer" only once
   its confirmation is approved. The backend marks the snapshot's
   `stagedTarget` `confirmed` when an arm, firmware or removal confirmation is
@@ -520,8 +523,9 @@ A VM re-check of the PR 6 screens passed, and found:
   Omarchy by itself, or if you're giving up on this installation."
 - **Removed:** the provider's result reads "The temporary installer was
   removed. Its space stays unallocated; Windows and any installed Omarchy
-  were not changed.", plus "BitLocker on C: stays paused until you resume it;
-  Windows reminds you at sign-in." when preparing paused it.
+  were not changed.", plus "If BitLocker on C: is still paused, resume it in
+  Windows." for volumes protected when preparing (it may have been resumed
+  since).
 
 ## Copy
 
