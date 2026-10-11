@@ -734,12 +734,41 @@ it('says nothing changed when another staged confirmation is declined',async()=>
   expect(screen.getByRole('region',{name:'Temporary installer'})).toHaveTextContent('Nothing was changed.');
   expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
 });
-it('uses the last disk check\'s Secure Boot state on the home screen',async()=>{
-  state.set({...card('staged',null),secureBoot:true});
+it('uses the last known Secure Boot state on the home screen',async()=>{
+  // The prepared installer's snapshot has no Secure Boot field of its own.
+  const prepared=card('staged',null);
+  delete (prepared.snapshot.stagedIso as {secureBoot?:boolean|null}).secureBoot;
+  state.set({...prepared,secureBoot:true});
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByText('Turn off Secure Boot')).toHaveAttribute('aria-current','step');
   expect(screen.getByRole('button',{name:'Restart to firmware settings'})).toHaveClass('primary');
+  // Known off, for example after the firmware action found it off.
+  state.set({...card('staged',true),secureBoot:false});
+  await tick();
+  expect(screen.getByText('Set next restart')).toHaveAttribute('aria-current','step');
+});
+it('ends Prepare again when its removal is declined',async()=>{
+  state.set(card('staged',true));
+  const prepareAgain=vi.fn();
+  render(StagedInstaller,{recoveryOnly:true,sourceReady:true,prepareAgain});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
+  state.set({pending:false,snapshot:{...card('staged',true).snapshot,status:'cancelled',message:'Nothing was changed.',error:null,stagedTarget:{action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'}}});
+  await tick();
+  // A later ordinary removal doesn't reopen preparation.
+  await fireEvent.click(screen.getByRole('button',{name:'Remove temporary installer'}));
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:'11111111-1111-4111-8111-111111111111'},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'11111111-1111-4111-8111-111111111111',status:'cleaned',message:'Removed.'}}});
+  await tick();
+  expect(prepareAgain).not.toHaveBeenCalled();
+});
+it('offers no Stop while Review is planned, even after reloading',async()=>{
+  // After a reload the component starts fresh; the snapshot says Review is being planned.
+  state.set({pending:false,snapshot:{...card('copying',null).snapshot,status:'running',cancelAvailable:true,cancelRequested:false,stagedTarget:{action:'stage',operationId:null}}});
+  const view=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+  await tick();
+  expect(screen.queryByRole('button',{name:/^Stop/})).not.toBeInTheDocument();
+  view.unmount();
 });
 it('offers no Stop while Review is planned',async()=>{
   state.set(measured());

@@ -142,7 +142,8 @@
   $: if(restarting && !busy && result?.operationId===restarting && result.status==='cleaned') {
     restarting=null; selectedDisk=''; prepareAgain(); inspect();
   }
-  $: if(error) restarting=null;
+  // A failed or declined removal ends Prepare again.
+  $: if(error || (!busy && $setup.snapshot?.status==='cancelled')) restarting=null;
   function sameLayout(before:StagedDisk,after:StagedDisk) {
     return before.diskSizeBytes===after.diskSizeBytes && before.regions.length===after.regions.length && before.regions.every((region,index)=>{
       const current=after.regions[index];
@@ -223,6 +224,8 @@
   // button rather than at the page bottom.
   let requesting=false;
   $: if(review || !busy) requesting=false;
+  // Planning a Review, from the snapshot, so it holds after reloading.
+  $: planning=busy && $setup.snapshot?.stagedTarget?.action==='stage' && !$setup.snapshot?.stagedReview;
   async function stage() {
     if(!testing || !sourceReady || !choice || busy || error) return;
     requesting=true;
@@ -316,13 +319,13 @@
   {#each operations as op (op.operationId)}
     <!-- While preparing, the panel above stands in for the new installer's card. -->
     {#if !(preparing && op.operationId===preparingId)}
-      <StagedSteps {op} secureBoot={inspection?.secureBoot ?? $setup.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
+      <StagedSteps {op} secureBoot={$setup.secureBoot ?? inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
     {/if}
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
   {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
-  {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
+  {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}

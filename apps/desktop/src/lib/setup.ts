@@ -37,9 +37,10 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // it is display-only.
 export interface StagedReviewPlan { operationId?:string;diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
-// `secureBoot` is the last disk check's Secure Boot state, so a screen without
-// its own check (the home screen) knows it too; unknown after relaunching,
-// which is also right after a firmware restart.
+// `secureBoot` is the latest known Secure Boot state (from a disk check, or a
+// firmware action finding it already off), so a screen without its own check
+// (the home screen) knows it too; unknown after relaunching, which is also
+// right after a firmware restart.
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; secureBoot?: boolean | null }>({ snapshot:null, pending:false, error:null, secureBoot:null });
 const withSnapshot = (secureBoot: boolean | null | undefined, snapshot: SetupSnapshot) =>
   ({ snapshot, secureBoot: snapshot?.stagedIso && 'secureBoot' in snapshot.stagedIso ? snapshot.stagedIso.secureBoot ?? null : secureBoot ?? null });

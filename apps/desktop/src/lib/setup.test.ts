@@ -24,9 +24,14 @@ describe('setup error recovery', () => {
     invoke.mockResolvedValueOnce({kind:null,status:'complete',stagedIso:{operationId:'id',status:'staged'}});
     await setup.stagedIso('cleanup',null,'id');
     expect(get(setup).secureBoot).toBe(true);
-    invoke.mockResolvedValueOnce({kind:null,status:'complete',stagedIso:{choices:[],secureBoot:false}});
+    // A firmware action that finds it already off says so.
+    invoke.mockResolvedValueOnce({kind:null,status:'complete',stagedIso:{operationId:'id',status:'staged',secureBoot:false}});
     await setup.refresh();
     expect(get(setup).secureBoot).toBe(false);
+    // A check that can't tell makes it unknown.
+    invoke.mockResolvedValueOnce({kind:null,status:'complete',stagedIso:{choices:[],secureBoot:null}});
+    await setup.refresh();
+    expect(get(setup).secureBoot).toBeNull();
   });
   it('clears a polling-only connection error after reconnecting', async () => {
     const { setup } = await import('./setup');
