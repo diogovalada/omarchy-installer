@@ -228,6 +228,19 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
     $decrypting=Get-FollowupView 'decrypting' $false $false 'C:'
     Assert (-not $decrypting.declineEnabled -and $decrypting.later -ceq 'Remind me next time') 'Decryption allowed stopping reminders.'
 }
+# The window builds twice in one process under strict mode (the DPI type is
+# added once), starts on the safe button, and tabs left to right.
+& {
+    foreach ($view in @((Get-FollowupView 'suspended' $true $false 'C:'),(Get-FollowupView 'suspended' $false $true 'C:'))) {
+        $window=New-FollowupForm $view
+        try {
+            Assert ($window.form.ActiveControl -eq $window.later -and $window.form.CancelButton -eq $window.later) 'The reminder did not start on Remind me next time.'
+            $order=@(@($window.settings,$window.later,$window.decline) | Where-Object { $_ } | Sort-Object TabIndex | ForEach-Object { $_.Text })
+            $expected=@(@($view.settings,$view.later,$view.decline) | Where-Object { $_ })
+            Assert (($order -join '|') -ceq ($expected -join '|')) 'The reminder buttons were out of order.'
+        } finally { $window.form.Dispose() }
+    }
+}
 # Task Scheduler reads the registered SID back as an account name.
 & {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent(); $sid=$identity.User.Value

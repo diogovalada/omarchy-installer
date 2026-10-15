@@ -68,7 +68,9 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
     $valid=[guid]::NewGuid().ToString(); $missing=[guid]::NewGuid().ToString(); $invalid=[guid]::NewGuid().ToString()
     try {
         foreach ($id in @($valid,$missing,$invalid)) { [void][IO.Directory]::CreateDirectory((Join-Path $recordsRoot $id)) }
-        $record=@{schema=1;operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=40GB;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB})}
+        # Replacing Windows, so the app's summary names it for the installer.
+        $windowsLetter=([IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))).Substring(0,1)
+        $record=@{schema=1;operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=0;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB});targetKind='shrink';shrink=@{driveLetter=$windowsLetter;partitionNumber=3}}
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$valid/state.json"),($record | ConvertTo-Json -Depth 5))
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$invalid/state.json"),'{')
         $status=Get-StagingStatus (ConvertFrom-Json '{}')
@@ -79,6 +81,7 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
         Write-StagingSummary
         $index=Read-Json (Join-Path $recordsRoot 'summary.json')
         Assert ($index.operations.Count -eq 1 -and $index.recordErrors.Count -eq 2) 'Passive summary omitted pending work.'
+        Assert ($index.operations[0].replaces -ceq 'Windows') 'The app summary lost the partition to delete in the installer.'
         $acl=Get-Acl -LiteralPath (Join-Path $recordsRoot 'summary.json')
         $readers=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
         Assert ($readers.Count -eq 1 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -eq 0) 'Discovery summary must grant users read access only.'

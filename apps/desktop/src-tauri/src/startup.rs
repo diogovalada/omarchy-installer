@@ -11,13 +11,15 @@ pub fn secure_boot() -> Option<bool> {
 }
 
 /// Reopen the app at the next sign-in. Windows deletes the entry as it runs it.
-pub fn reopen_at_sign_in() -> Result<(), String> {
+/// Returns the registered command, which carries a token of its own.
+pub fn reopen_at_sign_in() -> Result<String, String> {
     platform::reopen_at_sign_in()
 }
 
-/// Remove the entry once the PC is known not to restart.
-pub fn cancel_reopen() {
-    platform::cancel_reopen()
+/// Remove the entry once the PC is known not to restart, unless another copy
+/// of the app has registered its own since (`command` is what this one wrote).
+pub fn cancel_reopen(command: &str) {
+    platform::cancel_reopen(command)
 }
 
 #[cfg(windows)]
@@ -39,17 +41,15 @@ mod platform {
     pub fn secure_boot() -> Option<bool> {
         read_dword(HKEY_LOCAL_MACHINE, SECURE_BOOT_KEY, "UEFISecureBootEnabled").map(|v| v != 0)
     }
-    pub fn reopen_at_sign_in() -> Result<(), String> {
+    pub fn reopen_at_sign_in() -> Result<String, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        write_string(
-            HKEY_CURRENT_USER,
-            RUN_ONCE_KEY,
-            VALUE_NAME,
-            &format!("\"{}\"", exe.display()),
-        )
+        // The token tells this copy's entry from another's; the app ignores it.
+        let command = format!("\"{}\" --reopened {}", exe.display(), uuid::Uuid::new_v4());
+        write_string(HKEY_CURRENT_USER, RUN_ONCE_KEY, VALUE_NAME, &command)?;
+        Ok(command)
     }
-    pub fn cancel_reopen() {
-        delete_value(HKEY_CURRENT_USER, RUN_ONCE_KEY, VALUE_NAME);
+    pub fn cancel_reopen(command: &str) {
+        delete_value_if(HKEY_CURRENT_USER, RUN_ONCE_KEY, VALUE_NAME, command);
     }
 
     pub(super) fn read_dword(root: HKEY, key: &str, name: &str) -> Option<u32> {
@@ -74,7 +74,8 @@ mod platform {
         name: &str,
         data: &str,
     ) -> Result<(), String> {
-        if data.chars().count() > MAX_COMMAND {
+        // Windows counts UTF-16 units.
+        if data.encode_utf16().count() > MAX_COMMAND {
             return Err("The app's path is too long to reopen it at sign-in".into());
         }
         let data = wide(data);
@@ -94,9 +95,31 @@ mod platform {
             Err(std::io::Error::from_raw_os_error(status as i32).to_string())
         }
     }
-    pub(super) fn delete_value(root: HKEY, key: &str, name: &str) {
-        unsafe {
-            RegDeleteKeyValueW(root, wide(key).as_ptr(), wide(name).as_ptr());
+    pub(super) fn read_string(root: HKEY, key: &str, name: &str) -> Option<String> {
+        let mut buffer = vec![0_u16; 1024];
+        let mut size = (buffer.len() * 2) as u32;
+        let status = unsafe {
+            RegGetValueW(
+                root,
+                wide(key).as_ptr(),
+                wide(name).as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let units = (size as usize / 2).saturating_sub(1);
+        Some(String::from_utf16_lossy(&buffer[..units]))
+    }
+    pub(super) fn delete_value_if(root: HKEY, key: &str, name: &str, expected: &str) {
+        if read_string(root, key, name).as_deref() == Some(expected) {
+            unsafe {
+                RegDeleteKeyValueW(root, wide(key).as_ptr(), wide(name).as_ptr());
+            }
         }
     }
 
@@ -117,6 +140,17 @@ mod platform {
             )
             .unwrap();
             assert!(write_string(HKEY_CURRENT_USER, &key, "Long", &"x".repeat(261)).is_err());
+            // 130 characters outside the Basic Multilingual Plane are 260 units.
+            assert!(
+                write_string(HKEY_CURRENT_USER, &key, "Wide", &"\u{1F600}".repeat(130)).is_ok()
+            );
+            assert!(
+                write_string(HKEY_CURRENT_USER, &key, "Wider", &"\u{1F600}".repeat(131)).is_err()
+            );
+            assert_eq!(
+                read_string(HKEY_CURRENT_USER, &key, "Command").as_deref(),
+                Some("\"C:\\Omarchy\\app.exe\"")
+            );
             // A string isn't a DWORD.
             assert_eq!(read_dword(HKEY_CURRENT_USER, &key, "Command"), None);
             let one = 1_u32.to_le_bytes();
@@ -131,8 +165,22 @@ mod platform {
                 );
             }
             assert_eq!(read_dword(HKEY_CURRENT_USER, &key, "Enabled"), Some(1));
-            delete_value(HKEY_CURRENT_USER, &key, "Command");
-            delete_value(HKEY_CURRENT_USER, &key, "Command");
+            // Another copy's entry stays; this copy's own is removed.
+            delete_value_if(HKEY_CURRENT_USER, &key, "Command", "\"C:\\Other\\app.exe\"");
+            assert!(read_string(HKEY_CURRENT_USER, &key, "Command").is_some());
+            delete_value_if(
+                HKEY_CURRENT_USER,
+                &key,
+                "Command",
+                "\"C:\\Omarchy\\app.exe\"",
+            );
+            assert_eq!(read_string(HKEY_CURRENT_USER, &key, "Command"), None);
+            delete_value_if(
+                HKEY_CURRENT_USER,
+                &key,
+                "Command",
+                "\"C:\\Omarchy\\app.exe\"",
+            );
             unsafe {
                 RegDeleteTreeW(HKEY_CURRENT_USER, wide(&key).as_ptr());
             }
@@ -145,8 +193,8 @@ mod platform {
     pub fn secure_boot() -> Option<bool> {
         None
     }
-    pub fn reopen_at_sign_in() -> Result<(), String> {
-        Ok(())
+    pub fn reopen_at_sign_in() -> Result<String, String> {
+        Err("Reopening at sign-in requires Windows".into())
     }
-    pub fn cancel_reopen() {}
+    pub fn cancel_reopen(_: &str) {}
 }

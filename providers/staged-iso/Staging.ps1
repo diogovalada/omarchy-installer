@@ -287,6 +287,7 @@ function Write-StagingSummary {
     $summary=@{operations=@($status.operations | Where-Object { $_.status -ne 'cleaned' } | ForEach-Object {
         $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
         if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
+        if ($_.ContainsKey('replaces') -and $_.replaces) { $operation.replaces=$_.replaces }
         $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'

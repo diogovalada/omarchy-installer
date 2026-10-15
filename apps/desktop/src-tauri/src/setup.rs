@@ -218,6 +218,11 @@ fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
         operation["status"].as_str()?;
         operation["diskNumber"].as_u64()?;
         operation["temporaryBytes"].as_u64()?;
+        // The partition the installer must delete, shown as text.
+        if !operation["replaces"].is_null() && operation["replaces"].as_str()?.chars().count() > 64
+        {
+            return None;
+        }
     }
     for error in errors {
         uuid::Uuid::parse_str(error["operationId"].as_str()?).ok()?;
@@ -1384,7 +1389,7 @@ fn run_elevated(
     let verified_iso = app.state::<Downloads>().verified_lease(&request.source);
     let connection = elevation::launch()?;
     let writer = Arc::new(Mutex::new(connection.writer));
-    let mut reopen = false;
+    let mut reopen: Option<String> = None;
     let mut restarting = false;
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
     #[cfg(windows)]
@@ -1421,8 +1426,8 @@ fn run_elevated(
                 // dialog, since the helper restarts right after approval; if it
                 // can't be written, the dialog says so and the restart goes on.
                 let summary = if operation == "staged_firmware" {
-                    reopen = crate::startup::reopen_at_sign_in().is_ok();
-                    firmware_summary(summary, reopen)
+                    reopen = crate::startup::reopen_at_sign_in().ok();
+                    firmware_summary(summary, reopen.is_some())
                 } else {
                     summary.to_owned()
                 };
@@ -1500,9 +1505,10 @@ fn run_elevated(
                         ))
                         .blocking_show()
                 };
-                if reopen && !approved && operation == "staged_firmware" {
-                    crate::startup::cancel_reopen();
-                    reopen = false;
+                if !approved && operation == "staged_firmware" {
+                    if let Some(command) = reopen.take() {
+                        crate::startup::cancel_reopen(&command);
+                    }
                 }
                 // The app shows a staged action as under way once confirmed.
                 if approved
@@ -1583,8 +1589,8 @@ fn run_elevated(
             Some("result") => {
                 let mut result = value["result"].clone();
                 // Secure Boot was already off, so the PC doesn't restart.
-                if reopen && result["secureBoot"] == false {
-                    crate::startup::cancel_reopen();
+                if let Some(command) = reopen.as_deref().filter(|_| result["secureBoot"] == false) {
+                    crate::startup::cancel_reopen(command);
                 }
                 if let Some(path) = &exported_path {
                     result["receiptPath"] = json!(path);
@@ -1606,8 +1612,8 @@ fn run_elevated(
                 // A failure before the restart began means the PC won't
                 // restart. A lost connection keeps the entry: that is
                 // usually the restart.
-                if reopen && !restarting {
-                    crate::startup::cancel_reopen();
+                if let Some(command) = reopen.as_deref().filter(|_| !restarting) {
+                    crate::startup::cancel_reopen(command);
                 }
                 return Err(value["message"]
                     .as_str()
@@ -1690,9 +1696,19 @@ mod usb_review_tests {
         assert!(read_staging_summary(&path).is_none());
         let summary = json!({"operations":[{"operationId":uuid::Uuid::new_v4().to_string(),"status":"copying","diskNumber":0,"temporaryBytes":8589934592_u64}],"recordErrors":[]});
         std::fs::write(&path, serde_json::to_vec(&summary).unwrap()).unwrap();
-        assert_eq!(read_staging_summary(&path), Some(summary));
+        assert_eq!(read_staging_summary(&path), Some(summary.clone()));
         std::fs::write(&path, vec![b' '; 1_048_577]).unwrap();
         assert!(read_staging_summary(&path).is_none());
+        // The partition to delete in the installer is short text, if present.
+        let mut replacing = summary.clone();
+        replacing["operations"][0]["replaces"] = json!("Windows");
+        std::fs::write(&path, serde_json::to_vec(&replacing).unwrap()).unwrap();
+        assert_eq!(read_staging_summary(&path), Some(replacing.clone()));
+        for invalid in [json!(7), json!("x".repeat(65))] {
+            replacing["operations"][0]["replaces"] = invalid;
+            std::fs::write(&path, serde_json::to_vec(&replacing).unwrap()).unwrap();
+            assert!(read_staging_summary(&path).is_none());
+        }
     }
     #[test]
     fn scheduled_operations_are_marked_once_windows_restarts() {
