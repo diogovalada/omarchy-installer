@@ -517,7 +517,8 @@ it('keeps progress and Stop on the home screen during preparation',async()=>{
   state.set(reviewing({...reviewed(),approved:true},{kind:null,stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*GiB,totalBytes:6*GiB,cancelAvailable:true,cancelRequested:false,stagedRecovery:{operations:[op],recordErrors:[]}}));
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
-  expect(screen.getByText('Copying and verifying the installer...')).toBeInTheDocument();
+  // Outside the preparing panel too, counted work shows a percentage.
+  expect(screen.getByText('Copying and verifying the installer... 33%')).toBeInTheDocument();
   expect(screen.getByRole('progressbar',{name:'Progress'})).toHaveAttribute('value',String(2*GiB));
   expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
   // The installer being prepared isn't one that didn't finish.

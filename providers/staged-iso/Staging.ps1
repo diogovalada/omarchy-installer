@@ -73,8 +73,10 @@ function Assert-StagingFree($Disk,[long]$Start,[long]$Size) {
         if ($Start -lt [long]$p.Offset+[long]$p.Size -and [long]$p.Offset -lt $Start+$Size) { throw 'Staging or installation space overlaps an existing partition.' }
     }
 }
-# Its events keep Stop available while the check can be stopped.
-function Get-StagingChoices($Release,$Resize=$null,[bool]$Stoppable=$false) {
+# With a cancel file, its events keep Stop available, and it stops before
+# each disk and before measuring.
+function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
+    $Stoppable=[bool]$CancelPath
     $choices=@(); $blocked=@(); $disks=@(); $overhead=512MB+(Align-Up ([long]$Release.sizeBytes+1GB))
     $script:minimumBytes=[long]$overhead
     if ($null -ne $Resize) {
@@ -89,6 +91,8 @@ function Get-StagingChoices($Release,$Resize=$null,[bool]$Stoppable=$false) {
     $secureBoot=try { [bool](Confirm-SecureBootUEFI -ErrorAction Stop) } catch { $null }
     $encryptionSnapshot=Get-BitLockerSnapshot -ForStaging
     foreach ($disk in @(Get-Disk)) {
+        # Outside the per-disk try: a stop isn't a disk that can't be used.
+        Assert-StagingCheckRunning $CancelPath
         $encryption=@()
         try {
             [void](Get-StagingDisk $disk.Number $disk.UniqueId)
@@ -149,6 +153,7 @@ function Get-StagingChoices($Release,$Resize=$null,[bool]$Stoppable=$false) {
                         else { $region.resizeReason='Only NTFS partitions can be resized here.' }
                     } catch { $region.resizeReason='Cannot read this filesystem. Unlock it if needed, then refresh.' }
                     if ($null -ne $Resize -and $Resize.diskNumber -eq $disk.Number -and $Resize.diskUniqueId -ceq [string]$disk.UniqueId -and $Resize.partitionNumber -eq $p.PartitionNumber -and [guid]$Resize.partitionGuid -eq [guid]$p.Guid -and $region.resizeState -eq 'unchecked') {
+                        Assert-StagingCheckRunning $CancelPath
                         Emit 'progress' 'analyzing-resize' @{cancelAvailable=$Stoppable;message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
                         $candidate=Get-ShrinkCandidate $p
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
@@ -180,7 +185,9 @@ function Get-StagingChoices($Release,$Resize=$null,[bool]$Stoppable=$false) {
                 $choice.largestFreeAfterStagingBytes=if ($remaining.Count) { [long](($remaining | Measure-Object -Maximum).Maximum) } else { [long]0 }
             }
             $choices+=$diskChoices
-        } catch { $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
+        } catch {
+            if ($_.Exception.Message -ceq 'The disk check was stopped.') { throw }
+            $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
     }
     return @{choices=$choices;blocked=$blocked;disks=$disks;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead;secureBoot=$secureBoot}
 }
@@ -211,14 +218,14 @@ function Assert-StagingCheckRunning([string]$CancelPath) {
 function Get-StagingInspection($Release,$Resize=$null,[string]$CancelPath='') {
     Assert-StagingCheckRunning $CancelPath
     $stoppable=[bool]$CancelPath
-    $result=Get-StagingChoices $Release $Resize $stoppable
+    $result=Get-StagingChoices $Release $Resize $CancelPath
     if ($null -ne $Resize) { return $result }
     Emit 'progress' 'inspecting' @{cancelAvailable=$stoppable;message='Disks are ready. Checking Windows resize limits...';stagedIsoInspection=$result}
     foreach ($disk in @($result.disks)) {
         foreach ($region in @($disk.regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'unchecked' })) {
             Assert-StagingCheckRunning $CancelPath
             $query=[pscustomobject]@{diskNumber=$disk.diskNumber;diskUniqueId=$disk.diskUniqueId;partitionNumber=$region.partitionNumber;partitionGuid=$region.partitionGuid}
-            $measured=Get-StagingChoices $Release $query $stoppable
+            $measured=Get-StagingChoices $Release $query $CancelPath
             $result=Merge-StagingAnalysis $result $measured $query
             Emit 'progress' 'analyzing-resize' @{cancelAvailable=$stoppable;message=('Checked resize limit for '+$region.label+' on Disk '+$disk.diskNumber+'.');stagedIsoInspection=$result}
         }
@@ -480,6 +487,8 @@ function Enter-StagingStep($Plan,[string]$Step,[string]$Stage,[string]$Message) 
     $timings=@($Plan.timings)
     if ($timings.Count -and -not $timings[-1].end) { $timings[-1].end=$now }
     $Plan.timings=$timings+@([ordered]@{step=$Step;start=$now;end=$null})
+    # Saved now, so an interrupted run still shows where it stopped.
+    if ($Plan.PSObject.Properties['status'] -and $Plan.status -ne 'planned') { Save-StagingState $Plan }
     if ($Step) { Emit 'progress' $Stage @{message=$Message;step=$Step} }
 }
 function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath='') {
@@ -511,13 +520,15 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
             }
         }
         if ((Get-StagingFileHash $Plan.sourceIsoPath $verifying) -cne $Plan.sourceSha256) { throw 'Official ISO changed after verification.' }
+        # Mounting and listing files can't be counted: an uncounted stage
+        # replaces the finished hash bar.
+        Emit 'progress' 'checking-files' @{message='Checking installer files and staging capacity...';step='verify'}
         $image=Get-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop
         if ($image.Attached) { throw 'Unmount this ISO before staging; the installer only removes mounts it creates.' }
         $image=Mount-DiskImage -ImagePath $Plan.sourceIsoPath -Access ReadOnly -PassThru -ErrorAction Stop; $mounted=$true
         $volumes=@($image | Get-Volume -ErrorAction Stop)
         if ($volumes.Count -ne 1 -or -not $volumes[0].DriveLetter) { throw 'Mounted ISO has no unique readable volume.' }
         $isoRoot=[string]$volumes[0].DriveLetter+':\'
-        Emit 'progress' 'checking-files' @{message='Checking installer files and staging capacity...';step='verify'}
         $files=@(Get-IsoInventory $isoRoot)
         if (-not $Plan.release.bootQualified) {
             Set-TestingBootPaths $Plan.release $files

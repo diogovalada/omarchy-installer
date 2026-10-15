@@ -529,12 +529,38 @@ try {
 & {
     function Emit($Type,$Stage,$Fields) { $script:emitted+=,$Fields }
     $script:emitted=@()
-    $plan=[pscustomobject]@{operationId='timed'}
+    $plan=[pscustomobject]@{operationId='timed';status='planned'}
     Enter-StagingStep $plan 'verify' 'verifying-source' 'Verifying'
     Enter-StagingStep $plan 'copy' 'copying-installer' 'Copying'
     Enter-StagingStep $plan '' '' ''
     Assert (@($plan.timings).Count -eq 3 -and $plan.timings[0].end -and $plan.timings[1].end -and $plan.timings[1].step -eq 'copy') 'Step timings were not recorded.'
     Assert ($script:emitted.Count -eq 2 -and $script:emitted[1].step -eq 'copy') 'Entering a step did not tell the app, or finishing did.'
+    # Once preparing, each step change is saved, so an interrupted run keeps its timings.
+    function Save-StagingState($State) { $script:saved++ }
+    $script:saved=0; $plan.status='preparing'
+    Enter-StagingStep $plan 'startup' 'registering-boot' 'Adding'
+    Assert ($script:saved -eq 1) 'A step change was not saved.'
+}
+# The disk loop itself stops before reading the next disk.
+& {
+    $temp=Join-Path $env:TEMP ('omarchy-stop-loop-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); $cancel=Join-Path $temp 'staged-cancel'; [IO.File]::WriteAllText($cancel,'')
+    function Emit { }
+    function Confirm-SecureBootUEFI { return $true }
+    function Get-BitLockerSnapshot { return @{known=$false;volumes=@()} }
+    function Get-Disk { return @([pscustomobject]@{Number=0;UniqueId='a';Size=[long]500GB},[pscustomobject]@{Number=1;UniqueId='b';Size=[long]500GB}) }
+    function Get-StagingDisk { $script:read++; throw 'Disks must not be read after Stop.' }
+    try {
+        $script:read=0; $stopped=$false
+        try { [void](Get-StagingChoices ([pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB}) $null $cancel) } catch { $stopped=$_.Exception.Message -ceq 'The disk check was stopped.' }
+        Assert ($stopped -and $script:read -eq 0) 'The disk loop read a disk after Stop.'
+        # A stop inside a disk's own reading (before measuring) isn't recorded as an unusable disk.
+        [IO.File]::Delete($cancel)
+        function Get-StagingDisk { throw 'The disk check was stopped.' }
+        $stopped=$false
+        try { [void](Get-StagingChoices ([pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB}) $null $cancel) } catch { $stopped=$_.Exception.Message -ceq 'The disk check was stopped.' }
+        Assert $stopped 'A stop while reading a disk became a blocked disk.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 }
 # The chunked hash matches Get-FileHash, and copying counts the readback too.
 & {

@@ -353,7 +353,7 @@
     {/if}
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
-  {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
+  {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}{percent!=null ? ` ${percent}%` : ''}</p>{/if}
   {#if busy && measured && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Progress"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{stopLabel}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
