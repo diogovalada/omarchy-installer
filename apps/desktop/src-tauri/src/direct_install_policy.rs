@@ -9,7 +9,11 @@ pub fn check_destination(destination: &Destination) -> Result<(), String> {
     match destination {
         Destination::StagedIso {
             action:
-                StagedAction::Stage | StagedAction::Inspect | StagedAction::Arm | StagedAction::Firmware,
+                StagedAction::Stage
+                | StagedAction::Inspect
+                | StagedAction::Arm
+                | StagedAction::Restart
+                | StagedAction::Firmware,
             ..
         } if !STAGED_ISO_TESTING => Err(STAGED_ISO_BLOCKER.into()),
         Destination::InspectDirect
@@ -67,6 +71,7 @@ mod tests {
             StagedAction::Stage,
             StagedAction::Inspect,
             StagedAction::Arm,
+            StagedAction::Restart,
             StagedAction::Firmware,
         ] {
             assert_eq!(

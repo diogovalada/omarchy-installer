@@ -126,6 +126,8 @@ describe('USB review before administrator access',()=>{
     expect(screen.getByText(/Automatic ejection did not finish/)).toBeInTheDocument();
     expect(screen.getByRole('heading',{name:'Install from your USB'})).toBeInTheDocument();
     expect(screen.queryByText(/You can unplug it now/)).not.toBeInTheDocument();
+    // The official installer refuses BitLocker disks, even paused ones.
+    expect(screen.getByText('Installing beside Windows with BitLocker?').closest('details')).toHaveTextContent('let it finish decrypting first');
   });
   it('focuses an action error so it is visible above the drive controls',()=>{
     setSetup({...state(),error:'The selected USB changed. Refresh USB drives.'});

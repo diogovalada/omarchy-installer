@@ -24,9 +24,12 @@ export interface SetupSnapshot {
   cancelAvailable: boolean; cancelRequested: boolean; error: string | null;
   preparation?: {secureBoot:string;runtimePackaged:boolean;runtimeReady:boolean}|null;
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
+  // Secure Boot as Windows shows it to standard users; null when unknown.
+  secureBoot?: boolean | null;
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
-export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean }
+// `replaces`: the partition to delete in the installer (Replace Windows).
+export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean;replaces?:string|null }
 export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;label:string;largestFreeAfterStagingBytes:number;target:Record<string,unknown>;encryption?:StagedEncryption[] }
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
@@ -38,13 +41,13 @@ export interface StagedDisk { diskNumber:number;diskUniqueId:string;diskSizeByte
 // it is display-only.
 export interface StagedReviewPlan { operationId?:string;diskNumber:number;diskSizeBytes:number;layoutSha256:string;targetKind:'shrink'|'free';shrink:{label:string;partitionGuid:string;offsetBytes:number;beforeSizeBytes:number;afterSizeBytes:number}|null;temporary:{offsetBytes:number;sizeBytes:number};omarchy?:{offsetBytes:number;sizeBytes:number}|null;largestFreeAfterBytes:number;minimumOmarchyBytes:number;bitLocker:string[];warning:'experimental'|'unsigned'|null }
 export const setupActive = (status?: string) => status === 'inspecting' || status === 'running';
-// `secureBoot` is the latest known Secure Boot state (from a disk check, or a
-// firmware action finding it already off), so a screen without its own check
-// (the home screen) knows it too; unknown after relaunching, which is also
-// right after a firmware restart.
+// `secureBoot` is the latest known Secure Boot state: from an elevated result
+// (a disk check, or a firmware action finding it already off) when the
+// snapshot has one, else as Windows reports it, else the last known state.
+// The home screen has no check of its own, so it relies on this.
 const state = writable<{ snapshot: SetupSnapshot | null; pending: boolean; error: string | null; secureBoot?: boolean | null }>({ snapshot:null, pending:false, error:null, secureBoot:null });
 const withSnapshot = (secureBoot: boolean | null | undefined, snapshot: SetupSnapshot) =>
-  ({ snapshot, secureBoot: snapshot?.stagedIso && 'secureBoot' in snapshot.stagedIso ? snapshot.stagedIso.secureBoot ?? null : secureBoot ?? null });
+  ({ snapshot, secureBoot: snapshot?.stagedIso && 'secureBoot' in snapshot.stagedIso ? snapshot.stagedIso.secureBoot ?? null : typeof snapshot?.secureBoot==='boolean' ? snapshot.secureBoot : secureBoot ?? null });
 let epoch = 0; let reading = false;
 let commandError: string | null = null;
 async function refresh() {
@@ -66,7 +69,7 @@ export const setup = { subscribe:state.subscribe, refresh,
   inspectUsb:(choiceId:string,elevated=false) => command('inspect_usb_choice',{choiceId,elevated}),
   prepare:(action:'firmware'|'runtime') => command('prepare_setup', {action}),
   prepareBitLocker:(reminderOnly:boolean) => command('prepare_bitlocker', {reminderOnly}),
-  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'firmware'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
+  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'restart'|'firmware'|'cleanup',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
   reviewUsb:(choiceId:string,mode:'erase'|'preserve') => command('review_usb_setup',{choiceId,mode}),
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),

@@ -523,7 +523,18 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
 function Get-StagingSummary($State) {
     $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
     if ($State.status -eq 'boot-scheduled' -and $State.PSObject.Properties['scheduledBootUnixSeconds']) { $summary.scheduledBootUnixSeconds=[long]$State.scheduledBootUnixSeconds }
+    $summary.replaces=Get-StagingReplacedName $State
     return $summary
+}
+# The partition the installer must delete to make room: only a shrink that
+# left no space for Omarchy (Replace Windows), named as Review names it.
+function Get-StagingReplacedName($State) {
+    if (-not $State.PSObject.Properties['targetKind'] -or $State.targetKind -ne 'shrink' -or [long]$State.linuxBytes -ne 0 -or $null -eq $State.shrink) { return $null }
+    $letter=[string]$State.shrink.driveLetter
+    if (-not $letter) { return 'Partition '+$State.shrink.partitionNumber }
+    $windows=[IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))
+    if (($letter+':\') -ieq $windows) { return 'Windows' }
+    return $letter+':'
 }
 function Set-TestingBootPaths($Release,$Files) {
     if (-not $script:testingBuild) { throw 'Unqualified ISO staging requires a testing build.' }
@@ -584,6 +595,8 @@ function Invoke-StagingFirmware($State) {
     if (-not (Confirm-SecureBootUEFI -ErrorAction Stop)) {
         return @{operationId=$State.operationId;status=$State.status;secureBoot=$false;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
+    # The app keeps its reopen-at-sign-in entry once this stage is reported.
+    Emit 'progress' 'restarting' @{message='Restarting into firmware settings...'}
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
     # When the OsIndications variable does not exist yet, shutdown.exe creates
     # it but exits with 203 without restarting; the second attempt restarts.

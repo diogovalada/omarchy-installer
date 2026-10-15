@@ -191,9 +191,14 @@ namespace Omarchy.DirectX86 {
             if (!option.SequenceEqual(GetVariable(name) ?? new byte[0])) throw new InvalidDataException("Temporary entry readback failed");
             return name;
         }
+        // A one-time boot already pending is fine only if it is this entry's own,
+        // left by an earlier arm whose restart hasn't happened yet.
+        public static bool PendingBootAllowed(byte[] pending, string name) {
+            return pending == null || (pending.Length == 2 && BitConverter.ToUInt16(pending, 0) == StagingIndex(name));
+        }
         public static void ArmStagingBoot(string name, byte[] option) {
             ushort index = StagingIndex(name); FirmwarePrivilege();
-            if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || GetVariable("BootNext") != null) throw new InvalidDataException("Firmware entry changed or another one-time boot is pending");
+            if (!option.SequenceEqual(GetVariable(name) ?? new byte[0]) || !PendingBootAllowed(GetVariable("BootNext"), name)) throw new InvalidDataException("Firmware entry changed or another one-time boot is pending");
             byte[] next = BitConverter.GetBytes(index);
             Check(SetFirmwareEnvironmentVariableEx("BootNext", EfiGlobal, next, 2, 7), "Cannot select next installer boot");
             if (!next.SequenceEqual(GetVariable("BootNext") ?? new byte[0])) throw new InvalidDataException("One-time boot readback failed");

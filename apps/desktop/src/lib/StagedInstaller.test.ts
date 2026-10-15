@@ -21,7 +21,9 @@ it('binds boot and cleanup actions to the recorded operation',async()=>{
   const op={operationId:'11111111-1111-4111-8111-111111111111',status:'staged',diskNumber:0,temporaryBytes:8*1024**3,message:'Installer ready'};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op]}}});
   render(StagedInstaller,{recoveryOnly:true});
-  await fireEvent.click(screen.getByRole('button',{name:'Start installer on next restart'}));
+  await fireEvent.click(screen.getByRole('button',{name:'Restart into the installer'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('restart',null,op.operationId);
+  await fireEvent.click(screen.getByRole('button',{name:'Set for next restart only'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
   await fireEvent.click(screen.getByRole('button',{name:'Remove temporary installer'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,op.operationId);
@@ -29,7 +31,8 @@ it('binds boot and cleanup actions to the recorded operation',async()=>{
 it('offers only reviewed cleanup for an incomplete copy',()=>{
   state.set({pending:false,snapshot:{status:'complete',stagedIso:{operations:[{operationId:'id',status:'copying',diskNumber:0,temporaryBytes:8*1024**3,message:'Interrupted'}]}}});
   render(StagedInstaller,{recoveryOnly:true});
-  expect(screen.queryByRole('button',{name:'Start installer on next restart'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Restart into the installer'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Set for next restart only'})).not.toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
 });
 it('blocks overlapping operations',()=>{
@@ -432,7 +435,7 @@ it('moves the Secure Boot advice from the choose screen to Review',async()=>{
   expect(screen.queryByText(/Secure Boot/)).not.toBeInTheDocument();
   state.set(reviewing(reviewed()));
   await tick();
-  expect(screen.getByRole('region',{name:'Review changes'})).toHaveTextContent('Next: turn off Secure Boot in firmware settings.');
+  expect(screen.getByRole('region',{name:'Review changes'})).toHaveTextContent('Next: turn off Secure Boot in firmware settings. Windows may then ask you to set up your PIN again.');
 });
 it('reviews the plan with Now and After bars, short bullets and one warning',async()=>{
   state.set(reviewing(reviewed()));
@@ -445,7 +448,7 @@ it('reviews the plan with Now and After bars, short bullets and one warning',asy
     'C: shrinks from 500 to 428 GiB. Your files stay.',
     'Omarchy can use 64 GiB. The 8 GiB installer is removed later.',
     'BitLocker on C: pauses until you resume it. Files stay encrypted.',
-    'Next: turn off Secure Boot in firmware settings.'
+    'Next: turn off Secure Boot in firmware settings. Windows may then ask you to set up your PIN again.'
   ]);
   expect(review).toHaveTextContent('Test build: real disk changes. This image may not start or install.');
   expect(screen.getByText('Full details')).toBeInTheDocument();
@@ -549,11 +552,11 @@ it('shows copy progress and offers to stop only while copying',async()=>{
   expect(calls.cancel).toHaveBeenCalledOnce();
 });
 it('lets the installer be selected again after a restart and restarts to firmware settings',async()=>{
-  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:''};
+  const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:'',restartedSinceScheduled:true};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op]}}});
   render(StagedInstaller,{recoveryOnly:true});
   expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
-  expect(screen.getByText('Install Omarchy')).toHaveAttribute('aria-current','step');
+  expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
   expect(screen.getByText('Starting Windows later')).toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
@@ -565,18 +568,23 @@ it('emphasizes only the next step for a prepared installer',async()=>{
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op],choices:[],blocked:[],secureBoot:true}}});
   render(StagedInstaller,{recoveryOnly:true});
   expect(screen.getByRole('button',{name:'Restart to firmware settings'})).toHaveClass('primary');
-  expect(screen.getByRole('button',{name:'Start installer on next restart'})).not.toHaveClass('primary');
+  expect(screen.getByRole('button',{name:'Set for next restart only'})).not.toHaveClass('primary');
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op],choices:[],blocked:[],secureBoot:false}}});
   await tick();
-  expect(screen.getByRole('button',{name:'Start installer on next restart'})).toHaveClass('primary');
+  expect(screen.getByRole('button',{name:'Restart into the installer'})).toHaveClass('primary');
+  expect(screen.getByRole('button',{name:'Set for next restart only'})).not.toHaveClass('primary');
   expect(screen.queryByRole('button',{name:'Restart to firmware settings'})).not.toBeInTheDocument();
 });
-it('asks for a restart after selecting the installer, then suggests removal',async()=>{
+it('offers a restart while the selected restart is pending, then suggests removal',async()=>{
   const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:'',restartedSinceScheduled:false};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[op],recordErrors:[]}}});
   render(StagedInstaller,{recoveryOnly:true});
-  expect(screen.getByText('Restart Windows to start the installer.')).toBeInTheDocument();
-  for(const button of screen.getAllByRole('button')) expect(button).not.toHaveClass('primary');
+  expect(screen.getByText('The installer opens at your next restart.')).toBeInTheDocument();
+  expect(screen.getAllByRole('button').filter(button=>button.classList.contains('primary')).map(button=>button.textContent)).toEqual(['Restart into the installer']);
+  // Already selected, so selecting it again isn't offered.
+  expect(screen.queryByRole('button',{name:/next restart/})).not.toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Restart into the installer'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('restart',null,op.operationId);
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[{...op,restartedSinceScheduled:true}],recordErrors:[]}}});
   await tick();
   expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
@@ -588,9 +596,9 @@ const card=(status:string,secureBoot:boolean|null,restartedSinceScheduled=false)
 const installerDisk='In the installer, choose the disk marked “installer disk, free space only”, then “Free space install”.';
 it('shows only the current step of a prepared installer, with one primary button',async()=>{
   const cases:[ReturnType<typeof card>,string,string,string|null,boolean][]=[
-    [card('staged',true),'Turn off Secure Boot','Restart into firmware settings, turn off Secure Boot, then return to Windows.','Restart to firmware settings',false],
-    [card('arming',false),'Set next restart','Make your next restart open the installer.','Start installer on next restart',true],
-    [card('boot-scheduled',false),'Install Omarchy','Restart Windows to start the installer.',null,true],
+    [card('staged',true),'Turn off Secure Boot','Restart into your PC’s firmware settings, then:','Restart to firmware settings',false],
+    [card('arming',false),'Start the installer','Restart into the installer when you’re ready.','Restart into the installer',true],
+    [card('boot-scheduled',false),'Install Omarchy','The installer opens at your next restart.','Restart into the installer',true],
     [card('boot-scheduled',false,true),'Clean up','Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.','Remove temporary installer',false]
   ];
   for(const [snapshot,step,text,primary,instruction] of cases) {
@@ -613,8 +621,8 @@ it('offers a firmware restart beside starting the installer when Secure Boot is 
   render(StagedInstaller,{recoveryOnly:true});
   await tick();
   expect(screen.getByText("Turn off Secure Boot if it's on")).not.toHaveAttribute('aria-current');
-  expect(screen.getByText('Set next restart')).toHaveAttribute('aria-current','step');
-  expect(screen.getByRole('button',{name:'Start installer on next restart'})).toHaveClass('primary');
+  expect(screen.getByText('Start the installer')).toHaveAttribute('aria-current','step');
+  expect(screen.getByRole('button',{name:'Restart into the installer'})).toHaveClass('primary');
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('firmware',null,'11111111-1111-4111-8111-111111111111');
 });
@@ -752,7 +760,7 @@ it('uses the last known Secure Boot state on the home screen',async()=>{
   // Known off, for example after the firmware action found it off.
   state.set({...card('staged',true),secureBoot:false});
   await tick();
-  expect(screen.getByText('Set next restart')).toHaveAttribute('aria-current','step');
+  expect(screen.getByText('Start the installer')).toHaveAttribute('aria-current','step');
 });
 it('ends Prepare again when its removal is declined',async()=>{
   state.set(card('staged',true));
@@ -845,11 +853,39 @@ it('names the new parts of the After bar and keeps the warning out of Full detai
   expect(review.querySelector('.legend')).toHaveTextContent('Omarchy');
   expect(review.querySelector('details')).not.toHaveTextContent('EXPERIMENTAL');
 });
-it('helps with Secure Boot and leaves starting the installer for later',async()=>{
+it('spells out the Secure Boot step and leaves starting the installer for later',async()=>{
   state.set(card('staged',true));
   render(StagedInstaller,{sourceReady:true});
   await tick();
-  expect(screen.getByText('How?')).toBeInTheDocument();
+  const article=screen.getByRole('article');
+  expect([...article.querySelectorAll('.how-to li')].map(item=>item.textContent)).toEqual([
+    'Find Secure Boot, usually under Security, Boot or Authentication.',
+    'Set it to Disabled and leave TPM on.',
+    'Save and exit, often with F10.'
+  ]);
+  expect(article).toHaveTextContent('this app reopens');
+  expect(article).toHaveTextContent('Windows may ask you to set up your PIN again');
+  // Only for some PCs, so folded.
+  expect(screen.getByText('Can’t change it?').closest('details')).not.toHaveAttribute('open');
   const row=screen.getByRole('button',{name:'Remove temporary installer'}).parentElement!;
-  expect([...row.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['Remove temporary installer','Prepare again','Start installer on next restart']);
+  expect([...row.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['Remove temporary installer','Prepare again','Set for next restart only']);
+});
+it('says to delete only the partition being replaced',async()=>{
+  const replacing=(replaces:string|null)=>{
+    const snapshot=card('arming',false);
+    (snapshot.snapshot.stagedIso.operations[0] as {replaces?:string|null}).replaces=replaces;
+    return snapshot;
+  };
+  state.set(replacing(null));
+  const view=render(StagedInstaller,{recoveryOnly:true});
+  await tick();
+  expect(screen.getByText(installerDisk)).toBeInTheDocument();
+  view.unmount();
+  for(const name of ['Windows','D:']) {
+    state.set(replacing(name));
+    const view=render(StagedInstaller,{recoveryOnly:true});
+    await tick();
+    expect(screen.getByText(`In the installer, choose the disk marked “installer disk, free space only”, then “Free space install”, and delete ${name} when it asks for more space.`)).toBeInTheDocument();
+    view.unmount();
+  }
 });

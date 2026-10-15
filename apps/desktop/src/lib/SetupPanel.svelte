@@ -69,6 +69,7 @@
       <h3>Install from your USB</h3>
       <ol class="next-steps"><li>Connect it to the x86-64 PC where you want to install Omarchy.</li><li>Restart that PC and choose the USB in its boot menu.</li><li>Follow the installer to choose the destination disk and finish setup.</li></ol>
       <details><summary>USB not showing in the boot menu?</summary><p>Use the PC’s UEFI boot menu with Secure Boot off. The boot-menu key depends on the manufacturer.</p></details>
+      <details><summary>Installing beside Windows with BitLocker?</summary><p>Turn BitLocker off in Windows and let it finish decrypting first. The installer can’t use a disk with BitLocker on it, even paused.</p></details>
       {#if snapshot?.receipt?.receipt?.backupPath}<p>Boot recovery archive: <span class="path">{snapshot.receipt.receipt.backupPath}</span></p>{/if}
       <div class="actions"><button onclick={() => {selected='';void setup.inspect('usb');}}>Create another USB</button></div>
     {:else}

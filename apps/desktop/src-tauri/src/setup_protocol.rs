@@ -112,6 +112,8 @@ pub enum StagedAction {
     Stage,
     Status,
     Arm,
+    /// Arm, then restart Windows into the installer.
+    Restart,
     Firmware,
     Cleanup,
 }

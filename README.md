@@ -127,6 +127,11 @@ maintain our own images. Ideally, these would ship unencrypted for efficient
 compression, with native setup support to encrypt each installation with a
 fresh, unique key.
 
+Secure Boot support in Omarchy, as planned upstream in omarchy-iso's
+`plans/consumer-secure-boot.md`, would remove the Secure Boot step and the
+Windows PIN reset it causes, except on PCs that don't trust Microsoft's
+third-party certificate. BitLocker handling would still be needed.
+
 Omarchy's boot menu could also list Windows automatically after a dual-boot
 installation. Today users add it manually with `limine-scan` or use the
 computer's boot menu ([omarchy#7867](https://github.com/omacom/omarchy/issues/7867)).

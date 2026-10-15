@@ -68,6 +68,9 @@ pub struct Snapshot {
     // The running staged action and the recorded installer it acts on, so the
     // app can tell it from other records, even after reloading.
     staged_target: Option<Value>,
+    // Secure Boot as Windows shows it to standard users, read with each
+    // snapshot, so the home screen knows it without an elevated check.
+    secure_boot: Option<bool>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,6 +135,7 @@ impl Default for Setup {
                     staged_recovery: None,
                     staged_review: None,
                     staged_target: None,
+                    secure_boot: None,
                 },
                 destinations: vec![],
                 usb_review: None,
@@ -275,6 +279,7 @@ impl Setup {
                     .and_then(|root| {
                         read_staging_summary(&root.join("OmarchyStagedInstaller/summary.json"))
                     });
+            snapshot.secure_boot = crate::startup::secure_boot();
             Ok(snapshot)
         }
         #[cfg(not(windows))]
@@ -1345,6 +1350,19 @@ fn consume_usb_confirmation(
     Ok(())
 }
 
+/// The firmware confirmation promises the app reopens; when the reopen entry
+/// couldn't be written, it says to open the app instead.
+fn firmware_summary(summary: &str, reopens: bool) -> String {
+    if reopens {
+        summary.to_owned()
+    } else {
+        summary.replace(
+            crate::setup_helper::FIRMWARE_REOPENS,
+            "Windows starts again; open this app yourself then.",
+        )
+    }
+}
+
 fn run_elevated(
     service: &Setup,
     app: &tauri::AppHandle,
@@ -1366,6 +1384,8 @@ fn run_elevated(
     let verified_iso = app.state::<Downloads>().verified_lease(&request.source);
     let connection = elevation::launch()?;
     let writer = Arc::new(Mutex::new(connection.writer));
+    let mut reopen = false;
+    let mut restarting = false;
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
     #[cfg(windows)]
     if let Some(guard) = &verified_iso {
@@ -1386,6 +1406,8 @@ fn run_elevated(
     });
     let mut reader = BufReader::new(connection.reader);
     while let Some(value) = read_frame(&mut reader)? {
+        // The restart is under way: keep the reopen entry from here on.
+        restarting |= value["type"] == "event" && value["stage"] == "restarting";
         match value["type"].as_str() {
             Some("confirmation_required") => {
                 let binding = value["binding"]
@@ -1395,12 +1417,23 @@ fn run_elevated(
                     .as_str()
                     .ok_or("The helper omitted the confirmation summary")?;
                 let operation = value["plan"]["kind"].as_str().unwrap_or("");
+                // Reopen the app after the firmware restart. Written before the
+                // dialog, since the helper restarts right after approval; if it
+                // can't be written, the dialog says so and the restart goes on.
+                let summary = if operation == "staged_firmware" {
+                    reopen = crate::startup::reopen_at_sign_in().is_ok();
+                    firmware_summary(summary, reopen)
+                } else {
+                    summary.to_owned()
+                };
+                let summary = summary.as_str();
                 let (dialog_kind, button) = match operation {
                     "usb_preserve" => (MessageDialogKind::Info, "Keep files and add installer"),
                     "usb" => (MessageDialogKind::Warning, "Erase USB and create installer"),
                     "bitlocker_reminder" => (MessageDialogKind::Info, "Set restoration reminder"),
                     "staged_write" => (MessageDialogKind::Warning, "Prepare installer partitions"),
                     "staged_arm" => (MessageDialogKind::Info, "Select next startup"),
+                    "staged_restart" => (MessageDialogKind::Warning, "Restart now"),
                     "staged_firmware" => {
                         (MessageDialogKind::Warning, "Restart to firmware settings")
                     }
@@ -1467,11 +1500,15 @@ fn run_elevated(
                         ))
                         .blocking_show()
                 };
+                if reopen && !approved && operation == "staged_firmware" {
+                    crate::startup::cancel_reopen();
+                    reopen = false;
+                }
                 // The app shows a staged action as under way once confirmed.
                 if approved
                     && matches!(
                         operation,
-                        "staged_arm" | "staged_firmware" | "staged_cleanup"
+                        "staged_arm" | "staged_restart" | "staged_firmware" | "staged_cleanup"
                     )
                 {
                     service.update(app, |inner| {
@@ -1545,6 +1582,10 @@ fn run_elevated(
             }),
             Some("result") => {
                 let mut result = value["result"].clone();
+                // Secure Boot was already off, so the PC doesn't restart.
+                if reopen && result["secureBoot"] == false {
+                    crate::startup::cancel_reopen();
+                }
                 if let Some(path) = &exported_path {
                     result["receiptPath"] = json!(path);
                     service.update(app, |inner| {
@@ -1562,10 +1603,16 @@ fn run_elevated(
                 return Ok(result);
             }
             Some("error") => {
+                // A failure before the restart began means the PC won't
+                // restart. A lost connection keeps the entry: that is
+                // usually the restart.
+                if reopen && !restarting {
+                    crate::startup::cancel_reopen();
+                }
                 return Err(value["message"]
                     .as_str()
                     .unwrap_or("Installation failed")
-                    .into())
+                    .into());
             }
             _ => return Err("The helper sent an unexpected response".into()),
         }
@@ -1579,6 +1626,16 @@ fn run_elevated(
 #[cfg(test)]
 mod usb_review_tests {
     use super::*;
+    #[test]
+    fn the_firmware_confirmation_says_when_the_app_cannot_reopen() {
+        let summary = crate::setup_helper::FIRMWARE_SUMMARY;
+        assert!(summary.contains(crate::setup_helper::FIRMWARE_REOPENS));
+        assert_eq!(firmware_summary(summary, true), summary);
+        let fallback = firmware_summary(summary, false);
+        assert!(!fallback.contains("this app reopens"));
+        assert!(fallback.contains("open this app yourself"));
+    }
+
     #[test]
     fn a_declined_staged_confirmation_is_cancelled_without_an_error() {
         let setup = Setup::default();

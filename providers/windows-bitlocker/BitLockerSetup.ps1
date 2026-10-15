@@ -227,16 +227,73 @@ function Resume-OwnedProtection($State,[string]$Path) {
     $State.status='restored'; Write-FollowupState $Path $State
     Remove-EncryptionReminder $State.volume.partitionGuid
 }
-# A prepared installer that has not been selected for startup still needs
-# protection suspended. The summary is display-only; failure to read it keeps
-# the normal choices.
-function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OmarchyStagedInstaller/summary.json')) {
+# A prepared installer that hasn't started yet still needs protection
+# suspended: not yet selected for startup, or selected for a restart that
+# hasn't happened (the boot recorded when selecting is still the current one).
+# The summary is display-only; failure to read it keeps the normal choices.
+function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OmarchyStagedInstaller/summary.json'),[long]$CurrentBoot=-1) {
     try {
         if (-not (Test-Path -LiteralPath $Path)) { return $false }
         $summary=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        return @($summary.operations | Where-Object { $_.status -in @('staged','arming') }).Count -gt 0
+        foreach ($operation in @($summary.operations)) {
+            if ($operation.status -in @('staged','arming')) { return $true }
+            if ($operation.status -eq 'boot-scheduled' -and $operation.PSObject.Properties['scheduledBootUnixSeconds']) {
+                if ($CurrentBoot -lt 0) { $CurrentBoot=([DateTimeOffset](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime).ToUnixTimeSeconds() }
+                if ([long]$operation.scheduledBootUnixSeconds -eq $CurrentBoot) { return $true }
+            }
+        }
+        return $false
     } catch { return $false }
 }
+# What the reminder says and offers. A waiting installer points back to the
+# app and hides BitLocker settings, so protection isn't resumed too early.
+function Get-FollowupView([string]$Decision,[bool]$InstallerWaiting,[bool]$CanResume,[string]$Drive) {
+    $text=switch ($Decision) {
+        'ask' { 'Windows encryption is off. Would you like to turn BitLocker back on? Start Windows through your final Omarchy boot menu before doing so. Windows settings will guide you through activation and recovery-key backup. Closing this window reminds you at your next sign-in.' }
+        'uncertain' { 'Omarchy preparation was interrupted before the encryption change was confirmed. Check Windows encryption settings. Nothing will be re-enabled automatically; this reminder stays until protection is verified or you explicitly dismiss it.' }
+        'decrypting' { 'Windows decryption is still running or paused. Wait for it to finish before using the official installer. You can check its progress in Windows settings. The restoration reminder remains active.' }
+        'encrypting' { 'Windows encryption is running or paused. It is not yet verified as fully protected. Check progress in Windows settings; this reminder will retire when encryption and protection are both verified.' }
+        'suspended' { if ($InstallerWaiting) { 'BitLocker on '+$Drive+' is paused for the Omarchy installer waiting on this PC. Keep it paused until Omarchy is installed. To continue, open Omarchy Installer.' } else { 'BitLocker protection is suspended on '+$Drive+'. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
+    }
+    $settings=if ($InstallerWaiting) { $null } elseif ($CanResume) { 'Resume protection' } else { 'Open BitLocker settings' }
+    $decline=switch ($Decision) { 'suspended' { if ($InstallerWaiting) { 'Stop reminders' } else { 'Leave suspended' } } 'uncertain' { 'Stop reminders' } default { 'Keep BitLocker off' } }
+    return [pscustomobject]@{text=$text;settings=$settings;later='Remind me next time';decline=$decline;declineEnabled=($Decision -in @('ask','uncertain','suspended'))}
+}
+# The reminder window, sized to its text. DPI awareness and visual styles keep
+# Windows from stretching it as a blurry bitmap on scaled displays and drawing
+# old-style buttons. Buttons are returned for wiring.
+function New-FollowupForm($View) {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    if (-not ('Omarchy.FollowupDpi' -as [type])) { Add-Type -Namespace Omarchy -Name FollowupDpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' }
+    [void][Omarchy.FollowupDpi]::SetProcessDPIAware()
+    [Windows.Forms.Application]::EnableVisualStyles()
+    $form=New-Object Windows.Forms.Form
+    $form.Text='Omarchy Installer - Windows encryption'; $form.Font=New-Object Drawing.Font('Segoe UI',9)
+    $form.StartPosition='CenterScreen'; $form.FormBorderStyle='FixedDialog'; $form.MaximizeBox=$false; $form.MinimizeBox=$false
+    $form.AutoSize=$true; $form.AutoSizeMode='GrowAndShrink'
+    $graphics=$form.CreateGraphics(); try { $scale=$graphics.DpiX/96 } finally { $graphics.Dispose() }
+    $px={ param([int]$Value) [int][Math]::Round($Value*$scale) }
+    $layout=New-Object Windows.Forms.TableLayoutPanel
+    $layout.AutoSize=$true; $layout.AutoSizeMode='GrowAndShrink'; $layout.ColumnCount=1; $layout.RowCount=2
+    $layout.Padding=New-Object Windows.Forms.Padding((& $px 20))
+    $label=New-Object Windows.Forms.Label; $label.Text=$View.text; $label.AutoSize=$true
+    $label.MaximumSize=New-Object Drawing.Size((& $px 480),0); $label.Margin=New-Object Windows.Forms.Padding(0,0,0,(& $px 20))
+    $row=New-Object Windows.Forms.FlowLayoutPanel; $row.AutoSize=$true; $row.AutoSizeMode='GrowAndShrink'; $row.WrapContents=$false
+    $row.FlowDirection='RightToLeft'; $row.Anchor='Right'; $row.Margin=New-Object Windows.Forms.Padding(0)
+    $button={ param([string]$Text) $b=New-Object Windows.Forms.Button; $b.Text=$Text; $b.AutoSize=$true; $b.AutoSizeMode='GrowAndShrink'; $b.Padding=New-Object Windows.Forms.Padding((& $px 8),(& $px 3),(& $px 8),(& $px 3)); $b.Margin=New-Object Windows.Forms.Padding((& $px 8),0,0,0); $b }
+    $decline=& $button $View.decline; $decline.Enabled=$View.declineEnabled
+    $later=& $button $View.later
+    $settings=if ($View.settings) { & $button $View.settings } else { $null }
+    # Right to left: the first added sits at the right edge.
+    $row.Controls.Add($decline); $row.Controls.Add($later); if ($settings) { $row.Controls.Add($settings) }
+    $layout.Controls.Add($label,0,0); $layout.Controls.Add($row,0,1)
+    # Focus starts on the safe choice, and Tab moves left to right.
+    $index=0; foreach ($b in @($settings,$later,$decline)) { if ($b) { $b.TabIndex=$index++ } }
+    $form.Controls.Add($layout); $form.CancelButton=$later; $form.AcceptButton=$later; $form.ActiveControl=$later
+    return [pscustomobject]@{form=$form;settings=$settings;later=$later;decline=$decline}
+}
+
 function Show-EncryptionFollowup {
     $root=Get-FollowupRoot
     $guid=([guid](Split-Path -Leaf $PSScriptRoot)).ToString()
@@ -250,42 +307,28 @@ function Show-EncryptionFollowup {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
-    Add-Type -AssemblyName System.Windows.Forms
-    $form=New-Object Windows.Forms.Form
-    $form.Text='Omarchy Installer - Windows encryption'; $form.Width=620; $form.Height=285
-    $form.StartPosition='CenterScreen'; $form.FormBorderStyle='FixedDialog'; $form.MaximizeBox=$false; $form.MinimizeBox=$false
-    $label=New-Object Windows.Forms.Label; $label.SetBounds(20,20,565,110)
-    $label.Text=switch ($decision) {
-        'ask' { 'Windows encryption is off. Would you like to turn BitLocker back on? Start Windows through your final Omarchy boot menu before doing so. Windows settings will guide you through activation and recovery-key backup. Closing this window reminds you at your next sign-in.' }
-        'uncertain' { 'Omarchy preparation was interrupted before the encryption change was confirmed. Check Windows encryption settings. Nothing will be re-enabled automatically; this reminder stays until protection is verified or you explicitly dismiss it.' }
-        'decrypting' { 'Windows decryption is still running or paused. Wait for it to finish before using the official installer. You can check its progress in Windows settings. The restoration reminder remains active.' }
-        'encrypting' { 'Windows encryption is running or paused. It is not yet verified as fully protected. Check progress in Windows settings; this reminder will retire when encryption and protection are both verified.' }
-        'suspended' { if ($installerWaiting) { 'BitLocker protection is suspended on '+$facts.driveLetter+' for the Omarchy installer prepared on this computer. Keep it suspended until Omarchy is installed; the installer cannot start while protection is on. Closing this window reminds you next sign-in.' } else { 'BitLocker protection is suspended on '+$facts.driveLetter+'. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
-    }
-    $settings=New-Object Windows.Forms.Button; $settings.Text='Open BitLocker settings'; $settings.SetBounds(20,155,175,38)
     $canResume=$state.origin -eq 'installer-suspension' -and $state.status -eq 'pending' -and $decision -eq 'suspended' -and -not $installerWaiting
-    if ($canResume) { $settings.Text='Resume protection' }
-    $settings.Add_Click({
-        if ($canResume) {
+    $window=New-FollowupForm (Get-FollowupView $decision $installerWaiting $canResume ([string]$facts.driveLetter))
+    $form=$window.form
+    if ($window.settings) {
+        $window.settings.Add_Click({
+            if ($canResume) {
+                try {
+                    if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started the way you normally start it.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
+                    Resume-OwnedProtection $state $path; $form.Close()
+                } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'BitLocker','OK','Error') }
+                return
+            }
+            # Windows owns activation, recovery-key backup and any required consent.
+            $control=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/control.exe'
             try {
-                if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started the way you normally start it.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
-                Resume-OwnedProtection $state $path; $form.Close()
-            } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'BitLocker','OK','Error') }
-            return
-        }
-        # Windows owns activation, recovery-key backup and any required consent.
-        $control=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/control.exe'
-        try {
-            Start-Process -FilePath $control -ArgumentList '/name Microsoft.BitLockerDriveEncryption' -WindowStyle Normal -ErrorAction Stop
-            $form.Close()
-        } catch { [void][Windows.Forms.MessageBox]::Show('Could not open BitLocker settings. Open Windows Settings and search for Device encryption or BitLocker. The reminder remains active.','Windows encryption','OK','Error') }
-    })
-    $later=New-Object Windows.Forms.Button; $later.Text='Remind me next time'; $later.SetBounds(205,155,175,38); $later.Add_Click({$form.Close()})
-    $decline=New-Object Windows.Forms.Button; $decline.Text='Keep BitLocker off'; $decline.SetBounds(390,155,175,38)
-    $decline.Enabled=$decision -in @('ask','uncertain','suspended')
-    if ($decision -eq 'suspended') { $decline.Text='Leave suspended' }
-    if ($decision -eq 'uncertain') { $decline.Text='Stop reminders' }
-    $decline.Add_Click({
+                Start-Process -FilePath $control -ArgumentList '/name Microsoft.BitLockerDriveEncryption' -WindowStyle Normal -ErrorAction Stop
+                $form.Close()
+            } catch { [void][Windows.Forms.MessageBox]::Show('Could not open BitLocker settings. Open Windows Settings and search for Device encryption or BitLocker. The reminder remains active.','Windows encryption','OK','Error') }
+        })
+    }
+    $window.later.Add_Click({$form.Close()})
+    $window.decline.Add_Click({
         try {
             $warning=if ($decision -eq 'suspended') { 'Stop reminding? BitLocker protection will stay suspended until you resume it in Windows settings.' } elseif ($decision -eq 'ask') { 'Stop reminding? Windows will remain unencrypted. You can enable BitLocker later in Windows settings.' } else { 'Stop reminders for this interrupted preparation? This will not change Windows encryption. Check its status in Windows settings.' }
             if ([Windows.Forms.MessageBox]::Show($warning,'Stop encryption reminders?','YesNo','Warning','Button2') -ne 'Yes') { return }
@@ -294,7 +337,6 @@ function Show-EncryptionFollowup {
             $state.status='declined'; Write-FollowupState $path $state; Remove-EncryptionReminder $guid; $form.Close()
         } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'Windows encryption','OK','Error') }
     })
-    $form.Controls.AddRange(@($label,$settings,$later,$decline)); $form.CancelButton=$later
     try { [void]$form.ShowDialog() } finally { $form.Dispose() }
 }
 

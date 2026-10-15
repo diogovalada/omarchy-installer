@@ -14,6 +14,7 @@ mod provider_runtime;
 mod setup;
 mod setup_helper;
 mod setup_protocol;
+mod startup;
 mod usb_preserve;
 
 use tauri::Manager;

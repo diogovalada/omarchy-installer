@@ -146,6 +146,38 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     }
 }
 
+pub(crate) const FIRMWARE_SUMMARY: &str = "Restart into firmware settings now? Save your work first. Turn off Secure Boot (usually under Security, Boot or Authentication), leave TPM on, then save and exit. Windows starts again and this app reopens. Windows may ask you to set up your PIN again.";
+pub(crate) const FIRMWARE_REOPENS: &str = "Windows starts again and this app reopens.";
+
+/// What to do in the installer, which the app can't show once it runs. A
+/// replaced partition (`replaces` in the staging summary) is deleted there.
+pub(crate) fn installer_instruction(replaces: Option<&str>) -> String {
+    let base = "In the installer, choose the disk marked \"installer disk, free space only\", then \"Free space install\"";
+    match replaces {
+        Some(name) => format!("{base}, and delete {name} when it asks for more space."),
+        None => format!("{base}."),
+    }
+}
+
+fn restart_windows() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new(
+            crate::provider_process::system_directory()?.join("shutdown.exe"),
+        )
+        .args(["/r", "/t", "0"])
+        .status()
+        .map_err(|e| e.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("shutdown.exe exited with {status}"))
+        }
+    }
+    #[cfg(not(windows))]
+    Err("Restarting into the installer requires Windows".into())
+}
+
 /// The helper's error when the user declines a confirmation.
 pub(crate) const NOT_CONFIRMED: &str = "Operation was not confirmed";
 
@@ -582,6 +614,17 @@ mod staged_review_tests {
                 {"role":"source","offsetBytes":start + 512 * MIB,"sizeBytes":7 * GIB}
             ]
         })
+    }
+
+    #[test]
+    fn the_installer_instruction_names_only_a_replaced_partition() {
+        let keep = installer_instruction(None);
+        assert!(keep.ends_with("then \"Free space install\"."));
+        assert!(!keep.contains("delete"));
+        for name in ["Windows", "D:", "Partition 3"] {
+            assert!(installer_instruction(Some(name))
+                .ends_with(&format!(", and delete {name} when it asks for more space.")));
+        }
     }
 
     #[test]
@@ -1294,18 +1337,20 @@ fn execute(
                 .as_array()
                 .and_then(|items| items.iter().find(|record| record["operationId"] == id))
                 .ok_or("Recorded staging operation not found")?;
-            let (name, kind, summary) = if *action == StagedAction::Arm {
-                ("arm", "staged_arm", "Select the installer for the next restart only? Restart Windows when you're ready. This doesn't restart now or change the normal boot order.")
-            } else if *action == StagedAction::Firmware {
-                ("firmware", "staged_firmware", "Restart into firmware settings now to turn off Secure Boot? Save your work first. BitLocker protection is suspended, so this won't ask for your recovery key. Turn off Secure Boot, save, and return to Windows. Then open this app again to set the next restart.")
-            } else {
-                ("cleanup", "staged_cleanup", "Remove the temporary installer? Its two partitions and their files are deleted, and their space stays unallocated. Windows and any installed Omarchy stay. Continue once your PC starts Omarchy by itself, or if you're giving up on this installation.")
+            let (name, kind, summary) = match action {
+                StagedAction::Arm => ("arm", "staged_arm", "Select the installer for the next restart only? Restart Windows when you're ready. This doesn't restart now or change the normal boot order.".to_owned()),
+                StagedAction::Restart => ("arm", "staged_restart", format!(
+                    "Restart into the Omarchy installer now? Save your work first. {}",
+                    installer_instruction(record["replaces"].as_str())
+                )),
+                StagedAction::Firmware => ("firmware", "staged_firmware", FIRMWARE_SUMMARY.to_owned()),
+                _ => ("cleanup", "staged_cleanup", "Remove the temporary installer? Its two partitions and their files are deleted, and their space stays unallocated. Windows and any installed Omarchy stay. Continue once your PC starts Omarchy by itself, or if you're giving up on this installation.".to_owned()),
             };
             confirm(
                 output,
                 confirmations,
                 &cancel,
-                summary,
+                &summary,
                 &json!({"kind":kind,"operation":record}),
             )?;
             cancelled(&cancel)?;
@@ -1315,7 +1360,22 @@ fn execute(
                 "Updating the recorded installer…",
                 false,
             );
-            return run(name, &json!({"operationId":id}));
+            let mut result = run(name, &json!({"operationId":id}))?;
+            if *action == StagedAction::Restart && result["status"] == "boot-scheduled" {
+                stage(
+                    output,
+                    "restarting",
+                    "Restarting into the installer…",
+                    false,
+                );
+                result["message"] = json!(match restart_windows() {
+                    Ok(()) => "Restarting into the installer…",
+                    // Arming succeeded, so the next restart still opens it.
+                    Err(_) =>
+                        "The installer is set for the next restart. Restart Windows to start it.",
+                });
+            }
+            return Ok(result);
         }
         if let Destination::PrepareBitLocker { reminder_only } = &request.destination {
             if !reminder_only {

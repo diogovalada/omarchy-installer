@@ -37,4 +37,9 @@ $renamed=[byte[]](@(0,0,0,0) + [BitConverter]::GetBytes([uint16]$pathLength) + [
 Assert ([Omarchy.DirectX86.NativeDisk]::SameStagingTarget($renamed,$option)) 'A renamed entry targeting the temporary loader must remain ours.'
 Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([Omarchy.DirectX86.NativeDisk]::StagingBootOption(5,200GB,$esp),$option)) 'An entry for another partition was treated as ours.'
 Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([byte[]](1,0,0,0),$option)) 'A truncated entry was treated as ours.'
+# Arming again before the restart keeps this entry's own one-time boot; another is refused.
+Assert ([Omarchy.DirectX86.NativeDisk]::PendingBootAllowed($null,'Boot0007')) 'No pending one-time boot was refused.'
+Assert ([Omarchy.DirectX86.NativeDisk]::PendingBootAllowed([BitConverter]::GetBytes([uint16]7),'Boot0007')) 'Our own pending one-time boot was refused.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::PendingBootAllowed([BitConverter]::GetBytes([uint16]8),'Boot0007')) 'Another pending one-time boot was accepted.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::PendingBootAllowed([byte[]](7),'Boot0007')) 'A malformed pending one-time boot was accepted.'
 Write-Output 'Passed staged GPT and EFI binary tests. No host disks or firmware were accessed.'

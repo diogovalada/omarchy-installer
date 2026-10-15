@@ -33,6 +33,21 @@ describe('setup error recovery', () => {
     await setup.refresh();
     expect(get(setup).secureBoot).toBeNull();
   });
+  it('falls back to Secure Boot as Windows reports it, after an elevated result', async () => {
+    const { setup } = await import('./setup');
+    // After relaunching (the firmware restart), only Windows' report is known.
+    invoke.mockResolvedValueOnce({kind:null,status:'idle',secureBoot:false});
+    await setup.refresh();
+    expect(get(setup).secureBoot).toBe(false);
+    // An elevated result in the same snapshot wins.
+    invoke.mockResolvedValueOnce({kind:null,status:'complete',secureBoot:false,stagedIso:{choices:[],secureBoot:true}});
+    await setup.refresh();
+    expect(get(setup).secureBoot).toBe(true);
+    // Unknown to Windows keeps the last known state.
+    invoke.mockResolvedValueOnce({kind:null,status:'idle',secureBoot:null});
+    await setup.refresh();
+    expect(get(setup).secureBoot).toBe(true);
+  });
   it('clears a polling-only connection error after reconnecting', async () => {
     const { setup } = await import('./setup');
     invoke.mockRejectedValueOnce('Connection unavailable').mockResolvedValue({kind:'usb',status:'ready'});
