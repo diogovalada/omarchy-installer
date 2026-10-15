@@ -71,6 +71,10 @@ pub struct Snapshot {
     // Secure Boot as Windows shows it to standard users, read with each
     // snapshot, so the home screen knows it without an elevated check.
     secure_boot: Option<bool>,
+    // The steps a staged preparation goes through, and the current one, so
+    // the app shows progress, also after reloading.
+    steps: Option<Value>,
+    step: Option<String>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +140,8 @@ impl Default for Setup {
                     staged_review: None,
                     staged_target: None,
                     secure_boot: None,
+                    steps: None,
+                    step: None,
                 },
                 destinations: vec![],
                 usb_review: None,
@@ -151,10 +157,20 @@ impl Default for Setup {
 // change, and the inspection stays so the choose screen returns.
 fn record_failure(inner: &mut Inner, error: String) {
     inner.snapshot.staged_review = None;
+    let checking = inner
+        .snapshot
+        .staged_target
+        .as_ref()
+        .is_some_and(|target| target["action"] == "inspect");
     if inner.snapshot.staged_target.is_some() && crate::setup_helper::declined(&error) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
+    } else if checking && inner.cancel.load(Ordering::Relaxed) {
+        // A stopped disk check isn't a failure; partitions it measured stay.
+        inner.snapshot.status = "cancelled".into();
+        inner.snapshot.error = None;
+        inner.snapshot.message = "Disk check stopped.".into();
     } else {
         inner.snapshot.status = if inner.cancel.load(Ordering::Relaxed) {
             "cancelled"
@@ -317,6 +333,8 @@ impl Setup {
         inner.snapshot.cancel_available = false;
         inner.snapshot.staged_review = None;
         inner.snapshot.staged_target = None;
+        inner.snapshot.steps = None;
+        inner.snapshot.step = None;
         inner.snapshot.stage = status.into();
         inner.snapshot.message = if status == "inspecting" {
             "Checking this computer…"
@@ -1585,6 +1603,12 @@ fn run_elevated(
                 if let Some(available) = value["cancelAvailable"].as_bool() {
                     inner.snapshot.cancel_available = available;
                 }
+                if value["steps"].is_array() {
+                    inner.snapshot.steps = Some(value["steps"].clone());
+                }
+                if let Some(step) = value["step"].as_str() {
+                    inner.snapshot.step = Some(step.into());
+                }
             }),
             Some("result") => {
                 let mut result = value["result"].clone();
@@ -1632,6 +1656,50 @@ fn run_elevated(
 #[cfg(test)]
 mod usb_review_tests {
     use super::*;
+    #[test]
+    fn a_stopped_disk_check_is_cancelled_and_keeps_what_it_measured() {
+        let setup = Setup::default();
+        let mut inner = setup.inner.lock().unwrap();
+        inner.snapshot.status = "running".into();
+        inner.snapshot.staged_iso = Some(json!({"disks":[{"diskNumber":0}]}));
+        inner.snapshot.staged_target = Some(json!({"action":"inspect","operationId":null}));
+        inner.cancel.store(true, Ordering::Relaxed);
+        record_failure(&mut inner, "The disk check was stopped.".into());
+        assert_eq!(inner.snapshot.status, "cancelled");
+        assert_eq!(inner.snapshot.error, None);
+        assert_eq!(inner.snapshot.message, "Disk check stopped.");
+        assert_eq!(
+            inner.snapshot.staged_iso,
+            Some(json!({"disks":[{"diskNumber":0}]}))
+        );
+        // A failed check without Stop is still a failure.
+        inner.cancel.store(false, Ordering::Relaxed);
+        record_failure(&mut inner, "Windows failed".into());
+        assert_eq!(inner.snapshot.status, "failed");
+        // Stopping a preparation keeps its error, so removal is offered.
+        inner.snapshot.staged_target = Some(json!({"action":"stage","operationId":null}));
+        inner.cancel.store(true, Ordering::Relaxed);
+        record_failure(&mut inner, "Preparation was cancelled.".into());
+        assert_eq!(inner.snapshot.status, "cancelled");
+        assert!(inner.snapshot.error.is_some());
+    }
+
+    #[test]
+    fn each_operation_starts_without_the_previous_steps() {
+        let setup = Setup::default();
+        {
+            let mut inner = setup.inner.lock().unwrap();
+            inner.snapshot.steps =
+                Some(json!([{"id":"verify","label":"Verify the installer image"}]));
+            inner.snapshot.step = Some("copy".into());
+            inner.snapshot.status = "complete".into();
+        }
+        setup.begin("direct", "running").unwrap();
+        let inner = setup.inner.lock().unwrap();
+        assert_eq!(inner.snapshot.steps, None);
+        assert_eq!(inner.snapshot.step, None);
+    }
+
     #[test]
     fn the_firmware_confirmation_says_when_the_app_cannot_reopen() {
         let summary = crate::setup_helper::FIRMWARE_SUMMARY;

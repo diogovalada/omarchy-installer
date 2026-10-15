@@ -117,7 +117,14 @@
     checkingBeside=true;
     inspect();
   }
-  $: copying=$setup.snapshot?.stage==='copying-installer' && ($setup.snapshot?.totalBytes ?? 0)>0;
+  // Work counted in bytes (copying, or checking the installer files before
+  // restarting into it) shows a bar.
+  $: measured=($setup.snapshot?.totalBytes ?? 0)>0;
+  // Preparing's steps, from the provider: finished ones ticked, the current
+  // one with its bar (a percentage when counted in bytes).
+  $: steps=$setup.snapshot?.steps ?? [];
+  $: stepIndex=steps.findIndex(s=>s.id===$setup.snapshot?.step);
+  $: percent=measured ? Math.floor(100*($setup.snapshot?.bytes ?? 0)/($setup.snapshot?.totalBytes ?? 1)) : null;
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
   $: testing=$setup.snapshot?.stagedTesting===true;
@@ -225,6 +232,12 @@
   // button rather than at the page bottom.
   let requesting=false;
   $: if(review || !busy) requesting=false;
+  // Beside Review while it is planned: the planning step's own message
+  // (measuring the partition, which is the long part), else a plain line
+  // rather than the helper's technical stages.
+  $: planningMessage=busy && $setup.snapshot?.stage==='planning' && $setup.snapshot.message ? $setup.snapshot.message : 'Planning the changes…';
+  // A stopped check finishes the partition Windows is measuring first.
+  $: stopLabel=quiet ? ($setup.snapshot?.cancelRequested ? `Stopping after ${waitingFor || 'the current partition'}…` : 'Stop checking') : 'Stop preparing';
   // Planning a Review, from the snapshot, so it holds after reloading.
   $: planning=busy && $setup.snapshot?.stagedTarget?.action==='stage' && !$setup.snapshot?.stagedReview;
   async function stage() {
@@ -248,9 +261,25 @@
     {:else if preparing}
       <div class="preparing" role="region" aria-label="Preparing the installer">
         <h3>Preparing the installer</h3>
-        <p role="status">{$setup.snapshot?.message || 'Preparing…'}</p>
+        {#if steps.length}
+          <ol class="progress-steps" aria-label="Steps">
+            {#each steps as item,index (item.id)}
+              <li class:done={index<stepIndex} class:current={index===stepIndex} aria-current={index===stepIndex ? 'step' : undefined}>
+                <span>{item.label}{index===stepIndex && percent!=null ? ` · ${percent}%` : ''}</span>
+                {#if index===stepIndex}
+                  {#if measured}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label={item.label}></progress>
+                  {:else}<progress aria-label={item.label}></progress>{/if}
+                  {#if item.id==='shrink'}<small>This can take several minutes.</small>{/if}
+                {/if}
+              </li>
+            {/each}
+          </ol>
+          <p class="visually-hidden" role="status">{$setup.snapshot?.message ?? ''}</p>
+        {:else}
+          <p role="status">{$setup.snapshot?.message || 'Preparing…'}</p>
+          {#if measured}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Preparing the installer"></progress>{/if}
+        {/if}
         <p>Keep this window open.</p>
-        {#if copying}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
         {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
       </div>
     {:else if operations.length && !checkingBeside}
@@ -308,7 +337,7 @@
         {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
-          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">Planning the changes…</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
+          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">{planningMessage}</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
         </div>
       {/if}
     {/if}
@@ -325,8 +354,8 @@
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
   {#if busy && !quiet && !(review && !recoveryOnly) && !preparing && !requesting}<p role="status">{$setup.snapshot?.message || 'Checking…'}</p>{/if}
-  {#if busy && copying && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Copying the installer"></progress>{/if}
-  {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{quiet ? 'Stop checking' : 'Stop preparing'}</button>{/if}
+  {#if busy && measured && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Progress"></progress>{/if}
+  {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{stopLabel}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}
@@ -352,6 +381,11 @@
   .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .continue{display:grid;grid-template-columns:1fr auto;grid-template-areas:"toggle action" "table table";align-items:center;gap:0 16px;border-top:1px solid var(--border);margin-top:16px;padding-top:14px}.submit{grid-area:action;justify-self:end;display:flex;align-items:center;gap:12px}.waiting{font-size:11px;color:var(--text-dim)}
   .preparing{border:1px solid var(--accent);border-radius:6px;background:var(--surface);padding:22px;margin:24px 0 16px}.preparing h3{margin-bottom:6px}.preparing p{margin:0 0 8px;font-size:12px}
+  .progress-steps{list-style:none;margin:10px 0 12px;padding:0;display:grid;gap:8px}.progress-steps li{display:grid;gap:4px;font-size:12px;color:var(--text-dim);padding-left:18px;position:relative}
+  .progress-steps li::before{content:'';position:absolute;left:0;top:5px;width:8px;height:8px;border-radius:50%;box-sizing:border-box;border:1.5px solid var(--border-strong)}
+  .progress-steps .done{color:var(--text-muted)}.progress-steps .done::before{content:'✓';top:0;border:0;width:auto;height:auto;font-size:11px;color:var(--text-muted)}
+  .progress-steps .current{color:var(--text);font-weight:700}.progress-steps .current::before{border-color:var(--accent);background:var(--accent)}
+  .progress-steps small{font-size:11px;font-weight:400;color:var(--text-dim)}.progress-steps progress{margin:0}
   .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
   .beside{margin:0}.beside .text-action{padding:0}
   progress{width:100%;height:6px;margin:4px 0 12px;border:0;border-radius:3px;background:var(--surface-raised);appearance:none;-webkit-appearance:none}

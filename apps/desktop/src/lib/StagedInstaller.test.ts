@@ -490,6 +490,10 @@ it('says what Review waits for beside the button',async()=>{
   await tick();
   expect(screen.getByText('Planning the changes…')).toBeInTheDocument();
   expect(screen.queryByText('Loading Windows disk tools...')).not.toBeInTheDocument();
+  // Measuring the partition is the long part, so it says so.
+  state.set({...reviewing(null),snapshot:{...reviewing(null).snapshot,stage:'planning',message:'Checking how much C: can shrink. This can take a few minutes.'}});
+  await tick();
+  expect(screen.getByText('Checking how much C: can shrink. This can take a few minutes.')).toBeInTheDocument();
   state.set(reviewing(reviewed()));
   await tick();
   expect(screen.queryByText('Planning the changes…')).not.toBeInTheDocument();
@@ -504,7 +508,7 @@ it('shows preparation progress where the review was',async()=>{
   await tick();
   const panel=screen.getByRole('region',{name:'Preparing the installer'});
   expect(panel).toHaveTextContent('Copying and verifying the installer...');
-  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
+  expect(screen.getByRole('progressbar',{name:'Preparing the installer'})).toHaveAttribute('value',String(2*GiB));
   expect(screen.getAllByRole('button',{name:'Stop preparing'})).toHaveLength(1);
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
 });
@@ -514,7 +518,7 @@ it('keeps progress and Stop on the home screen during preparation',async()=>{
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
   await tick();
   expect(screen.getByText('Copying and verifying the installer...')).toBeInTheDocument();
-  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*GiB));
+  expect(screen.getByRole('progressbar',{name:'Progress'})).toHaveAttribute('value',String(2*GiB));
   expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
   // The installer being prepared isn't one that didn't finish.
   expect(screen.getByRole('heading',{name:'Preparing the installer · Disk 0'})).toBeInTheDocument();
@@ -547,9 +551,39 @@ it('reviews the staging plan in the app before any disk change',async()=>{
 it('shows copy progress and offers to stop only while copying',async()=>{
   state.set({pending:false,snapshot:{status:'running',stage:'copying-installer',message:'Copying and verifying the installer...',bytes:2*1024**3,totalBytes:6*1024**3,cancelAvailable:true,cancelRequested:false,stagedTesting:true}});
   render(StagedInstaller,{sourceReady:true});
-  expect(screen.getByRole('progressbar',{name:'Copying the installer'})).toHaveAttribute('value',String(2*1024**3));
+  expect(screen.getByRole('progressbar',{name:'Progress'})).toHaveAttribute('value',String(2*1024**3));
   await fireEvent.click(screen.getByRole('button',{name:'Stop preparing'}));
   expect(calls.cancel).toHaveBeenCalledOnce();
+});
+it('lists the preparation steps, ticking finished ones and showing the current one',async()=>{
+  const steps=[{id:'verify',label:'Verify the installer image'},{id:'bitlocker',label:'Pause BitLocker on C:'},{id:'shrink',label:'Shrink C:'},{id:'partitions',label:'Create the installer partitions'},{id:'copy',label:'Copy and check the installer'},{id:'startup',label:'Add the startup entry'}];
+  const at=(step:string,extra:Record<string,unknown>={})=>reviewing({...reviewed(),approved:true},{stage:'x',message:'Working...',bytes:0,totalBytes:0,cancelAvailable:false,cancelRequested:false,steps,step,...extra});
+  state.set(at('shrink'));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  const items=()=>[...screen.getByRole('list',{name:'Steps'}).querySelectorAll('li')];
+  expect(items().map(item=>item.className.includes('done'))).toEqual([true,true,false,false,false,false]);
+  expect(items()[2]).toHaveAttribute('aria-current','step');
+  // Shrinking can't be measured: a moving bar and a note.
+  expect(screen.getByRole('progressbar',{name:'Shrink C:'})).not.toHaveAttribute('value');
+  expect(items()[2]).toHaveTextContent('This can take several minutes.');
+  // Copying is counted, so it shows a percentage.
+  state.set(at('copy',{bytes:3*GiB,totalBytes:12*GiB,cancelAvailable:true}));
+  await tick();
+  expect(items()[4]).toHaveTextContent('Copy and check the installer · 25%');
+  expect(screen.getByRole('progressbar',{name:'Copy and check the installer'})).toHaveAttribute('value',String(3*GiB));
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+});
+it('says it finishes the partition being measured when the check is stopped',async()=>{
+  const checking=(cancelRequested:boolean)=>({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,cancelAvailable:true,cancelRequested,stagedIso:{choices:[],blocked:[],disks:[fullDisk],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}});
+  state.set(checking(false));
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Stop checking'}));
+  expect(calls.cancel).toHaveBeenCalledOnce();
+  state.set(checking(true));
+  await tick();
+  expect(screen.getByRole('button',{name:'Stopping after C:…'})).toBeDisabled();
 });
 it('lets the installer be selected again after a restart and restarts to firmware settings',async()=>{
   const op={operationId:'11111111-1111-4111-8111-111111111111',status:'boot-scheduled',diskNumber:0,temporaryBytes:8*1024**3,message:'',restartedSinceScheduled:true};
