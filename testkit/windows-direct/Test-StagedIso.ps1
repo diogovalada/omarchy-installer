@@ -220,9 +220,23 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $found=Get-StagingChoices $release $query
     Assert ($found.choices.Count -eq 0 -and $found.disks[0].regions[0].resizeState -eq 'checked' -and $found.disks[0].regions[0].maximumReleaseBytes -eq 5GB-2MB) 'Insufficient shrink space must retain the measured limit and partition.'
     Assert ($found.disks[0].regions[0].resizeReason -like 'Windows cannot move some files*') 'A Windows shrink limit was blamed on the free-space reserve.'
+    # Stop pressed while C: is measured: the next disk is still read, so C:'s
+    # result is returned rather than lost.
+    $temp=Join-Path $env:TEMP ('omarchy-stop-keep-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); $cancel=Join-Path $temp 'staged-cancel'
+    $other=[pscustomobject]@{Number=1;UniqueId='other';Size=[long]100GB}
+    function Get-Disk { return @($disk,$other) }
+    function Get-StagingDisk($Number,$Identity) { if ($Number -eq 1) { return $other }; return $disk }
+    function Get-InspectedPartitions($Disk) { if ($Disk.Number -eq 0) { return @($part) }; return @() }
+    function Get-PartitionSupportedSize { $script:shrinkCalls++; [IO.File]::WriteAllText($cancel,''); return @{SizeMin=$script:shrinkLimit} }
+    try {
+        $kept=Get-StagingChoices $release $query $cancel
+        Assert ($kept.disks.Count -eq 2 -and $kept.disks[0].regions[0].resizeState -eq 'checked') 'Stop discarded the measurement that had just finished.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
     $query.partitionGuid='44444444-4444-4444-4444-444444444444'
+    function Get-Disk { return $disk }
     Reject { Get-StagingChoices $release $query } 'Resize query accepted a replaced partition.'
-    Assert ($script:shrinkCalls -eq 2) 'Changed partition reached shrink analysis.'
+    Assert ($script:shrinkCalls -eq 3) 'Changed partition reached shrink analysis.'
 }
 
 # One privileged inspection emits the inventory before running the expensive

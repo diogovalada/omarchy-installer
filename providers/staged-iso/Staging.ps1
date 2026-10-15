@@ -90,9 +90,12 @@ function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
     # Reported so the app can explain when to turn it off; staging never needs it off.
     $secureBoot=try { [bool](Confirm-SecureBootUEFI -ErrorAction Stop) } catch { $null }
     $encryptionSnapshot=Get-BitLockerSnapshot -ForStaging
+    $measured=$false
     foreach ($disk in @(Get-Disk)) {
         # Outside the per-disk try: a stop isn't a disk that can't be used.
-        Assert-StagingCheckRunning $CancelPath
+        # Once the requested partition is measured, finish so its result
+        # isn't lost; the caller stops before the next measurement.
+        if (-not $measured) { Assert-StagingCheckRunning $CancelPath }
         $encryption=@()
         try {
             [void](Get-StagingDisk $disk.Number $disk.UniqueId)
@@ -155,7 +158,7 @@ function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
                     if ($null -ne $Resize -and $Resize.diskNumber -eq $disk.Number -and $Resize.diskUniqueId -ceq [string]$disk.UniqueId -and $Resize.partitionNumber -eq $p.PartitionNumber -and [guid]$Resize.partitionGuid -eq [guid]$p.Guid -and $region.resizeState -eq 'unchecked') {
                         Assert-StagingCheckRunning $CancelPath
                         Emit 'progress' 'analyzing-resize' @{cancelAvailable=$Stoppable;message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
-                        $candidate=Get-ShrinkCandidate $p
+                        $candidate=Get-ShrinkCandidate $p; $measured=$true
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
                         $region.reserveBytes=[long]$candidate.reserveBytes
                         $region.limitedByFiles=[bool]$candidate.limitedByFiles
