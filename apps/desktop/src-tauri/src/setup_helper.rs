@@ -332,20 +332,25 @@ mod measurements {
     }
 
     pub(super) fn recall(disk: &str, partition: &str) -> Option<Value> {
+        recall_within(disk, partition, FRESH)
+    }
+    fn recall_within(disk: &str, partition: &str, fresh: Duration) -> Option<Value> {
         let measured = MEASURED.lock().ok()?;
         let m = measured.iter().find(|m| {
-            m.disk == disk && m.partition.eq_ignore_ascii_case(partition) && m.at.elapsed() < FRESH
+            m.disk == disk && m.partition.eq_ignore_ascii_case(partition) && m.at.elapsed() < fresh
         })?;
         Some(json!({"bytes":m.bytes,"offsetBytes":m.offset,"sizeBytes":m.size}))
     }
 
+    // When the entry was taken, for tests (moving Instants back can underflow
+    // on a freshly booted machine).
     #[cfg(test)]
-    fn age(by: Duration) {
-        if let Ok(mut measured) = MEASURED.lock() {
-            for m in measured.iter_mut() {
-                m.at -= by;
-            }
-        }
+    fn measured_at(disk: &str, partition: &str) -> Option<Instant> {
+        let measured = MEASURED.lock().ok()?;
+        measured
+            .iter()
+            .find(|m| m.disk == disk && m.partition.eq_ignore_ascii_case(partition))
+            .map(|m| m.at)
     }
 
     #[cfg(test)]
@@ -379,14 +384,16 @@ mod measurements {
             // A newer measurement of the same partition replaces it.
             remember(&inspection("checked", json!(310)), "second");
             assert_eq!(recall("disk", "guid-c").unwrap()["bytes"], 310);
-            // Too old to reuse; repeated events of the same check don't renew
-            // it, but a new check measuring the same value does.
-            age(FRESH);
-            assert_eq!(recall("disk", "guid-c"), None);
+            // Older than the limit, it isn't reused.
+            assert_eq!(recall_within("disk", "guid-c", Duration::ZERO), None);
+            // Repeated events of the same check don't renew it; a new check
+            // measuring the same value does.
+            let first = measured_at("disk", "guid-c").unwrap();
+            std::thread::sleep(Duration::from_millis(5));
             remember(&inspection("checked", json!(310)), "second");
-            assert_eq!(recall("disk", "guid-c"), None);
+            assert_eq!(measured_at("disk", "guid-c"), Some(first));
             remember(&inspection("checked", json!(310)), "third");
-            assert_eq!(recall("disk", "guid-c").unwrap()["bytes"], 310);
+            assert!(measured_at("disk", "guid-c").unwrap() > first);
             forget();
         }
     }
