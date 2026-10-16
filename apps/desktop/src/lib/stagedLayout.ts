@@ -344,7 +344,7 @@ export function reviewBullets(review:StagedReviewPlan,secureBoot:boolean|null|un
     bullets.push(freeTargetLine(review.largestFreeAfterBytes,review.minimumOmarchyBytes));
   }
   if(review.bitLocker.length) bullets.push(`BitLocker on ${listNames(review.bitLocker)} pauses until you resume it. Files stay encrypted.`);
-  bullets.push(secureBoot ? 'Next: turn off Secure Boot in firmware settings.' : 'Next: set your next restart to open the installer.');
+  bullets.push(secureBoot ? 'Next: turn off Secure Boot in firmware settings. Windows may then ask you to set up your PIN again.' : 'Next: restart into the installer.');
   return bullets;
 }
 

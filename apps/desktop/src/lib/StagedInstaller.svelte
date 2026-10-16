@@ -178,7 +178,7 @@
   // helps. The setup store outlives this screen, so the offer carries from
   // the home screen into the flow.
   $: removalFailed=operations.length>0 && lastAction==='cleanup' && $setup.snapshot?.status==='failed';
-  function operate(op:StagedOperation,action:'arm'|'firmware'|'cleanup'|'again') {
+  function operate(op:StagedOperation,action:'restart'|'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }

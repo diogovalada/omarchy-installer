@@ -38,25 +38,29 @@ pub fn hide(command: &mut Command) {
 pub fn system_powershell() -> Result<std::path::PathBuf, String> {
     #[cfg(windows)]
     {
-        let mut buffer = vec![0_u16; 32768];
-        let size = unsafe {
-            windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW(
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
-            )
-        };
-        if size == 0 || size as usize >= buffer.len() {
-            return Err("Windows system directory is unavailable".into());
-        }
-        return Ok(
-            std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..size as usize]))
-                .join("WindowsPowerShell/v1.0/powershell.exe"),
-        );
+        return Ok(system_directory()?.join("WindowsPowerShell/v1.0/powershell.exe"));
     }
     #[cfg(not(windows))]
     {
         Err("The x86 direct-install provider currently requires Windows".into())
     }
+}
+
+#[cfg(windows)]
+pub fn system_directory() -> Result<std::path::PathBuf, String> {
+    let mut buffer = vec![0_u16; 32768];
+    let size = unsafe {
+        windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW(
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+        )
+    };
+    if size == 0 || size as usize >= buffer.len() {
+        return Err("Windows system directory is unavailable".into());
+    }
+    Ok(std::path::PathBuf::from(String::from_utf16_lossy(
+        &buffer[..size as usize],
+    )))
 }
 
 #[cfg(windows)]

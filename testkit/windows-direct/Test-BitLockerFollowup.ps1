@@ -206,11 +206,40 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
         Assert (-not (Test-StagedInstallerWaiting $summary)) 'A missing summary hid Resume.'
         foreach ($case in @(@{status='staged';waiting=$true},@{status='arming';waiting=$true},@{status='boot-scheduled';waiting=$false},@{status='copying';waiting=$false})) {
             [IO.File]::WriteAllText($summary,(@{operations=@(@{status=$case.status})} | ConvertTo-Json -Depth 4))
-            Assert ((Test-StagedInstallerWaiting $summary) -eq $case.waiting) ('Wrong waiting state for '+$case.status)
+            Assert ((Test-StagedInstallerWaiting $summary 1000) -eq $case.waiting) ('Wrong waiting state for '+$case.status)
         }
+        # Selected for a restart that hasn't happened: still waiting until it does.
+        [IO.File]::WriteAllText($summary,(@{operations=@(@{status='boot-scheduled';scheduledBootUnixSeconds=1000})} | ConvertTo-Json -Depth 4))
+        Assert (Test-StagedInstallerWaiting $summary 1000) 'A pending restart into the installer offered Resume.'
+        Assert (-not (Test-StagedInstallerWaiting $summary 2000)) 'An installer that already started still counted as waiting.'
         [IO.File]::WriteAllText($summary,'not json')
         Assert (-not (Test-StagedInstallerWaiting $summary)) 'An unreadable summary hid Resume.'
     } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
+}
+# A waiting installer points back to the app and hides BitLocker settings;
+# other states keep their choices.
+& {
+    $waiting=Get-FollowupView 'suspended' $true $false 'C:'
+    Assert ($waiting.text -like '*waiting on this PC*open Omarchy Installer.' -and $null -eq $waiting.settings -and $waiting.decline -ceq 'Stop reminders' -and $waiting.declineEnabled) 'A waiting installer did not point back to the app.'
+    $installed=Get-FollowupView 'suspended' $false $true 'C:'
+    Assert ($installed.settings -ceq 'Resume protection' -and $installed.decline -ceq 'Leave suspended' -and $installed.text -like '*suspended on C:*') 'A finished installation lost Resume protection.'
+    Assert ((Get-FollowupView 'suspended' $false $false 'C:').settings -ceq 'Open BitLocker settings') 'A foreign suspension lost BitLocker settings.'
+    Assert ((Get-FollowupView 'ask' $false $false 'C:').decline -ceq 'Keep BitLocker off') 'Asking lost Keep BitLocker off.'
+    $decrypting=Get-FollowupView 'decrypting' $false $false 'C:'
+    Assert (-not $decrypting.declineEnabled -and $decrypting.later -ceq 'Remind me next time') 'Decryption allowed stopping reminders.'
+}
+# The window builds twice in one process under strict mode (the DPI type is
+# added once), starts on the safe button, and tabs left to right.
+& {
+    foreach ($view in @((Get-FollowupView 'suspended' $true $false 'C:'),(Get-FollowupView 'suspended' $false $true 'C:'))) {
+        $window=New-FollowupForm $view
+        try {
+            Assert ($window.form.ActiveControl -eq $window.later -and $window.form.CancelButton -eq $window.later) 'The reminder did not start on Remind me next time.'
+            $order=@(@($window.settings,$window.later,$window.decline) | Where-Object { $_ } | Sort-Object TabIndex | ForEach-Object { $_.Text })
+            $expected=@(@($view.settings,$view.later,$view.decline) | Where-Object { $_ })
+            Assert (($order -join '|') -ceq ($expected -join '|')) 'The reminder buttons were out of order.'
+        } finally { $window.form.Dispose() }
+    }
 }
 # Task Scheduler reads the registered SID back as an account name.
 & {

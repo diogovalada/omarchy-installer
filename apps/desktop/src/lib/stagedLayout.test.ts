@@ -324,7 +324,7 @@ describe('staged review', () => {
       'C: shrinks from 953 to 881.5 GiB. Your files stay.',
       'Omarchy can use 64 GiB. The 7.5 GiB installer is removed later.',
       'BitLocker on C: pauses until you resume it. Files stay encrypted.',
-      'Next: turn off Secure Boot in firmware settings.'
+      'Next: turn off Secure Boot in firmware settings. Windows may then ask you to set up your PIN again.'
     ]);
   });
 
@@ -338,7 +338,7 @@ describe('staged review', () => {
     expect(reviewBullets(replace,false,true)).toEqual([
       'C: shrinks from 953 to 881.5 GiB. Your files stay.',
       'Adds a 7.5 GiB temporary installer. In the installer, delete Windows to make room.',
-      'Next: set your next restart to open the installer.'
+      'Next: restart into the installer.'
     ]);
     expect(reviewBullets({...replace,shrink:{...replace.shrink!,label:'D:'}},null,false)[1]).toBe('Adds a 7.5 GiB temporary installer. In the installer, delete D: to make room.');
     const free={...replace,targetKind:'free' as const,shrink:null,largestFreeAfterBytes:112*GiB};

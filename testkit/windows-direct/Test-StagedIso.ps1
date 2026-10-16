@@ -68,7 +68,9 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
     $valid=[guid]::NewGuid().ToString(); $missing=[guid]::NewGuid().ToString(); $invalid=[guid]::NewGuid().ToString()
     try {
         foreach ($id in @($valid,$missing,$invalid)) { [void][IO.Directory]::CreateDirectory((Join-Path $recordsRoot $id)) }
-        $record=@{schema=1;operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=40GB;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB})}
+        # Replacing Windows, so the app's summary names it for the installer.
+        $windowsLetter=([IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))).Substring(0,1)
+        $record=@{schema=1;operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=0;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB});targetKind='shrink';shrink=@{driveLetter=$windowsLetter;partitionNumber=3}}
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$valid/state.json"),($record | ConvertTo-Json -Depth 5))
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$invalid/state.json"),'{')
         $status=Get-StagingStatus (ConvertFrom-Json '{}')
@@ -79,6 +81,7 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
         Write-StagingSummary
         $index=Read-Json (Join-Path $recordsRoot 'summary.json')
         Assert ($index.operations.Count -eq 1 -and $index.recordErrors.Count -eq 2) 'Passive summary omitted pending work.'
+        Assert ($index.operations[0].replaces -ceq 'Windows') 'The app summary lost the partition to delete in the installer.'
         $acl=Get-Acl -LiteralPath (Join-Path $recordsRoot 'summary.json')
         $readers=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
         Assert ($readers.Count -eq 1 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -eq 0) 'Discovery summary must grant users read access only.'
@@ -476,12 +479,34 @@ try {
     function Get-OwnedStagingPartition { return [pscustomobject]@{DiskNumber=0} }
     function Assert-StagingEncryption { }
     function Confirm-SecureBootUEFI { return $true }
+    # The app keeps its reopen entry once `restarting` is reported, so it
+    # comes before shutdown.exe, and never when nothing restarts.
+    function Emit($Type,$Stage,$Fields) { $script:events+=,@($Stage,$script:shutdownCalls) }
     function Start-Process { $script:shutdownCalls++; return [pscustomobject]@{ExitCode=$script:exitCodes[$script:shutdownCalls-1]} }
     $state=[pscustomobject]@{operationId='firmware';status='staged';partitions=@(@{})}
     foreach ($case in @(@{codes=@(203,0);calls=2;ok=$true},@{codes=@(0);calls=1;ok=$true},@{codes=@(203,203);calls=2;ok=$false},@{codes=@(5);calls=1;ok=$false})) {
-        $script:exitCodes=$case.codes; $script:shutdownCalls=0; $ok=$true
+        $script:exitCodes=$case.codes; $script:shutdownCalls=0; $script:events=@(); $ok=$true
         try { [void](Invoke-StagingFirmware $state) } catch { $ok=$false }
         Assert ($ok -eq $case.ok -and $script:shutdownCalls -eq $case.calls) "Firmware restart with exit codes $($case.codes -join ',') was handled incorrectly."
+        Assert ($script:events.Count -eq 1 -and $script:events[0][0] -eq 'restarting' -and $script:events[0][1] -eq 0) 'The restarting stage was not reported before shutdown.exe.'
     }
+    function Confirm-SecureBootUEFI { return $false }
+    $script:events=@(); $script:shutdownCalls=0
+    $off=Invoke-StagingFirmware $state
+    Assert ($off.secureBoot -eq $false -and $script:events.Count -eq 0 -and $script:shutdownCalls -eq 0) 'Secure Boot already off reported a restart.'
+}
+# The summary names the partition to delete in the installer only for a
+# shrink that left no space for Omarchy.
+& {
+    $windowsLetter=([IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))).Substring(0,1)
+    $record={ param($kind,$linux,$letter) [pscustomobject]@{operationId='o';status='staged';diskUniqueId='d';diskNumber=0;linuxOffsetBytes=0;linuxBytes=[long]$linux;message='';partitions=@(@{},@{sizeBytes=[long]8GB});targetKind=$kind;shrink=$(if ($kind -eq 'shrink') { [pscustomobject]@{driveLetter=$letter;partitionNumber=3} } else { $null })} }
+    Assert ($null -eq (Get-StagingSummary (& $record 'free' 0 '')).replaces) 'A free-space installer asked to delete a partition.'
+    Assert ($null -eq (Get-StagingSummary (& $record 'shrink' 64GB $windowsLetter)).replaces) 'Keeping Windows asked to delete it.'
+    Assert ((Get-StagingSummary (& $record 'shrink' 0 $windowsLetter)).replaces -ceq 'Windows') 'Replacing Windows did not name it.'
+    $other=if ($windowsLetter -ieq 'D') { 'E' } else { 'D' }
+    Assert ((Get-StagingSummary (& $record 'shrink' 0 $other)).replaces -ceq ($other+':')) 'Replacing a data partition did not name its drive.'
+    Assert ((Get-StagingSummary (& $record 'shrink' 0 '')).replaces -ceq 'Partition 3') 'A partition without a letter was not named.'
+    $old=& $record 'free' 0 ''; $old.PSObject.Properties.Remove('targetKind')
+    Assert ($null -eq (Get-StagingSummary $old).replaces) 'An older record without a target kind asked to delete a partition.'
 }
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'

@@ -48,6 +48,17 @@ downloads. Published versions and their artifacts are immutable.
   also says how much keeping Windows needs; removing the temporary installer
   reads plainly, shows as under way only once confirmed, and reminds you to
   resume BitLocker if it's still paused.
+- Install without USB (testing builds): the Secure Boot step says where to find
+  the setting, to leave TPM on, how to save, that Windows starts again, and
+  that Windows may ask you to set up your PIN again (Review warns too). The app
+  reopens after sign-in, and **Restart into the installer** sets the next
+  restart and restarts in one step, also after **Set for next restart only**.
+  The installer instruction names the partition to delete only when replacing
+  it. The BitLocker reminder is sharp on scaled displays, fits its text, and
+  points back to the app while an installer waits, including one set for a
+  restart that hasn't happened.
+- USB: the steps after writing say the installer can't use a disk with
+  BitLocker on it, even paused.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

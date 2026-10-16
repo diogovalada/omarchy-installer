@@ -287,6 +287,7 @@ function Write-StagingSummary {
     $summary=@{operations=@($status.operations | Where-Object { $_.status -ne 'cleaned' } | ForEach-Object {
         $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
         if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
+        if ($_.ContainsKey('replaces') -and $_.replaces) { $operation.replaces=$_.replaces }
         $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'
@@ -523,7 +524,18 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
 function Get-StagingSummary($State) {
     $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
     if ($State.status -eq 'boot-scheduled' -and $State.PSObject.Properties['scheduledBootUnixSeconds']) { $summary.scheduledBootUnixSeconds=[long]$State.scheduledBootUnixSeconds }
+    $summary.replaces=Get-StagingReplacedName $State
     return $summary
+}
+# The partition the installer must delete to make room: only a shrink that
+# left no space for Omarchy (Replace Windows), named as Review names it.
+function Get-StagingReplacedName($State) {
+    if (-not $State.PSObject.Properties['targetKind'] -or $State.targetKind -ne 'shrink' -or [long]$State.linuxBytes -ne 0 -or $null -eq $State.shrink) { return $null }
+    $letter=[string]$State.shrink.driveLetter
+    if (-not $letter) { return 'Partition '+$State.shrink.partitionNumber }
+    $windows=[IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))
+    if (($letter+':\') -ieq $windows) { return 'Windows' }
+    return $letter+':'
 }
 function Set-TestingBootPaths($Release,$Files) {
     if (-not $script:testingBuild) { throw 'Unqualified ISO staging requires a testing build.' }
@@ -544,7 +556,8 @@ function Invoke-StagingArm($State) {
     Assert-StagingEncryption $disk
     [void](Get-StagingDisk $disk $State.diskUniqueId)
     if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot is on. Use Restart to firmware settings to turn it off; BitLocker is suspended, so this does not need your recovery key.' }
-    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
+    # Selecting it again before the restart: its own pending one-time boot is fine.
+    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot([Convert]::ToInt32($State.boot.name.Substring(4),16))
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }
     $efi=Get-OwnedStagingPartition $State $State.partitions[0]
     if ([Convert]::ToBase64String([Omarchy.DirectX86.NativeDisk]::StagingBootOption($efi.PartitionNumber,$efi.Offset,[guid]$efi.Guid)) -cne $State.boot.option) { throw 'The temporary firmware target no longer matches its partition.' }
@@ -584,6 +597,8 @@ function Invoke-StagingFirmware($State) {
     if (-not (Confirm-SecureBootUEFI -ErrorAction Stop)) {
         return @{operationId=$State.operationId;status=$State.status;secureBoot=$false;message='Secure Boot is already off. Select the installer for the next restart.'}
     }
+    # The app keeps its reopen-at-sign-in entry once this stage is reported.
+    Emit 'progress' 'restarting' @{message='Restarting into firmware settings...'}
     $shutdown=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/shutdown.exe'
     # When the OsIndications variable does not exist yet, shutdown.exe creates
     # it but exits with 203 without restarting; the second attempt restarts.
