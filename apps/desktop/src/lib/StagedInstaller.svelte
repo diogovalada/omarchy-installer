@@ -10,6 +10,10 @@
   export let recoveryOnly=false;
   export let close:()=>void=()=>{};
   export let sourceReady=false;
+  // The chosen image's identity, known before it finishes downloading; a disk
+  // check needs only that, Review needs the downloaded image.
+  export let image='';
+  $: imageKnown=sourceReady || !!image;
   export let prepareAgain:()=>void=()=>{};
   // Opens the USB installer instead, when no space can be used here.
   export let useUsb:(()=>void)|null=null;
@@ -29,21 +33,38 @@
   $: busy=$setup.pending || setupActive($setup.snapshot?.status);
   $: result=$setup.snapshot?.stagedIso;
   $: error=$setup.error ?? $setup.snapshot?.error;
+  // The check started in the background at launch. Its results stand in
+  // until the user runs a check of their own; while it runs, partitions it
+  // hasn't measured show as being checked, and any action stops it first.
+  // Results for another image don't count: its size sets the space needed.
+  $: check=!image || $setup.snapshot?.stagedCheck?.identity===image ? $setup.snapshot?.stagedCheck : null;
+  $: background=check?.status==='running' || check?.status==='stopping';
+  $: checking=busy || background;
+  // A check run by hand counts only for the image it ran for, recorded on
+  // its result, so it holds after Review and after reopening the screen.
+  $: own=busy || !image || !result?.disks || result.image===image ? result : null;
+  $: scan=own?.disks || busy ? own : (check?.result ?? own);
+  // Choosing another image drops what is shown: its size sets the space needed.
+  let shownImage=image;
+  $: if(image!==shownImage) { shownImage=image; inspection=undefined; handledInspection=''; heldDefault=''; analyzing=null; chosenSegment=''; chosenSource=''; }
   $: browsing=!busy || ($setup.snapshot?.status==='running' && ['inspecting','analyzing-resize'].includes($setup.snapshot?.stage) && !!result?.disks);
   $: if(!result && busy) handledInspection='';
   // The elevated check sends an initial layout, then updated resize limits.
   // Polling can return a new object every second; apply each version once.
-  $: if(result?.disks && !error) {
-    const signature=JSON.stringify({disks:result.disks,choices:result.choices,blocked:result.blocked,secureBoot:result.secureBoot});
+  $: if(scan?.disks && !error) {
+    const signature=JSON.stringify({disks:scan.disks,choices:scan.choices,blocked:scan.blocked,secureBoot:scan.secureBoot});
     if(signature!==handledInspection) {
       handledInspection=signature;
-      inspection=analyzing && !busy && inspection ? mergeInspection(inspection,result,analyzing) : result;
+      inspection=analyzing && !busy && inspection ? mergeInspection(inspection,scan,analyzing) : scan;
       analyzing=null;
     }
-  } else if(result?.choices && !result.disks && !busy && !error) {
-    const signature=JSON.stringify({choices:result.choices,blocked:result.blocked,secureBoot:result.secureBoot});
-    if(signature!==handledInspection) { handledInspection=signature; inspection=result; }
+  } else if(scan?.choices && !scan.disks && !busy && !error) {
+    const signature=JSON.stringify({choices:scan.choices,blocked:scan.blocked,secureBoot:scan.secureBoot});
+    if(signature!==handledInspection) { handledInspection=signature; inspection=scan; }
   }
+  // A background check stopped for another action picks up again here.
+  let resumed=false;
+  $: if(!recoveryOnly && !resumed && check?.status==='stopped' && !busy && !own?.disks) { resumed=true; void setup.backgroundCheck(); }
   $: if(error && analyzing) analyzing=null;
   $: disks=Array.from(new Map([
     ...(inspection?.choices ?? []).map(c=>[c.diskUniqueId,{id:c.diskUniqueId,number:c.diskNumber,size:c.diskSizeBytes,blocked:undefined as StagedBlockedDisk|undefined}] as const),
@@ -58,7 +79,7 @@
   $: installMinimum=inspection?.minimumLinuxBytes ?? 32*GiB;
   $: spaces=(inspection?.choices ?? []).filter(c=>c.diskUniqueId===selectedDisk && !disk?.blocked);
   $: segments=layout ? overviewSegments(layout,{barPx:mapWidth || 760}) : [];
-  $: statuses=Object.fromEntries(segments.map(s=>[s.key,statusFor(s.regions,spaces,busy,analyzing,requiredBytes,installMinimum)])) as Record<string,RegionStatus>;
+  $: statuses=Object.fromEntries(segments.map(s=>[s.key,statusFor(s.regions,spaces,checking,analyzing,requiredBytes,installMinimum)])) as Record<string,RegionStatus>;
   $: autoRegion=layout ? defaultRegion(layout,spaces,requiredBytes,installMinimum) : undefined;
   // Once a usable default is shown, it stays while it is usable, so a later
   // measurement doesn't move the selection; measurements take minutes.
@@ -70,10 +91,10 @@
   $: usableCount=layout ? layout.regions.filter(r=>choiceFor(r,spaces)).length : 0;
   // With no usable space, help fits what blocks the default partition
   // (usually Windows): files it can't move, or a failed measurement.
-  $: blockCause=!choice && shownDefault ? statusFor([shownDefault],spaces,busy,analyzing,requiredBytes,installMinimum).cause : undefined;
+  $: blockCause=!choice && shownDefault ? statusFor([shownDefault],spaces,checking,analyzing,requiredBytes,installMinimum).cause : undefined;
   $: blockName=shownDefault?.label ?? '';
   // Review waits for the disk check; say which partition it waits for.
-  $: waitingFor=busy && browsing ? (inspection?.disks ?? []).flatMap(d=>d.regions).find(r=>analyzing ? r.partitionGuid===analyzing.partitionGuid : r.kind==='partition' && r.resizeState==='unchecked')?.label ?? '' : '';
+  $: waitingFor=checking && browsing ? (inspection?.disks ?? []).flatMap(d=>d.regions).find(r=>analyzing ? r.partitionGuid===analyzing.partitionGuid : r.kind==='partition' && r.resizeState==='unchecked')?.label ?? '' : '';
   // Without a layout (an older provider), use the first choice as before.
   $: choice=layout ? (sourceRegion ? choiceFor(sourceRegion,spaces) : undefined) : spaces[0];
   // Shrinking can also leave room for Omarchy after the temporary installer,
@@ -83,9 +104,9 @@
   $: ({minGiB:minimumGiB,maxGiB:keepMaximumGiB,canKeep}=limits(shrinkRegion,requiredBytes,installMinimum));
   $: if(canKeep && (omarchyGiB>keepMaximumGiB || omarchyGiB<minimumGiB)) omarchyGiB=Math.min(Math.max(omarchyGiB,minimumGiB),keepMaximumGiB);
   $: linuxBytes=canKeep && keepWindows ? omarchyGiB*GiB : 0;
-  $: checkingAny=busy && (!!analyzing || !!layout?.regions.some(r=>r.resizeState==='unchecked'));
+  $: checkingAny=checking && (!!analyzing || !!layout?.regions.some(r=>r.resizeState==='unchecked'));
   $: tableStatus=(region:StagedRegion) => {
-    const status=statusFor([region],spaces,busy,analyzing,requiredBytes,installMinimum);
+    const status=statusFor([region],spaces,checking,analyzing,requiredBytes,installMinimum);
     return status.detail ? `${status.text} ${status.detail}` : status.text;
   };
   // The map and the selected-partition line show disk-check progress, so the
@@ -223,7 +244,7 @@
   }
   const single=(segment:OverviewSegment|undefined) => segment?.regions.length===1 ? segment.regions[0] : undefined;
   function analyze(region:StagedRegion) {
-    if(!disk || !layout || busy || !testing || !sourceReady || !region.partitionNumber || !region.partitionGuid) return;
+    if(!disk || !layout || busy || !testing || !imageKnown || !region.partitionNumber || !region.partitionGuid) return;
     const query={diskNumber:disk.number,diskUniqueId:disk.id,partitionNumber:region.partitionNumber,partitionGuid:region.partitionGuid};
     analyzing=query;
     void setup.stagedIso('inspect',null,null,query);
@@ -286,34 +307,34 @@
     {:else if operations.length && !checkingBeside}
       <!-- The recorded installer's steps below stand in for the choose screen. -->
     {:else if !inspection}
-      {#if reading && busy}
+      {#if (reading && busy) || (background && !check?.result)}
         <div class="map-placeholder" aria-hidden="true"></div>
         <p class="line">Reading disks…</p>
       {:else}
         <div class="start">
-          <button class="primary" disabled={busy || !testing || !sourceReady} onclick={inspect}><HardDrive size={16}/>Check available space</button>
-          <p>{!sourceReady ? 'Download the image above first.' : $setup.snapshot?.admin==='ready' ? 'Nothing is changed.' : 'Windows will ask for administrator access. Nothing is changed.'}</p>
+          <button class="primary" disabled={busy || !testing || !imageKnown} onclick={inspect}><HardDrive size={16}/>Check available space</button>
+          <p>{!imageKnown ? 'Download the image above first.' : $setup.snapshot?.admin==='ready' ? 'Nothing is changed.' : 'Windows will ask for administrator access. Nothing is changed.'}</p>
         </div>
       {/if}
     {:else}
       <div class="disk-row" data-measure-start>
         {#if !disks.length}<p class="empty">No internal disks found. Check Disk Management, then refresh.</p>
         {:else if disks.length===1}<h3>{diskName(disks[0])}</h3>
-        {:else}<div class="disks" role="group" aria-label="Disks">{#each disks as item (item.id)}<button class="disk" class:selected={selectedDisk===item.id} aria-pressed={selectedDisk===item.id} disabled={!sourceReady || !browsing} onclick={()=>selectDisk(item.id)}>{diskName(item)}</button>{/each}</div>{/if}
+        {:else}<div class="disks" role="group" aria-label="Disks">{#each disks as item (item.id)}<button class="disk" class:selected={selectedDisk===item.id} aria-pressed={selectedDisk===item.id} disabled={!browsing} onclick={()=>selectDisk(item.id)}>{diskName(item)}</button>{/each}</div>{/if}
         {#if usableCount>1 && !disk?.blocked}<span class="hint">Select where the space comes from.</span>{/if}
-        <button class="refresh" disabled={busy || !sourceReady || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
+        <button class="refresh" disabled={busy || !imageKnown || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
       </div>
       {#if disk?.blocked}
         <p class="blocked">{disk.blocked.reason}</p>
       {:else if layout}
-        <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} disabled={!sourceReady || !(browsing || analyzing)} bind:width={mapWidth}/>
+        <StagedDiskMap label={`Partitions on Disk ${layout.diskNumber}`} {segments} {statuses} selected={selectedSegment?.key ?? ''} source={sourceRegion ? regionKey(sourceRegion) : ''} select={selectSegment} disabled={!(browsing || analyzing)} bind:width={mapWidth}/>
         {#if selectedSegment}
           {@const status=statuses[selectedSegment.key]}
           {@const region=single(selectedSegment)}
           <p class="line">{status?.text}
             {#if sourceRegion && region!==sourceRegion}<span class="source-note">Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</span>{/if}
-            {#if status?.action==='recheck' && region}<button class="text-action" aria-label={`Recheck ${region.label}`} disabled={busy || !testing || !sourceReady} onclick={()=>analyze(region)}>Recheck</button>
-            {:else if status?.action==='refresh'}<button class="text-action" aria-label="Refresh disks" disabled={busy || !testing || !sourceReady} onclick={inspect}>Refresh</button>{/if}
+            {#if status?.action==='recheck' && region}<button class="text-action" aria-label={`Recheck ${region.label}`} disabled={busy || !testing || !imageKnown} onclick={()=>analyze(region)}>Recheck</button>
+            {:else if status?.action==='refresh'}<button class="text-action" aria-label="Refresh disks" disabled={busy || !testing || !imageKnown} onclick={inspect}>Refresh</button>{/if}
           </p>
         {/if}
       {/if}
@@ -338,7 +359,7 @@
         {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
-          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">{planningMessage}</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
+          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">{planningMessage}</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{:else if !sourceReady}<span class="waiting">Download the image above first.</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
         </div>
       {/if}
     {/if}

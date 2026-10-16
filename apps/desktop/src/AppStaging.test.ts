@@ -13,7 +13,7 @@ vi.mock('./lib/downloads', async importOriginal => {
 vi.mock('./lib/setup', async importOriginal => {
   const actual = await importOriginal<typeof import('./lib/setup')>();
   const { writable } = await import('svelte/store');
-  return { ...actual, setup:{ ...writable({ pending:false, snapshot:null }), refresh:vi.fn(), stagedIso:vi.fn(), startAdminSession:vi.fn() } };
+  return { ...actual, setup:{ ...writable({ pending:false, snapshot:null }), refresh:vi.fn(), stagedIso:vi.fn(), startAdminSession:vi.fn(), backgroundCheck:vi.fn() } };
 });
 const state = setup as typeof setup & { set:(value:unknown)=>void };
 beforeEach(()=>{ vi.clearAllMocks(); state.set({pending:false,snapshot:{status:'idle',stagedTesting:false}}); });
@@ -24,6 +24,34 @@ it('asks for administrator access once at launch and says why while asking',asyn
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:false,admin:'asking'}});
   await import('svelte').then(({tick})=>tick());
   expect(screen.getByText('Omarchy Installer needs administrator access to check your disks and prepare installers.')).toHaveAttribute('role','status');
+});
+it('checks disks in the background once access is granted and the image is known',async()=>{
+  const { downloads } = await import('./lib/downloads');
+  const files = downloads as typeof downloads & { set:(value:unknown)=>void };
+  const tick = () => import('svelte').then(({tick})=>tick());
+  files.set({pending:false,error:null,snapshot:{status:'idle',host_os:'windows',host_architecture:'x86_64',release:{version:'v',file_name:'omarchy.iso',length:1,sha256:'iso'},destination_directory:'C:/Downloads',image_path:null}});
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'asking'}});
+  render(App);
+  expect(setup.backgroundCheck).not.toHaveBeenCalled();
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready'}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledOnce();
+  // Once per image.
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',message:'x'}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledOnce();
+  // A check running for another image is asked to stop, then this one starts
+  // once it has.
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'running',identity:'official',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(2);
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'stopped',identity:'official',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(3);
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'running',identity:'iso',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(3);
+  files.set({pending:false,error:null,snapshot:{status:'idle',host_os:'windows',host_architecture:'x86_64',release:null,destination_directory:'C:/Downloads',image_path:null}});
 });
 it('keeps normal native builds closed with no empty recovery section',()=>{
   render(App);

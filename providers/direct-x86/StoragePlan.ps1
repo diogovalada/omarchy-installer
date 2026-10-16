@@ -10,7 +10,10 @@ function Get-InspectedPartitions($Disk) {
     if ($partitions.Count -ne [int]$Disk.NumberOfPartitions) { Fail 'partition_inventory_changed' 'The partition inventory changed or is incomplete. Refresh disks and retry.' }
     return $partitions
 }
-function Get-ShrinkCandidate($Partition) {
+# $KnownSizeMin: Windows' shrink minimum measured moments ago by the same
+# helper, so the slow measurement is skipped; every other check still runs
+# against the partition's current state.
+function Get-ShrinkCandidate($Partition,[long]$KnownSizeMin=0) {
     $limitedByFiles=$false; $filesRelease=$null
     $issues=New-Object 'Collections.Generic.List[string]'
     $sizeMin=[long]0; $reserve=[long]0; $minimum=[long]$Partition.Size; $maximum=[long]0; $volumeId=''; $letter=''; $fs=''; $free=[long]0
@@ -24,8 +27,7 @@ function Get-ShrinkCandidate($Partition) {
         if ([long]$Partition.Offset % 1048576 -ne 0) { throw 'NTFS partition start is not MiB aligned.' }
         # This supported sizing analysis can start Windows Optimize Drives;
         # it does not resize or move the partition. Do not invoke in static QA.
-        $supported=Get-PartitionSupportedSize -DiskNumber $Partition.DiskNumber -PartitionNumber $Partition.PartitionNumber -ErrorAction Stop
-        $sizeMin=[long]$supported.SizeMin
+        $sizeMin=if ($KnownSizeMin -gt 0) { $KnownSizeMin } else { [long](Get-PartitionSupportedSize -DiskNumber $Partition.DiskNumber -PartitionNumber $Partition.PartitionNumber -ErrorAction Stop).SizeMin }
         if ($sizeMin -le 0 -or $sizeMin -gt [long]$Partition.Size) { throw 'Windows returned unsupported NTFS shrink limits.' }
         $reserve=Align-Up ([long][Math]::Max(20GB,[decimal]$volume.Size/10))
         $used=[long]$volume.Size-$free
@@ -139,11 +141,13 @@ function Select-Allocation($Probe,$Request) {
     if ($newSize -lt [long]$c.minimumSizeBytes) { Fail 'shrink_too_large' 'Selected size would violate the Windows reserve.' }
     return [ordered]@{disk=$disk;startOffsetBytes=$start;delete=$null;shrink=[ordered]@{partitionNumber=$c.partitionNumber;partitionGuid=$c.partitionGuid;volumeId=$c.volumeId;driveLetter=$c.driveLetter;offsetBytes=$c.offsetBytes;beforeSizeBytes=$c.sizeBytes;afterSizeBytes=$newSize;shrinkBytes=([long]$c.sizeBytes-$newSize);reserveBytes=$c.reserveBytes;minimumSizeBytes=$c.minimumSizeBytes;freedOffsetBytes=$start;allocationBytes=[long]$Request.allocationBytes}}
 }
-function Invoke-ConfirmedShrink($Plan,[string]$Directory) {
+# Staging passes the minimum it measured just before pausing BitLocker;
+# direct-x86 passes nothing and measures here, as before.
+function Invoke-ConfirmedShrink($Plan,[string]$Directory,[long]$KnownSizeMin=0) {
     $s=$Plan.shrink
     $partition=Get-Partition -DiskNumber $Plan.diskNumber -PartitionNumber $s.partitionNumber -ErrorAction Stop
     if ([string]$partition.Guid -cne $s.partitionGuid -or [long]$partition.Offset -ne $s.offsetBytes -or [long]$partition.Size -ne $s.beforeSizeBytes) { Fail 'shrink_target_changed' 'The confirmed NTFS partition changed before resizing.' }
-    $candidate=Get-ShrinkCandidate $partition
+    $candidate=Get-ShrinkCandidate $partition $KnownSizeMin
     if (-not $candidate.eligible -or $candidate.volumeId -ine $s.volumeId -or [long]$s.afterSizeBytes -lt $candidate.minimumSizeBytes -or $s.freedOffsetBytes -ne $s.offsetBytes+$s.afterSizeBytes) { Fail 'shrink_limit_changed' 'Windows volume identity, shrink limits or free-space reserve changed after confirmation.' }
     [byte[]]$before=[Omarchy.DirectX86.NativeDisk]::ReadLayout($Plan.diskNumber)
     if ([Omarchy.DirectX86.NativeDisk]::Hash($before) -ne $Plan.layoutSha256) { Fail 'target_changed' 'GPT layout changed before the confirmed shrink.' }

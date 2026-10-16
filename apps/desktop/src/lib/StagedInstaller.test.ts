@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StagedInstaller from './StagedInstaller.svelte';
 import { setup } from './setup';
-const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn()}));
+const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn(),backgroundCheck:vi.fn()}));
 vi.mock('./setup',async importOriginal=>{
   const actual=await importOriginal<typeof import('./setup')>();
   const {writable}=await import('svelte/store');
@@ -568,6 +568,70 @@ it('shows copy progress and offers to stop only while copying',async()=>{
   expect(screen.getByRole('progressbar',{name:'Progress'})).toHaveAttribute('value',String(2*1024**3));
   await fireEvent.click(screen.getByRole('button',{name:'Stop preparing'}));
   expect(calls.cancel).toHaveBeenCalledOnce();
+});
+it('shows the background check before the download, and Review waits for the image',async()=>{
+  const background=(status:string,regions:unknown[])=>({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status,message:'',identity:'iso',result:{choices:status==='done' ? [encrypted] : [],blocked:[],disks:[{...fullDisk,regions}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}});
+  // Still measuring C:, before the image is downloaded.
+  state.set(background('running',[fullDisk.regions[0]]));
+  render(StagedInstaller,{sourceReady:false});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Check available space'})).not.toBeInTheDocument();
+  expect(screen.getAllByText('Checking how much C: can shrink. This can take a few minutes.').length).toBeGreaterThan(0);
+  // Measured: the space can be chosen, but Review needs the image.
+  state.set(background('done',[checkedC]));
+  await tick();
+  expect(screen.getByText('Download the image above first.')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
+});
+it('drops results already shown when another image is chosen, including a check run by hand',async()=>{
+  const checked=(identity:string)=>({status:'done',message:'',identity,result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}});
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:checked('official')}});
+  const view=render(StagedInstaller,{sourceReady:true,image:'official'});
+  await tick();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeInTheDocument();
+  await view.rerender({sourceReady:false,image:'local'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  // A check run by hand holds for its image, also after reopening the
+  // screen, and not for another image.
+  // Then Review was declined: the target now describes that, not the check.
+  const byHand={pending:false,snapshot:{...measured().snapshot,status:'cancelled',message:'Nothing was changed.',stagedTarget:{action:'stage',operationId:null},stagedIso:{...measured().snapshot.stagedIso,image:'official'},stagedCheck:{...checked('official'),status:'stopped',result:null}}};
+  state.set(byHand);
+  view.unmount();
+  const reopened=render(StagedInstaller,{sourceReady:true,image:'official'});
+  await tick();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeInTheDocument();
+  expect(calls.backgroundCheck).not.toHaveBeenCalled();
+  await reopened.rerender({sourceReady:false,image:'other'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+});
+it('uses only a check of the chosen image, and checks by hand before the download',async()=>{
+  const snapshot={pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'done',message:'',identity:'official',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}};
+  state.set(snapshot);
+  // Another image's results set the wrong space needed: not shown.
+  render(StagedInstaller,{sourceReady:false,image:'local'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  // The image is known though not downloaded: checking by hand works.
+  expect(screen.getByRole('button',{name:'Check available space'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
+});
+it('lets a measured partition go to Review while the background check goes on',async()=>{
+  const data={kind:'partition',partitionNumber:5,partitionGuid:'data',offsetBytes:501*GiB,sizeBytes:400*GiB,label:'D:',fileSystem:'NTFS',freeBytes:300*GiB,resizeState:'unchecked',isWindows:false};
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'running',message:'',identity:'iso',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,diskSizeBytes:1000*GiB,regions:[checkedC,data]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',expect.objectContaining({diskUniqueId:'windows-disk'}));
+});
+it('picks a stopped background check up again when the screen opens',async()=>{
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'stopped',message:'',identity:'iso',result:null}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(calls.backgroundCheck).toHaveBeenCalledOnce();
 });
 it('lists the preparation steps, ticking finished ones and showing the current one',async()=>{
   const steps=[{id:'verify',label:'Verify the installer image'},{id:'bitlocker',label:'Pause BitLocker on C:'},{id:'shrink',label:'Shrink C:'},{id:'partitions',label:'Create the installer partitions'},{id:'copy',label:'Copy and check the installer'},{id:'startup',label:'Add the startup entry'}];

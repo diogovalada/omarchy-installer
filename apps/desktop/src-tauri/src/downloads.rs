@@ -209,6 +209,11 @@ impl Downloads {
             inner.snapshot.error = None;
         }
     }
+    /// The image's identity, known before downloading for an official release
+    /// and after selection for a local test image.
+    pub(crate) fn release(&self) -> Option<ImageRelease> {
+        self.inner.lock().ok()?.snapshot.release.clone()
+    }
     pub(crate) fn verified_source(&self) -> Result<(PathBuf, ImageRelease), String> {
         let inner = self
             .inner

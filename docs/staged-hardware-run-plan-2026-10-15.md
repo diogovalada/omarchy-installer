@@ -567,6 +567,25 @@ Implemented as planned, with these details:
 - "Check available space" drops "Windows will ask for administrator
   access" once the session is ready.
 
+## PR 4 notes (2026-10-16)
+
+Implemented as planned, with these details:
+
+- The inspection reports Windows' raw minimum (`windowsMinimumBytes`); the
+  helper records when it first saw each measurement rather than the provider
+  stamping it.
+- The background check never prompts: it runs only on an existing, live
+  session, and does nothing while an operation holds it. It is skipped while a
+  temporary installer exists, since the installer's steps replace the choose
+  screen.
+- A user-started check (Check available space, Refresh) also works before the
+  download finishes, from the image's identity.
+- The preflight lives in `Get-StagingShrinkPreflight`, so its "fails before
+  anything changes" rule is tested directly; a source-order test keeps it
+  ahead of the BitLocker pause.
+- Windows' disk and partition are measured first with an explicit split, since
+  Windows PowerShell's `Sort-Object` isn't stable.
+
 ## Not doing
 
 - **Running the whole app as administrator:** see Decisions.

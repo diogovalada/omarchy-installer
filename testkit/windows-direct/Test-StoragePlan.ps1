@@ -133,5 +133,12 @@ Reject { Select-Allocation $planProbe $request } 'A changed disk identity was ac
  $script:shrinkSizeMin=[long]50GB
  $candidate=Get-ShrinkCandidate $shrinkPart
  Assert ($candidate.eligible -and $candidate.maximumAllocationBytes -eq 80GB) 'An unconstrained shrink lost its measured limit.'
+ # A minimum measured moments ago skips Windows' measurement and gives the same
+ # result; without one (direct-x86), it still measures.
+ function Get-PartitionSupportedSize { $script:measures++; return @{SizeMin=$script:shrinkSizeMin} }
+ $script:measures=0
+ $measured=Get-ShrinkCandidate $shrinkPart
+ $known=Get-ShrinkCandidate $shrinkPart ([long]$script:shrinkSizeMin)
+ Assert ($script:measures -eq 1 -and $known.eligible -eq $measured.eligible -and $known.maximumAllocationBytes -eq $measured.maximumAllocationBytes -and $known.windowsMinimumSizeBytes -eq 50GB) 'A supplied minimum measured again or changed the result.'
 }
 Write-Output 'Passed blank-disk, failed-inventory, protected-environment, exact allocation and shrink-limit regressions; all host boundaries mocked.'

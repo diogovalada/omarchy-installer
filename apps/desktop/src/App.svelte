@@ -22,6 +22,16 @@
   $: testingDirect = downloads.native && $setup.snapshot?.stagedTesting === true && $downloads.snapshot?.host_os === 'windows' && $downloads.snapshot?.host_architecture === 'x86_64';
   $: sourceReady = $downloads.snapshot?.status === 'complete' && !!$downloads.snapshot.image_path;
   $: if (!option && setupActive($setup.snapshot?.status)) option=$setup.snapshot?.kind ?? null;
+  // Once administrator access is granted and the image is known, check disks
+  // in the background so Install without USB has results waiting. Not while
+  // a temporary installer exists: its steps replace the choose screen.
+  // A check for another image is asked to stop and then started again for
+  // this one; each change of the check's state allows one more request.
+  let lastRequest = '';
+  $: image = $downloads.snapshot?.release?.sha256 ?? '';
+  $: check = $setup.snapshot?.stagedCheck;
+  $: requestKey = `${image}|${check?.status ?? ''}|${check?.identity ?? ''}`;
+  $: if (testingDirect && $setup.snapshot?.admin === 'ready' && image && check?.identity !== image && !$setup.snapshot?.stagedRecovery?.operations?.length && requestKey !== lastRequest) { lastRequest = requestKey; void setup.backgroundCheck(); }
   onMount(() => {
     void setup.refresh();
     // Asks for administrator access once, over a window the user can see;
@@ -37,7 +47,7 @@
     <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
     {#if $setup.snapshot?.admin==='asking'}<p class="admin" role="status">Omarchy Installer needs administrator access to check your disks and prepare installers.</p>{/if}
     <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
-    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
+    {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} {image} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       <section class="next-actions" aria-label="Installation options">
         <button bind:this={usbButton} aria-describedby="usb-option-description" disabled={setupActive($setup.snapshot?.status) || $setup.pending} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>
         <button bind:this={directButton} aria-describedby="direct-option-description" disabled={!testingDirect || setupActive($setup.snapshot?.status) || $setup.pending} onclick={(event) => { if (!event.currentTarget.disabled) option='direct'; }}><HardDriveDownload size={21}/><span>Install without USB</span></button>

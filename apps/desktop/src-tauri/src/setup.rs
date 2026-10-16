@@ -75,6 +75,8 @@ pub struct Snapshot {
     // the app shows progress, also after reloading.
     steps: Option<Value>,
     step: Option<String>,
+    // The background disk check: status, latest inspection and its image.
+    staged_check: Option<Value>,
     // Administrator access for this run: "asking" while the startup prompt is
     // open, "ready" once approved, "declined"; none before asking or after
     // the helper went away.
@@ -122,6 +124,28 @@ pub struct Setup {
     // of each operation, so a launch in progress (the prompt at startup) and
     // an operation started meanwhile share one prompt.
     session: Arc<Mutex<Option<Session>>>,
+    // The disk check started in the background, kept apart from the main
+    // snapshot so a late result can't overwrite a foreground operation.
+    check: Arc<Mutex<Check>>,
+}
+#[derive(Default)]
+struct Check {
+    // Bumped by each start; results from an older start are dropped.
+    generation: u64,
+    status: String,
+    result: Option<Value>,
+    message: String,
+    // The image the check was for.
+    identity: String,
+    writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
+    operation: Option<String>,
+}
+impl Check {
+    fn view(&self) -> Option<Value> {
+        (!self.status.is_empty()).then(|| {
+            json!({"status":self.status,"result":self.result,"message":self.message,"identity":self.identity})
+        })
+    }
 }
 struct Session {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -188,6 +212,7 @@ impl Default for Setup {
                     steps: None,
                     step: None,
                     admin: None,
+                    staged_check: None,
                 },
                 destinations: vec![],
                 usb_review: None,
@@ -197,6 +222,7 @@ impl Default for Setup {
                 staged_review: None,
             })),
             session: Arc::new(Mutex::new(None)),
+            check: Arc::new(Mutex::new(Check::default())),
         }
     }
 }
@@ -338,12 +364,13 @@ impl Setup {
             .unwrap_or(true)
     }
     fn snapshot(&self) -> Result<Snapshot, String> {
-        let snapshot = self
+        let mut snapshot = self
             .inner
             .lock()
             .map_err(|_| "Setup state is unavailable")?
             .snapshot
             .clone();
+        snapshot.staged_check = self.check.lock().ok().and_then(|check| check.view());
         #[cfg(windows)]
         {
             let mut snapshot = snapshot;
@@ -876,8 +903,11 @@ pub fn staged_iso(
         } => json!({"action": action, "operationId": operation_id}),
         _ => Value::Null,
     };
-    let source = if matches!(action, StagedAction::Stage | StagedAction::Inspect) {
+    let source = if matches!(action, StagedAction::Stage) {
         source(&downloads)?
+    } else if matches!(action, StagedAction::Inspect) {
+        // A finished download when there is one; its identity otherwise.
+        source(&downloads).or_else(|_| identity_source(&downloads))?
     } else {
         // Existing staging records are self-contained. Cleanup must still work
         // after the downloaded ISO was removed or a newer release appeared.
@@ -900,6 +930,8 @@ pub fn staged_iso(
         }
     });
     let service = setup.inner().clone();
+    let inspecting = matches!(action, StagedAction::Inspect);
+    let image = source.sha256.clone();
     std::thread::spawn(move || {
         match run_elevated(
             &service,
@@ -910,7 +942,12 @@ pub fn staged_iso(
                 destination,
             },
         ) {
-            Ok(result) => service.update(&app, |inner| {
+            Ok(mut result) => service.update(&app, |inner| {
+                // A disk check's results hold for the image it ran for, also
+                // after later operations (Review) and reopening the screen.
+                if inspecting {
+                    result["image"] = json!(image);
+                }
                 inner.snapshot.status = "complete".into();
                 inner.snapshot.stage = "complete".into();
                 inner.snapshot.message = result["message"]
@@ -1424,6 +1461,183 @@ pub fn start_admin_session(
     setup.snapshot()
 }
 
+/// Checks disks in the background as soon as the session is up and the
+/// image's identity is known, so Install without USB has results waiting.
+/// Never prompts: without a session, or while an operation holds it, it does
+/// nothing. Testing builds only, like the flow it serves.
+#[tauri::command]
+pub fn staged_background_check(
+    app: tauri::AppHandle,
+    setup: State<'_, Setup>,
+    downloads: State<'_, Downloads>,
+) -> Result<Snapshot, String> {
+    // Never ahead of a foreground operation: it is marked active before it
+    // stops a running check and takes the helper.
+    if !(KEEP_SESSION && crate::direct_install_policy::STAGED_ISO_TESTING)
+        || setup.active_operation()
+    {
+        return setup.snapshot();
+    }
+    let Ok(source) = identity_source(&downloads) else {
+        return setup.snapshot();
+    };
+    let service = setup.inner().clone();
+    // Marked running here, before the thread exists, so a foreground action
+    // started at any point after this asks it to stop instead of waiting a
+    // whole check. A check for another image stops; the app asks again once
+    // it has.
+    let generation = begin_check(&service.check, &source.sha256);
+    let Some(generation) = generation else {
+        return setup.snapshot();
+    };
+    std::thread::spawn(move || {
+        let session = service.session.try_lock().ok().filter(|session| {
+            session
+                .as_ref()
+                .is_some_and(|session| session.alive.load(Ordering::Relaxed))
+        });
+        let Some(mut session) = session else {
+            // An operation holds the helper (the screen picks the check up
+            // again later), or there is no live helper to use.
+            let held = service.session.try_lock().is_err();
+            if let Ok(mut check) = service.check.lock() {
+                if check.generation == generation {
+                    check.status = if held { "stopped" } else { "" }.into();
+                }
+            }
+            return;
+        };
+        let request = OperationRequest {
+            protocol: 1,
+            source,
+            destination: Destination::StagedIso {
+                action: crate::setup_protocol::StagedAction::Inspect,
+                selection: None,
+                operation_id: None,
+                resize: None,
+            },
+        };
+        let mut finished = false;
+        let outcome = exchange(
+            &service,
+            &app,
+            request,
+            Prepared {
+                staged_inspection: true,
+                usb_approval: None,
+                export: None,
+                #[cfg(windows)]
+                verified_iso: None,
+            },
+            &uuid::Uuid::new_v4().to_string(),
+            session.as_mut().expect("checked above"),
+            &mut finished,
+            Some((&service.check, generation)),
+        );
+        if !finished {
+            *session = None;
+        }
+        drop(session);
+        if let Ok(mut check) = service.check.lock() {
+            finish_check(&mut check, generation, outcome);
+        }
+    });
+    setup.snapshot()
+}
+
+/// Starts a check for `identity` unless one is running: a running check for
+/// another image is asked to stop (the app asks again once it has). Returns
+/// the new check's generation. Takes and releases the lock itself, so the
+/// caller can read the snapshot afterwards.
+fn begin_check(check: &Mutex<Check>, identity: &str) -> Option<u64> {
+    let mut check = check.lock().ok()?;
+    if matches!(check.status.as_str(), "running" | "stopping") {
+        if check.identity != identity {
+            request_stop(&mut check);
+        }
+        return None;
+    }
+    check.generation += 1;
+    check.status = "running".into();
+    check.result = None;
+    check.message = "Checking disks…".into();
+    check.identity = identity.into();
+    Some(check.generation)
+}
+
+/// Records how a background check ended, unless a newer one has started.
+fn finish_check(check: &mut Check, generation: u64, outcome: Result<Value, String>) {
+    // A newer check owns the handles now.
+    if check.generation != generation {
+        return;
+    }
+    check.writer = None;
+    check.operation = None;
+    match outcome {
+        Ok(result) => {
+            check.status = "done".into();
+            check.result = Some(result);
+            check.message = String::new();
+        }
+        // Stopped for a foreground operation: what it measured stays.
+        Err(_) if check.status == "stopping" => check.status = "stopped".into(),
+        Err(error) => {
+            check.status = "failed".into();
+            check.message = error;
+        }
+    }
+}
+
+/// The image as a disk check needs it: only its identity, so checking can
+/// start before the download finishes. Inspection never reads the image.
+fn identity_source(downloads: &Downloads) -> Result<SourceImage, String> {
+    let release = downloads.release().ok_or("Choose an image first")?;
+    Ok(SourceImage {
+        path: std::env::current_exe().map_err(|e| e.to_string())?,
+        file_name: release.file_name().into(),
+        length: release.length(),
+        sha256: release.sha256().into(),
+        signature: vec![],
+    })
+}
+
+/// Asks a running background check to stop before a foreground operation
+/// takes the session; the operation then waits for the measurement in
+/// progress to finish.
+fn stop_background_check(service: &Setup, app: &tauri::AppHandle) {
+    let stopping = service
+        .check
+        .lock()
+        .map(|mut check| request_stop(&mut check))
+        .unwrap_or(false);
+    if stopping {
+        service.update(app, |inner| {
+            inner.snapshot.message = "Finishing the disk check…".into()
+        });
+    }
+}
+
+/// Marks a running check as stopping and, once it is talking to the helper,
+/// sends its cancel; a check that registers later sends it itself.
+fn request_stop(check: &mut Check) -> bool {
+    if check.status != "running" {
+        return false;
+    }
+    check.status = "stopping".into();
+    send_stop(check);
+    true
+}
+fn send_stop(check: &Check) {
+    if let (Some(writer), Some(operation)) = (&check.writer, &check.operation) {
+        if let Ok(mut writer) = writer.lock() {
+            let _ = write_frame(
+                &mut *writer,
+                &json!({"protocol":1,"type":"cancel","operation":operation}),
+            );
+        }
+    }
+}
+
 #[tauri::command]
 pub fn cancel_setup(setup: State<'_, Setup>) -> Result<Snapshot, String> {
     let mut inner = setup
@@ -1491,6 +1705,7 @@ fn run_elevated(
         #[cfg(windows)]
         verified_iso: app.state::<Downloads>().verified_lease(&request.source),
     };
+    stop_background_check(service, app);
     let mut session = acquire_session(&service.session, elevation::launch)?;
     service.update(app, |inner| inner.snapshot.admin = Some("ready".into()));
     let operation_id = uuid::Uuid::new_v4().to_string();
@@ -1505,6 +1720,7 @@ fn run_elevated(
         &operation_id,
         session.as_mut().ok_or("Helper session is unavailable")?,
         &mut finished,
+        None,
     );
     if !finished || !KEEP_SESSION {
         *session = None;
@@ -1534,6 +1750,9 @@ fn exchange(
     operation_id: &str,
     session: &mut Session,
     finished: &mut bool,
+    // A background check reports to its own slot (at this generation),
+    // never the main snapshot.
+    background: Option<(&Mutex<Check>, u64)>,
 ) -> Result<Value, String> {
     let Prepared {
         staged_inspection,
@@ -1546,6 +1765,7 @@ fn exchange(
     let mut exported_path = None;
     let mut export_error = None;
     let writer = Arc::clone(&session.writer);
+    let image = request.source.sha256.clone();
     let mut reopen: Option<String> = None;
     let mut restarting = false;
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
@@ -1562,13 +1782,54 @@ fn exchange(
             .map_err(|_| "Helper connection is unavailable")?,
         &json!({"protocol":1,"type":"request","operation":operation_id,"request":envelope}),
     )?;
-    service.update(app, |inner| {
-        inner.writer = Some(Arc::clone(&writer));
-        inner.operation = Some(operation_id.into());
-        inner.snapshot.cancel_available = true;
-    });
+    if let Some((check, generation)) = background {
+        if let Ok(mut check) = check.lock() {
+            if check.generation == generation {
+                check.writer = Some(Arc::clone(&writer));
+                check.operation = Some(operation_id.into());
+                // Asked to stop before it could be told.
+                if check.status == "stopping" {
+                    send_stop(&check);
+                }
+            }
+        }
+    } else {
+        service.update(app, |inner| {
+            inner.writer = Some(Arc::clone(&writer));
+            inner.operation = Some(operation_id.into());
+            inner.snapshot.cancel_available = true;
+        });
+    }
     let reader = &mut session.reader;
     while let Some(value) = read_frame(reader)? {
+        if let Some((check, generation)) = background {
+            match value["type"].as_str() {
+                Some("event") => {
+                    if let Ok(mut check) = check.lock() {
+                        if check.generation == generation {
+                            if value["stagedIsoInspection"]["disks"].is_array() {
+                                check.result = Some(value["stagedIsoInspection"].clone());
+                            }
+                            if let Some(message) = value["message"].as_str() {
+                                check.message = message.into();
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // A disk check asks for nothing; refuse anything else.
+                Some("confirmation_required") => {
+                    write_frame(
+                        &mut *writer
+                            .lock()
+                            .map_err(|_| "Helper connection is unavailable")?,
+                        &json!({"protocol":1,"type":"confirmation","operation":operation_id,"binding":value["binding"],"approved":false}),
+                    )?;
+                    continue;
+                }
+                _ => {}
+            }
+        }
         // The restart is under way: keep the reopen entry from here on.
         restarting |= value["type"] == "event" && value["stage"] == "restarting";
         match value["type"].as_str() {
@@ -1696,7 +1957,9 @@ fn exchange(
                     && value["stagedIsoInspection"]["minimumLinuxBytes"].is_u64()
                     && value["stagedIsoInspection"]["temporaryBytes"].is_u64()
                 {
-                    inner.snapshot.staged_iso = Some(value["stagedIsoInspection"].clone());
+                    let mut inspection = value["stagedIsoInspection"].clone();
+                    inspection["image"] = json!(image);
+                    inner.snapshot.staged_iso = Some(inspection);
                 }
                 if value["recovery"].is_object() {
                     inner.snapshot.recovery = if value["recovery"]["cleanup"]["workspaceRemoved"]
@@ -1808,6 +2071,72 @@ mod usb_review_tests {
             alive: Arc::new(AtomicBool::new(true)),
         }
     }
+    #[test]
+    fn a_background_check_keeps_its_own_results_and_drops_stale_ones() {
+        let mut check = Check {
+            generation: 2,
+            status: "running".into(),
+            result: Some(json!({"disks":["partial"]})),
+            ..Check::default()
+        };
+        // A check replaced by a newer one changes nothing, not even the
+        // newer one's handles.
+        check.operation = Some("newer".into());
+        finish_check(&mut check, 1, Ok(json!({"disks":["old"]})));
+        assert_eq!(
+            (check.status.as_str(), &check.result),
+            ("running", &Some(json!({"disks":["partial"]})))
+        );
+        assert_eq!(check.operation.as_deref(), Some("newer"));
+        // A stop requested before the check could be told is kept for it.
+        let mut early = Check {
+            status: "running".into(),
+            ..Check::default()
+        };
+        assert!(request_stop(&mut early));
+        assert_eq!(early.status, "stopping");
+        assert!(!request_stop(&mut early));
+        // Stopped for a foreground operation: the partial result stays.
+        check.status = "stopping".into();
+        finish_check(&mut check, 2, Err("The disk check was stopped.".into()));
+        assert_eq!(
+            (check.status.as_str(), &check.result),
+            ("stopped", &Some(json!({"disks":["partial"]})))
+        );
+        check.status = "running".into();
+        finish_check(&mut check, 2, Ok(json!({"disks":["all"]})));
+        assert_eq!(
+            (check.status.as_str(), &check.result),
+            ("done", &Some(json!({"disks":["all"]})))
+        );
+        check.status = "running".into();
+        finish_check(&mut check, 2, Err("Windows failed".into()));
+        assert_eq!(
+            (check.status.as_str(), check.message.as_str()),
+            ("failed", "Windows failed")
+        );
+        // The main snapshot never holds it; it's shown beside.
+        assert_eq!(check.view().unwrap()["status"], "failed");
+        assert!(Check::default().view().is_none());
+    }
+
+    #[test]
+    fn a_check_for_another_image_is_stopped_and_the_lock_released() {
+        let check = Mutex::new(Check::default());
+        assert_eq!(begin_check(&check, "official"), Some(1));
+        // Same image while running: nothing new.
+        assert_eq!(begin_check(&check, "official"), None);
+        assert_eq!(check.lock().unwrap().status, "running");
+        // Another image: the running check is asked to stop.
+        assert_eq!(begin_check(&check, "local"), None);
+        assert_eq!(check.lock().unwrap().status, "stopping");
+        // The lock is free again (the snapshot takes it next).
+        assert!(check.try_lock().is_ok());
+        check.lock().unwrap().status = "stopped".into();
+        assert_eq!(begin_check(&check, "local"), Some(2));
+        assert_eq!(check.lock().unwrap().identity, "local");
+    }
+
     #[test]
     fn overlapping_requests_share_one_prompt_and_a_lost_session_is_replaced() {
         let holder = Arc::new(Mutex::new(None));
