@@ -55,6 +55,12 @@ describe('single-screen native download flow', () => {
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button',{name:'Image details'}));
     expect(screen.getByRole('button',{name:/Download/})).toBeEnabled();
+    // A finished pause isn't still stopping, and an unknown release has a name.
+    await setState(state('cancelled', {cancel_requested:true,received_bytes:400}));
+    await fireEvent.click(screen.getByRole('button',{name:'Hide image details'}));
+    expect(screen.getByRole('heading',{name:'Omarchy 3.4.1 · Download paused'})).toBeInTheDocument();
+    await setState(state('idle', {release:null}));
+    expect(screen.getByRole('heading',{name:'Omarchy ISO · Checking release…'})).toBeInTheDocument();
   });
   it('locks image changes during installation while allowing details to expand', async () => {
     await setState(state('complete', {image_path:'C:\\fixture.iso'}));

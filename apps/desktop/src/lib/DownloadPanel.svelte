@@ -24,13 +24,14 @@
   // Beside a flow, one line: the ready image, or the download in progress
   // (Pause is under Image details), so the flow stays in view.
   $: summary = collapsed || (compact && (complete || transfer));
-  $: summaryText = complete ? readyLabel : snapshot?.cancel_requested ? 'Stopping…' : statusText;
+  $: summaryText = complete ? readyLabel : snapshot?.cancel_requested && active ? 'Stopping…' : statusText;
+  $: version = release?.version ?? 'ISO';
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
 
 <section class="download-panel" class:compact={summary} aria-label="Omarchy image download">
   {#if summary}
-    <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · ${summaryText}`}><span role="status" class:testing={verificationSkipped || localImage} class:transferring={!complete}>{#if authenticated}<Check size={17}/>{/if}Omarchy {release?.version} · {summaryText}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
+    <div class="image-summary"><h1 aria-label={`Omarchy ${version} · ${summaryText}`}><span role="status" class:testing={verificationSkipped || localImage} class:transferring={!complete}>{#if authenticated}<Check size={17}/>{/if}Omarchy {version} · {summaryText}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
     {#if transfer && !expanded}{#if indeterminate}<progress class="summary-progress" max="100" aria-label={statusText}></progress>{:else}<progress class="summary-progress" max="100" value={percent} aria-label="Download progress"></progress>{/if}{/if}
   {/if}
   {#if !summary || expanded}
