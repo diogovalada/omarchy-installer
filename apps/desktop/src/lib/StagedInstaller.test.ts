@@ -583,6 +583,18 @@ it('shows the background check before the download, and Review waits for the ima
   expect(screen.getByText('Download the image above first.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
 });
+it('uses only a check of the chosen image, and checks by hand before the download',async()=>{
+  const snapshot={pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'done',message:'',identity:'official',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}};
+  state.set(snapshot);
+  // Another image's results set the wrong space needed: not shown.
+  render(StagedInstaller,{sourceReady:false,image:'local'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  // The image is known though not downloaded: checking by hand works.
+  expect(screen.getByRole('button',{name:'Check available space'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('inspect');
+});
 it('lets a measured partition go to Review while the background check goes on',async()=>{
   const data={kind:'partition',partitionNumber:5,partitionGuid:'data',offsetBytes:501*GiB,sizeBytes:400*GiB,label:'D:',fileSystem:'NTFS',freeBytes:300*GiB,resizeState:'unchecked',isWindows:false};
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'running',message:'',identity:'iso',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,diskSizeBytes:1000*GiB,regions:[checkedC,data]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}});

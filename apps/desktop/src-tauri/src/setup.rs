@@ -1466,16 +1466,18 @@ pub fn staged_background_check(
         return setup.snapshot();
     };
     let service = setup.inner().clone();
-    std::thread::spawn(move || {
-        let Ok(mut session) = service.session.try_lock() else {
-            return;
-        };
-        if !session
-            .as_ref()
-            .is_some_and(|session| session.alive.load(Ordering::Relaxed))
-        {
-            return;
+    if let Ok(mut check) = service.check.lock() {
+        if matches!(check.status.as_str(), "running" | "stopping") {
+            // A check for another image stops; the app asks again once it has.
+            if check.identity != source.sha256 {
+                request_stop(&mut check);
+            }
+            return setup.snapshot();
         }
+    }
+    std::thread::spawn(move || {
+        // Marked running before taking the session, so a foreground action
+        // arriving meanwhile asks it to stop instead of waiting a whole check.
         let generation = {
             let Ok(mut check) = service.check.lock() else {
                 return;
@@ -1486,6 +1488,22 @@ pub fn staged_background_check(
             check.message = "Checking disks…".into();
             check.identity = source.sha256.clone();
             check.generation
+        };
+        let session = service.session.try_lock().ok().filter(|session| {
+            session
+                .as_ref()
+                .is_some_and(|session| session.alive.load(Ordering::Relaxed))
+        });
+        let Some(mut session) = session else {
+            // An operation holds the helper (the screen picks the check up
+            // again later), or there is no live helper to use.
+            let held = service.session.try_lock().is_err();
+            if let Ok(mut check) = service.check.lock() {
+                if check.generation == generation {
+                    check.status = if held { "stopped" } else { "" }.into();
+                }
+            }
+            return;
         };
         let request = OperationRequest {
             protocol: 1,
@@ -1527,11 +1545,12 @@ pub fn staged_background_check(
 
 /// Records how a background check ended, unless a newer one has started.
 fn finish_check(check: &mut Check, generation: u64, outcome: Result<Value, String>) {
-    check.writer = None;
-    check.operation = None;
+    // A newer check owns the handles now.
     if check.generation != generation {
         return;
     }
+    check.writer = None;
+    check.operation = None;
     match outcome {
         Ok(result) => {
             check.status = "done".into();
@@ -1564,13 +1583,29 @@ fn identity_source(downloads: &Downloads) -> Result<SourceImage, String> {
 /// takes the session; the operation then waits for the measurement in
 /// progress to finish.
 fn stop_background_check(service: &Setup, app: &tauri::AppHandle) {
-    let Ok(mut check) = service.check.lock() else {
-        return;
-    };
+    let stopping = service
+        .check
+        .lock()
+        .map(|mut check| request_stop(&mut check))
+        .unwrap_or(false);
+    if stopping {
+        service.update(app, |inner| {
+            inner.snapshot.message = "Finishing the disk check…".into()
+        });
+    }
+}
+
+/// Marks a running check as stopping and, once it is talking to the helper,
+/// sends its cancel; a check that registers later sends it itself.
+fn request_stop(check: &mut Check) -> bool {
     if check.status != "running" {
-        return;
+        return false;
     }
     check.status = "stopping".into();
+    send_stop(check);
+    true
+}
+fn send_stop(check: &Check) {
     if let (Some(writer), Some(operation)) = (&check.writer, &check.operation) {
         if let Ok(mut writer) = writer.lock() {
             let _ = write_frame(
@@ -1579,10 +1614,6 @@ fn stop_background_check(service: &Setup, app: &tauri::AppHandle) {
             );
         }
     }
-    drop(check);
-    service.update(app, |inner| {
-        inner.snapshot.message = "Finishing the disk check…".into()
-    });
 }
 
 #[tauri::command]
@@ -1728,10 +1759,16 @@ fn exchange(
             .map_err(|_| "Helper connection is unavailable")?,
         &json!({"protocol":1,"type":"request","operation":operation_id,"request":envelope}),
     )?;
-    if let Some((check, _)) = background {
+    if let Some((check, generation)) = background {
         if let Ok(mut check) = check.lock() {
-            check.writer = Some(Arc::clone(&writer));
-            check.operation = Some(operation_id.into());
+            if check.generation == generation {
+                check.writer = Some(Arc::clone(&writer));
+                check.operation = Some(operation_id.into());
+                // Asked to stop before it could be told.
+                if check.status == "stopping" {
+                    send_stop(&check);
+                }
+            }
         }
     } else {
         service.update(app, |inner| {
@@ -2017,12 +2054,23 @@ mod usb_review_tests {
             result: Some(json!({"disks":["partial"]})),
             ..Check::default()
         };
-        // A check replaced by a newer one changes nothing.
+        // A check replaced by a newer one changes nothing, not even the
+        // newer one's handles.
+        check.operation = Some("newer".into());
         finish_check(&mut check, 1, Ok(json!({"disks":["old"]})));
         assert_eq!(
             (check.status.as_str(), &check.result),
             ("running", &Some(json!({"disks":["partial"]})))
         );
+        assert_eq!(check.operation.as_deref(), Some("newer"));
+        // A stop requested before the check could be told is kept for it.
+        let mut early = Check {
+            status: "running".into(),
+            ..Check::default()
+        };
+        assert!(request_stop(&mut early));
+        assert_eq!(early.status, "stopping");
+        assert!(!request_stop(&mut early));
         // Stopped for a foreground operation: the partial result stays.
         check.status = "stopping".into();
         finish_check(&mut check, 2, Err("The disk check was stopped.".into()));

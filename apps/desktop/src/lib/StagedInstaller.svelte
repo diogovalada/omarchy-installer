@@ -10,6 +10,10 @@
   export let recoveryOnly=false;
   export let close:()=>void=()=>{};
   export let sourceReady=false;
+  // The chosen image's identity, known before it finishes downloading; a disk
+  // check needs only that, Review needs the downloaded image.
+  export let image='';
+  $: imageKnown=sourceReady || !!image;
   export let prepareAgain:()=>void=()=>{};
   // Opens the USB installer instead, when no space can be used here.
   export let useUsb:(()=>void)|null=null;
@@ -32,7 +36,8 @@
   // The check started in the background at launch. Its results stand in
   // until the user runs a check of their own; while it runs, partitions it
   // hasn't measured show as being checked, and any action stops it first.
-  $: check=$setup.snapshot?.stagedCheck;
+  // Results for another image don't count: its size sets the space needed.
+  $: check=!image || $setup.snapshot?.stagedCheck?.identity===image ? $setup.snapshot?.stagedCheck : null;
   $: background=check?.status==='running' || check?.status==='stopping';
   $: checking=busy || background;
   $: scan=result?.disks || busy ? result : (check?.result ?? result);
@@ -233,7 +238,7 @@
   }
   const single=(segment:OverviewSegment|undefined) => segment?.regions.length===1 ? segment.regions[0] : undefined;
   function analyze(region:StagedRegion) {
-    if(!disk || !layout || busy || !testing || !sourceReady || !region.partitionNumber || !region.partitionGuid) return;
+    if(!disk || !layout || busy || !testing || !imageKnown || !region.partitionNumber || !region.partitionGuid) return;
     const query={diskNumber:disk.number,diskUniqueId:disk.id,partitionNumber:region.partitionNumber,partitionGuid:region.partitionGuid};
     analyzing=query;
     void setup.stagedIso('inspect',null,null,query);
@@ -301,8 +306,8 @@
         <p class="line">Reading disks…</p>
       {:else}
         <div class="start">
-          <button class="primary" disabled={busy || !testing || !sourceReady} onclick={inspect}><HardDrive size={16}/>Check available space</button>
-          <p>{!sourceReady ? 'Download the image above first.' : $setup.snapshot?.admin==='ready' ? 'Nothing is changed.' : 'Windows will ask for administrator access. Nothing is changed.'}</p>
+          <button class="primary" disabled={busy || !testing || !imageKnown} onclick={inspect}><HardDrive size={16}/>Check available space</button>
+          <p>{!imageKnown ? 'Download the image above first.' : $setup.snapshot?.admin==='ready' ? 'Nothing is changed.' : 'Windows will ask for administrator access. Nothing is changed.'}</p>
         </div>
       {/if}
     {:else}
@@ -311,7 +316,7 @@
         {:else if disks.length===1}<h3>{diskName(disks[0])}</h3>
         {:else}<div class="disks" role="group" aria-label="Disks">{#each disks as item (item.id)}<button class="disk" class:selected={selectedDisk===item.id} aria-pressed={selectedDisk===item.id} disabled={!browsing} onclick={()=>selectDisk(item.id)}>{diskName(item)}</button>{/each}</div>{/if}
         {#if usableCount>1 && !disk?.blocked}<span class="hint">Select where the space comes from.</span>{/if}
-        <button class="refresh" disabled={busy || !sourceReady || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
+        <button class="refresh" disabled={busy || !imageKnown || !testing} onclick={inspect}><RefreshCw size={14}/>Refresh</button>
       </div>
       {#if disk?.blocked}
         <p class="blocked">{disk.blocked.reason}</p>
@@ -322,8 +327,8 @@
           {@const region=single(selectedSegment)}
           <p class="line">{status?.text}
             {#if sourceRegion && region!==sourceRegion}<span class="source-note">Space comes from {sourceRegion.kind==='free' ? 'free space' : sourceRegion.label}.</span>{/if}
-            {#if status?.action==='recheck' && region}<button class="text-action" aria-label={`Recheck ${region.label}`} disabled={busy || !testing || !sourceReady} onclick={()=>analyze(region)}>Recheck</button>
-            {:else if status?.action==='refresh'}<button class="text-action" aria-label="Refresh disks" disabled={busy || !testing || !sourceReady} onclick={inspect}>Refresh</button>{/if}
+            {#if status?.action==='recheck' && region}<button class="text-action" aria-label={`Recheck ${region.label}`} disabled={busy || !testing || !imageKnown} onclick={()=>analyze(region)}>Recheck</button>
+            {:else if status?.action==='refresh'}<button class="text-action" aria-label="Refresh disks" disabled={busy || !testing || !imageKnown} onclick={inspect}>Refresh</button>{/if}
           </p>
         {/if}
       {/if}

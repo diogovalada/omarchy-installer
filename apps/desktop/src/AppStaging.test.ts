@@ -40,6 +40,18 @@ it('checks disks in the background once access is granted and the image is known
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',message:'x'}});
   await tick();
   expect(setup.backgroundCheck).toHaveBeenCalledOnce();
+  // A check running for another image is asked to stop, then this one starts
+  // once it has.
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'running',identity:'official',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(2);
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'stopped',identity:'official',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(3);
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready',stagedCheck:{status:'running',identity:'iso',message:'',result:null}}});
+  await tick();
+  expect(setup.backgroundCheck).toHaveBeenCalledTimes(3);
+  files.set({pending:false,error:null,snapshot:{status:'idle',host_os:'windows',host_architecture:'x86_64',release:null,destination_directory:'C:/Downloads',image_path:null}});
 });
 it('keeps normal native builds closed with no empty recovery section',()=>{
   render(App);

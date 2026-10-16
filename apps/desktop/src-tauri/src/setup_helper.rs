@@ -275,6 +275,7 @@ mod measurements {
 
     const FRESH: Duration = Duration::from_secs(30 * 60);
     struct Measured {
+        run: String,
         disk: String,
         partition: String,
         offset: u64,
@@ -284,7 +285,7 @@ mod measurements {
     }
     static MEASURED: Mutex<Vec<Measured>> = Mutex::new(Vec::new());
 
-    pub(super) fn remember(inspection: &Value) {
+    pub(super) fn remember(inspection: &Value, run: &str) {
         let Ok(mut measured) = MEASURED.lock() else {
             return;
         };
@@ -304,10 +305,11 @@ mod measurements {
                 if region["resizeState"] != "checked" || bytes == 0 {
                     continue;
                 }
-                // The same result arrives in several events; keep the time
-                // it was first seen for these exact facts.
+                // The same result arrives in several events of one check;
+                // keep the time it was first seen there.
                 if measured.iter().any(|m| {
-                    m.disk == disk_id
+                    m.run == run
+                        && m.disk == disk_id
                         && m.partition.eq_ignore_ascii_case(partition)
                         && (m.offset, m.size, m.bytes) == (offset, size, bytes)
                 }) {
@@ -317,6 +319,7 @@ mod measurements {
                     !(m.disk == disk_id && m.partition.eq_ignore_ascii_case(partition))
                 });
                 measured.push(Measured {
+                    run: run.into(),
                     disk: disk_id.into(),
                     partition: partition.into(),
                     offset,
@@ -334,6 +337,15 @@ mod measurements {
             m.disk == disk && m.partition.eq_ignore_ascii_case(partition) && m.at.elapsed() < FRESH
         })?;
         Some(json!({"bytes":m.bytes,"offsetBytes":m.offset,"sizeBytes":m.size}))
+    }
+
+    #[cfg(test)]
+    fn age(by: Duration) {
+        if let Ok(mut measured) = MEASURED.lock() {
+            for m in measured.iter_mut() {
+                m.at -= by;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -356,16 +368,24 @@ mod measurements {
                     {"kind":"free","offsetBytes":0,"sizeBytes":10}
                 ]}]})
             };
-            remember(&inspection("unchecked", Value::Null));
+            remember(&inspection("unchecked", Value::Null), "first");
             assert_eq!(recall("disk", "guid-c"), None);
-            remember(&inspection("checked", json!(300)));
+            remember(&inspection("checked", json!(300)), "first");
             assert_eq!(
                 recall("disk", "guid-c"),
                 Some(json!({"bytes":300,"offsetBytes":1048576,"sizeBytes":500}))
             );
             assert_eq!(recall("other-disk", "guid-c"), None);
             // A newer measurement of the same partition replaces it.
-            remember(&inspection("checked", json!(310)));
+            remember(&inspection("checked", json!(310)), "second");
+            assert_eq!(recall("disk", "guid-c").unwrap()["bytes"], 310);
+            // Too old to reuse; repeated events of the same check don't renew
+            // it, but a new check measuring the same value does.
+            age(FRESH);
+            assert_eq!(recall("disk", "guid-c"), None);
+            remember(&inspection("checked", json!(310)), "second");
+            assert_eq!(recall("disk", "guid-c"), None);
+            remember(&inspection("checked", json!(310)), "third");
             assert_eq!(recall("disk", "guid-c").unwrap()["bytes"], 310);
             forget();
         }
@@ -1731,6 +1751,9 @@ fn execute(
                 )?;
                 let mut command = provider_process::staged_command(&runtime, "inspect", &path)?;
                 provider_process::privileged_environment(&mut command, &workspace)?;
+                // Repeated events of one check aren't new measurements; a new
+                // check is, even when it measures the same minimum.
+                let run_id = uuid::Uuid::new_v4().to_string();
                 let result = provider_process::run(
                     command,
                     None,
@@ -1738,11 +1761,11 @@ fn execute(
                     Some(cancel_path),
                     true,
                     |value| {
-                        measurements::remember(&value["stagedIsoInspection"]);
+                        measurements::remember(&value["stagedIsoInspection"], &run_id);
                         provider_event(output, value)
                     },
                 )?;
-                measurements::remember(&result);
+                measurements::remember(&result, &run_id);
                 return Ok(result);
             }
             if resize.is_some() {

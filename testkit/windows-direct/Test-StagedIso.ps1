@@ -630,6 +630,21 @@ try {
     $part.Guid='other'; $script:removed=0
     Reject { Get-StagingShrinkPreflight $plan } 'A replaced partition passed the final check.'
 }
+# Only a record from before any change is removed, with its summary entry.
+& {
+    $temp=Join-Path $env:TEMP ('omarchy-remove-record-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); [IO.File]::WriteAllText((Join-Path $temp 'state.json'),'{}')
+    function Get-StagingDirectory($Id) { return $temp }
+    function Assert-ProtectedDirectory($Path) { }
+    function Write-StagingSummary { $script:summaries++ }
+    try {
+        $script:summaries=0
+        Reject { Remove-StagingRecord ([pscustomobject]@{operationId='o';status='allocation-starting'}) } 'A record from after the disk changed was removed.'
+        Assert ((Test-Path -LiteralPath $temp) -and $script:summaries -eq 0) 'A refused removal still changed something.'
+        Remove-StagingRecord ([pscustomobject]@{operationId='o';status='preparing'})
+        Assert (-not (Test-Path -LiteralPath $temp) -and $script:summaries -eq 1) 'An untouched record or its summary entry was left behind.'
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Recurse -Force } }
+}
 # The staged write measures before pausing BitLocker (source order), and
 # shrinks with that measurement.
 & {
