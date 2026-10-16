@@ -583,6 +583,24 @@ it('shows the background check before the download, and Review waits for the ima
   expect(screen.getByText('Download the image above first.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
 });
+it('drops results already shown when another image is chosen, including a check run by hand',async()=>{
+  const checked=(identity:string)=>({status:'done',message:'',identity,result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}});
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:checked('official')}});
+  const view=render(StagedInstaller,{sourceReady:true,image:'official'});
+  await tick();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeInTheDocument();
+  await view.rerender({sourceReady:false,image:'local'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+  // A check run by hand for the old image doesn't count for the new one.
+  await view.rerender({sourceReady:true,image:'official'});
+  await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
+  state.set({pending:false,snapshot:{...measured().snapshot,stagedCheck:checked('local')}});
+  await tick();
+  await view.rerender({sourceReady:false,image:'other'});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
+});
 it('uses only a check of the chosen image, and checks by hand before the download',async()=>{
   const snapshot={pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'done',message:'',identity:'official',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,regions:[checkedC]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}};
   state.set(snapshot);

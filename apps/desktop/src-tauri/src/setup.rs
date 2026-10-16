@@ -1466,29 +1466,15 @@ pub fn staged_background_check(
         return setup.snapshot();
     };
     let service = setup.inner().clone();
-    if let Ok(mut check) = service.check.lock() {
-        if matches!(check.status.as_str(), "running" | "stopping") {
-            // A check for another image stops; the app asks again once it has.
-            if check.identity != source.sha256 {
-                request_stop(&mut check);
-            }
-            return setup.snapshot();
-        }
-    }
+    // Marked running here, before the thread exists, so a foreground action
+    // started at any point after this asks it to stop instead of waiting a
+    // whole check. A check for another image stops; the app asks again once
+    // it has.
+    let generation = begin_check(&service.check, &source.sha256);
+    let Some(generation) = generation else {
+        return setup.snapshot();
+    };
     std::thread::spawn(move || {
-        // Marked running before taking the session, so a foreground action
-        // arriving meanwhile asks it to stop instead of waiting a whole check.
-        let generation = {
-            let Ok(mut check) = service.check.lock() else {
-                return;
-            };
-            check.generation += 1;
-            check.status = "running".into();
-            check.result = None;
-            check.message = "Checking disks…".into();
-            check.identity = source.sha256.clone();
-            check.generation
-        };
         let session = service.session.try_lock().ok().filter(|session| {
             session
                 .as_ref()
@@ -1541,6 +1527,26 @@ pub fn staged_background_check(
         }
     });
     setup.snapshot()
+}
+
+/// Starts a check for `identity` unless one is running: a running check for
+/// another image is asked to stop (the app asks again once it has). Returns
+/// the new check's generation. Takes and releases the lock itself, so the
+/// caller can read the snapshot afterwards.
+fn begin_check(check: &Mutex<Check>, identity: &str) -> Option<u64> {
+    let mut check = check.lock().ok()?;
+    if matches!(check.status.as_str(), "running" | "stopping") {
+        if check.identity != identity {
+            request_stop(&mut check);
+        }
+        return None;
+    }
+    check.generation += 1;
+    check.status = "running".into();
+    check.result = None;
+    check.message = "Checking disks…".into();
+    check.identity = identity.into();
+    Some(check.generation)
 }
 
 /// Records how a background check ended, unless a newer one has started.
@@ -2093,6 +2099,23 @@ mod usb_review_tests {
         // The main snapshot never holds it; it's shown beside.
         assert_eq!(check.view().unwrap()["status"], "failed");
         assert!(Check::default().view().is_none());
+    }
+
+    #[test]
+    fn a_check_for_another_image_is_stopped_and_the_lock_released() {
+        let check = Mutex::new(Check::default());
+        assert_eq!(begin_check(&check, "official"), Some(1));
+        // Same image while running: nothing new.
+        assert_eq!(begin_check(&check, "official"), None);
+        assert_eq!(check.lock().unwrap().status, "running");
+        // Another image: the running check is asked to stop.
+        assert_eq!(begin_check(&check, "local"), None);
+        assert_eq!(check.lock().unwrap().status, "stopping");
+        // The lock is free again (the snapshot takes it next).
+        assert!(check.try_lock().is_ok());
+        check.lock().unwrap().status = "stopped".into();
+        assert_eq!(begin_check(&check, "local"), Some(2));
+        assert_eq!(check.lock().unwrap().identity, "local");
     }
 
     #[test]

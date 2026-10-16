@@ -40,7 +40,13 @@
   $: check=!image || $setup.snapshot?.stagedCheck?.identity===image ? $setup.snapshot?.stagedCheck : null;
   $: background=check?.status==='running' || check?.status==='stopping';
   $: checking=busy || background;
-  $: scan=result?.disks || busy ? result : (check?.result ?? result);
+  // A check run by hand counts only for the image it ran for.
+  let inspectedImage='';
+  $: own=busy || !image || inspectedImage===image ? result : null;
+  $: scan=own?.disks || busy ? own : (check?.result ?? own);
+  // Choosing another image drops what is shown: its size sets the space needed.
+  let shownImage=image;
+  $: if(image!==shownImage) { shownImage=image; inspection=undefined; handledInspection=''; heldDefault=''; analyzing=null; chosenSegment=''; chosenSource=''; }
   $: browsing=!busy || ($setup.snapshot?.status==='running' && ['inspecting','analyzing-resize'].includes($setup.snapshot?.stage) && !!result?.disks);
   $: if(!result && busy) handledInspection='';
   // The elevated check sends an initial layout, then updated resize limits.
@@ -205,7 +211,7 @@
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }
   function inspect() {
-    inspection=undefined; analyzing=null; reading=true; heldDefault='';
+    inspection=undefined; analyzing=null; reading=true; heldDefault=''; inspectedImage=image;
     void setup.stagedIso('inspect');
   }
   // A partition being rechecked shows as checking until its new limit arrives.
@@ -240,7 +246,7 @@
   function analyze(region:StagedRegion) {
     if(!disk || !layout || busy || !testing || !imageKnown || !region.partitionNumber || !region.partitionGuid) return;
     const query={diskNumber:disk.number,diskUniqueId:disk.id,partitionNumber:region.partitionNumber,partitionGuid:region.partitionGuid};
-    analyzing=query;
+    analyzing=query; inspectedImage=image;
     void setup.stagedIso('inspect',null,null,query);
   }
   // Review takes a while after Windows asks for access; say so beside the
