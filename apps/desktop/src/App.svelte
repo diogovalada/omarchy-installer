@@ -30,6 +30,10 @@
   let lastRequest = '';
   $: image = $downloads.snapshot?.release?.sha256 ?? '';
   $: check = $setup.snapshot?.stagedCheck;
+  // A temporary installer in progress comes first on the home screen: after
+  // the firmware restart the app reopens there, to start the installer.
+  $: windowsHost = downloads.native && $downloads.snapshot?.host_os==='windows' && $downloads.snapshot?.host_architecture==='x86_64';
+  $: recorded = !!$setup.snapshot?.stagedRecovery?.operations?.length;
   $: requestKey = `${image}|${check?.status ?? ''}|${check?.identity ?? ''}`;
   $: if (testingDirect && $setup.snapshot?.admin === 'ready' && image && check?.identity !== image && !$setup.snapshot?.stagedRecovery?.operations?.length && requestKey !== lastRequest) { lastRequest = requestKey; void setup.backgroundCheck(); }
   onMount(() => {
@@ -44,19 +48,22 @@
 
 <main class="setup">
   <div class="setup-content">
-    <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
-    {#if $setup.snapshot?.admin==='asking'}<p class="admin" role="status">Omarchy Installer needs administrator access to check your disks and prepare installers.</p>{/if}
-    <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
+    <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span>
+      <!-- In the gap below the header, so it moves nothing when it goes. -->
+      {#if $setup.snapshot?.admin==='asking'}<p class="admin" role="status">Omarchy Installer needs administrator access to check your disks and prepare installers.</p>{/if}
+    </header>
+    <DownloadPanel compact={option !== null} collapsed={recorded && option === null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
     {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} {image} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
+      {#if windowsHost}<StagedInstaller recoveryOnly {sourceReady} prepareAgain={()=>{option='direct';}}/>{/if}
       <section class="next-actions" aria-label="Installation options">
         <button bind:this={usbButton} aria-describedby="usb-option-description" disabled={setupActive($setup.snapshot?.status) || $setup.pending} onclick={() => { option='usb'; }}><Usb size={21}/><span>Create bootable USB</span></button>
         <button bind:this={directButton} aria-describedby="direct-option-description" disabled={!testingDirect || setupActive($setup.snapshot?.status) || $setup.pending} onclick={(event) => { if (!event.currentTarget.disabled) option='direct'; }}><HardDriveDownload size={21}/><span>Install without USB</span></button>
         <p id="usb-option-description">Make an installer for an x86-64 PC.</p>
         <p id="direct-option-description">{testingDirect ? 'Experimental testing — real disk changes' : 'Awaiting official ISO support'}</p>
       </section>
-      <p class="availability">{$downloads.snapshot?.status === 'complete' && $downloads.snapshot.image_path ? 'Your image is ready. Choose how to install Omarchy.' : 'Choose an option to check image and disk requirements.'}</p>
+      {#if !recorded}<p class="availability">{$downloads.snapshot?.status === 'complete' && $downloads.snapshot.image_path ? 'Your image is ready. Choose how to install Omarchy.' : 'Choose an option to check image and disk requirements.'}</p>{/if}
     {/if}
-    {#if downloads.native && $downloads.snapshot?.host_os==='windows' && $downloads.snapshot?.host_architecture==='x86_64' && option!=='direct'}
+    {#if windowsHost && option==='usb'}
       <StagedInstaller recoveryOnly {sourceReady} prepareAgain={()=>{option='direct';}}/>
     {/if}
     <footer>{#if !downloads.native}Browser preview · downloads require the desktop app{:else if $downloads.error && !$downloads.snapshot}Desktop connection unavailable{:else}v0.1.0 · {$downloads.snapshot?.host_os ?? 'Connecting…'}{/if}</footer>
@@ -66,14 +73,14 @@
 <style>
   .setup{height:100dvh;overflow-y:auto;padding:40px 24px;scrollbar-color:var(--border-strong) transparent}
   .setup-content{width:100%;max-width:760px;margin:0 auto}
-  header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}
+  header{position:relative;display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}
   .wordmark{width:190px;flex-shrink:0}header>span{color:var(--text-dim);font-size:11px}
   .next-actions{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}
   .next-actions button{display:flex;align-items:center;justify-content:center;gap:12px;min-height:76px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:14px;cursor:pointer}
   .next-actions button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
   .next-actions button:disabled{opacity:.65;color:var(--text-muted);cursor:not-allowed}
   .next-actions p{margin:-6px 0 0;text-align:center;color:var(--text-muted);font-size:11px;line-height:1.7}
-  .admin{margin:-14px 0 16px;color:var(--text-muted);font-size:11px;line-height:1.7}
+  .admin{position:absolute;top:100%;left:0;margin:4px 0 0;color:var(--text-muted);font-size:11px;line-height:1.7}
   .availability{margin:12px 0 0;color:var(--text-dim);font-size:10px;text-align:center;line-height:1.7}
   footer{margin-top:28px;color:var(--text-dim);font-size:10px;text-align:center;line-height:1.7}
   @media(max-width:550px){.setup{padding:24px 16px}header{margin-bottom:24px;gap:16px}.wordmark{width:165px}.edition{display:none}.next-actions{gap:12px;margin-top:20px}.next-actions button{font-size:12px;gap:9px;min-height:66px}footer{font-size:9px}}

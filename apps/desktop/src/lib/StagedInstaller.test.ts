@@ -11,17 +11,15 @@ vi.mock('./setup',async importOriginal=>{
 const state=setup as typeof setup & {set:(value:unknown)=>void};
 beforeEach(()=>{vi.clearAllMocks();state.set({pending:false,snapshot:null});});
 const tick=()=>import('svelte').then(({tick})=>tick());
-it('offers administrator access again after it was declined at launch',async()=>{
+it('says the check asks for administrator access after it was declined at launch',async()=>{
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'declined'}});
   render(StagedInstaller,{sourceReady:true});
-  expect(screen.getByText(/lets the installer check your disks in the background/)).toBeInTheDocument();
+  // Check available space asks again, so there's no separate Allow.
   expect(screen.getByText('Windows will ask for administrator access. Nothing is changed.')).toBeInTheDocument();
-  await fireEvent.click(screen.getByRole('button',{name:'Allow'}));
-  expect(calls.startAdminSession).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button',{name:'Allow'})).not.toBeInTheDocument();
   // Once approved, checking needs no prompt.
   state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready'}});
   await tick();
-  expect(screen.queryByRole('button',{name:'Allow'})).not.toBeInTheDocument();
   expect(screen.getByText('Nothing is changed.')).toBeInTheDocument();
 });
 it('shows nothing and does not elevate when no temporary installer exists',()=>{
@@ -225,6 +223,8 @@ it('invalidates destinations when refreshing fails',async()=>{
   await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
   state.set({...inspected(),error:'Inspection failed'});
   await tick();
+  // The message itself shows, not behind a disclosure.
+  expect(screen.getByText('Inspection failed')).toBeVisible();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
 });
 // EFI, C: and free space after it, as on a disk with room left at the end.
@@ -580,7 +580,7 @@ it('shows the background check before the download, and Review waits for the ima
   // Measured: the space can be chosen, but Review needs the image.
   state.set(background('done',[checkedC]));
   await tick();
-  expect(screen.getByText('Download the image above first.')).toBeInTheDocument();
+  expect(screen.getByText('Available once the image has downloaded.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
 });
 it('drops results already shown when another image is chosen, including a check run by hand',async()=>{
@@ -645,12 +645,20 @@ it('lists the preparation steps, ticking finished ones and showing the current o
   // Shrinking can't be measured: a moving bar and a note.
   expect(screen.getByRole('progressbar',{name:'Shrink C:'})).not.toHaveAttribute('value');
   expect(items()[2]).toHaveTextContent('This can take several minutes.');
+  // Stopping starts with the copy; until then the button stays, disabled, and says so.
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeDisabled();
+  expect(screen.getByText('You can stop once copying starts.')).toBeInTheDocument();
   // Copying is counted, so it shows a percentage.
   state.set(at('copy',{bytes:3*GiB,totalBytes:12*GiB,cancelAvailable:true}));
   await tick();
   expect(items()[4]).toHaveTextContent('Copy and check the installer · 25%');
   expect(screen.getByRole('progressbar',{name:'Copy and check the installer'})).toHaveAttribute('value',String(3*GiB));
   expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+  // After copying, stopping isn't offered again, and the note doesn't promise it.
+  state.set(at('startup'));
+  await tick();
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeDisabled();
+  expect(screen.queryByText('You can stop once copying starts.')).not.toBeInTheDocument();
 });
 it('says it finishes the partition being measured when the check is stopped',async()=>{
   const checking=(cancelRequested:boolean)=>({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,cancelAvailable:true,cancelRequested,stagedIso:{choices:[],blocked:[],disks:[fullDisk],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}});

@@ -253,11 +253,14 @@ function Get-FollowupView([string]$Decision,[bool]$InstallerWaiting,[bool]$CanRe
         'uncertain' { 'Omarchy preparation was interrupted before the encryption change was confirmed. Check Windows encryption settings. Nothing will be re-enabled automatically; this reminder stays until protection is verified or you explicitly dismiss it.' }
         'decrypting' { 'Windows decryption is still running or paused. Wait for it to finish before using the official installer. You can check its progress in Windows settings. The restoration reminder remains active.' }
         'encrypting' { 'Windows encryption is running or paused. It is not yet verified as fully protected. Check progress in Windows settings; this reminder will retire when encryption and protection are both verified.' }
-        'suspended' { if ($InstallerWaiting) { 'BitLocker on '+$Drive+' is paused for the Omarchy installer waiting on this PC. Keep it paused until Omarchy is installed. To continue, open Omarchy Installer.' } else { 'BitLocker protection is suspended on '+$Drive+'. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
+        'suspended' { if ($InstallerWaiting) { 'BitLocker on '+$Drive+' is paused for the Omarchy installer waiting on this PC. Keep it paused until Omarchy is installed. Continue in Omarchy Installer.' } else { 'BitLocker protection on '+$Drive+' is paused. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
     }
     $settings=if ($InstallerWaiting) { $null } elseif ($CanResume) { 'Resume protection' } else { 'Open BitLocker settings' }
-    $decline=switch ($Decision) { 'suspended' { if ($InstallerWaiting) { 'Stop reminders' } else { 'Leave suspended' } } 'uncertain' { 'Stop reminders' } default { 'Keep BitLocker off' } }
-    return [pscustomobject]@{text=$text;settings=$settings;later='Remind me next time';decline=$decline;declineEnabled=($Decision -in @('ask','uncertain','suspended'))}
+    $decline=switch ($Decision) { 'suspended' { if ($InstallerWaiting) { 'Stop reminders' } else { 'Keep paused' } } 'uncertain' { 'Stop reminders' } default { 'Keep BitLocker off' } }
+    # While an installer waits, this reminder is the one that later says to
+    # resume protection, so it can't be stopped then (it often shows beside
+    # the app reopening, where it's easy to dismiss as noise).
+    return [pscustomobject]@{text=$text;settings=$settings;later='Remind me next time';decline=$decline;declineEnabled=($Decision -in @('ask','uncertain','suspended') -and -not $InstallerWaiting)}
 }
 # The reminder window, sized to its text. DPI awareness and visual styles keep
 # Windows from stretching it as a blurry bitmap on scaled displays and drawing
