@@ -11,9 +11,9 @@ pub struct Connection {
     pub alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// How a launch reports the prompt being declined (or not completed), which
-/// always happens before any change.
-pub const NOT_APPROVED: &str = "Administrator approval was not completed";
+/// How a launch reports that the user declined the prompt, which always
+/// happens before any change. Other launch failures keep their own message.
+pub const DECLINED: &str = "Administrator access wasn't given";
 
 pub fn launch() -> Result<Connection, String> {
     platform::launch()
@@ -137,7 +137,13 @@ mod platform {
         info.lpParameters = parameters.as_ptr();
         info.nShow = SW_HIDE;
         if unsafe { ShellExecuteExW(&mut info) } == 0 {
-            return Err(format!("{NOT_APPROVED}: {}", os_error()));
+            if unsafe { GetLastError() } == ERROR_CANCELLED {
+                return Err(DECLINED.into());
+            }
+            return Err(format!(
+                "Administrator approval was not completed: {}",
+                os_error()
+            ));
         }
         if info.hProcess.is_null() {
             return Err("Elevation did not return a helper process".into());
@@ -611,7 +617,7 @@ mod platform {
                 if Instant::now() > deadline
                     || child.try_wait().map_err(|e| e.to_string())?.is_some()
                 {
-                    return Err(NOT_APPROVED.into());
+                    return Err("Administrator approval was not completed".into());
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
