@@ -10,12 +10,11 @@ export interface UsbReview { token:string; choiceId:string; mode:'erase'|'preser
 export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
-  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string}|null;
+  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string;image?:string}|null;
   // The running staged action and the recorded installer it acts on; set when
   // a staged command starts, and cleared when any other operation starts.
   // `confirmed` once the user approves the action's confirmation.
-  // `image`: for a disk check, the image it ran for.
-  stagedTarget?:{action:string;operationId:string|null;confirmed?:boolean;image?:string}|null;
+  stagedTarget?:{action:string;operationId:string|null;confirmed?:boolean}|null;
   // After approval, the review stays marked approved until the operation ends.
   stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;

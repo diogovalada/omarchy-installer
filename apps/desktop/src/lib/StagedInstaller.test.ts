@@ -594,7 +594,8 @@ it('drops results already shown when another image is chosen, including a check 
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
   // A check run by hand holds for its image, also after reopening the
   // screen, and not for another image.
-  const byHand={pending:false,snapshot:{...measured().snapshot,stagedTarget:{action:'inspect',operationId:null,image:'official'},stagedCheck:{...checked('official'),status:'stopped',result:null}}};
+  // Then Review was declined: the target now describes that, not the check.
+  const byHand={pending:false,snapshot:{...measured().snapshot,status:'cancelled',message:'Nothing was changed.',stagedTarget:{action:'stage',operationId:null},stagedIso:{...measured().snapshot.stagedIso,image:'official'},stagedCheck:{...checked('official'),status:'stopped',result:null}}};
   state.set(byHand);
   view.unmount();
   const reopened=render(StagedInstaller,{sourceReady:true,image:'official'});

@@ -914,15 +914,6 @@ pub fn staged_iso(
             signature: vec![],
         }
     };
-    // A disk check's results hold for the image it ran for; the screen
-    // compares this after reopening, too.
-    let target = if matches!(action, StagedAction::Inspect) {
-        let mut target = target;
-        target["image"] = json!(source.sha256);
-        target
-    } else {
-        target
-    };
     setup.begin("direct", "running")?;
     setup.update(&app, |inner| {
         inner.snapshot.kind = None;
@@ -934,6 +925,8 @@ pub fn staged_iso(
         }
     });
     let service = setup.inner().clone();
+    let inspecting = matches!(action, StagedAction::Inspect);
+    let image = source.sha256.clone();
     std::thread::spawn(move || {
         match run_elevated(
             &service,
@@ -944,7 +937,12 @@ pub fn staged_iso(
                 destination,
             },
         ) {
-            Ok(result) => service.update(&app, |inner| {
+            Ok(mut result) => service.update(&app, |inner| {
+                // A disk check's results hold for the image it ran for, also
+                // after later operations (Review) and reopening the screen.
+                if inspecting {
+                    result["image"] = json!(image);
+                }
                 inner.snapshot.status = "complete".into();
                 inner.snapshot.stage = "complete".into();
                 inner.snapshot.message = result["message"]
@@ -1762,6 +1760,7 @@ fn exchange(
     let mut exported_path = None;
     let mut export_error = None;
     let writer = Arc::clone(&session.writer);
+    let image = request.source.sha256.clone();
     let mut reopen: Option<String> = None;
     let mut restarting = false;
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
@@ -1953,7 +1952,9 @@ fn exchange(
                     && value["stagedIsoInspection"]["minimumLinuxBytes"].is_u64()
                     && value["stagedIsoInspection"]["temporaryBytes"].is_u64()
                 {
-                    inner.snapshot.staged_iso = Some(value["stagedIsoInspection"].clone());
+                    let mut inspection = value["stagedIsoInspection"].clone();
+                    inspection["image"] = json!(image);
+                    inner.snapshot.staged_iso = Some(inspection);
                 }
                 if value["recovery"].is_object() {
                     inner.snapshot.recovery = if value["recovery"]["cleanup"]["workspaceRemoved"]

@@ -40,9 +40,9 @@
   $: check=!image || $setup.snapshot?.stagedCheck?.identity===image ? $setup.snapshot?.stagedCheck : null;
   $: background=check?.status==='running' || check?.status==='stopping';
   $: checking=busy || background;
-  // A check run by hand counts only for the image it ran for, recorded with
-  // it, so it holds after the screen is reopened.
-  $: own=busy || !image || $setup.snapshot?.stagedTarget?.image===image ? result : null;
+  // A check run by hand counts only for the image it ran for, recorded on
+  // its result, so it holds after Review and after reopening the screen.
+  $: own=busy || !image || !result?.disks || result.image===image ? result : null;
   $: scan=own?.disks || busy ? own : (check?.result ?? own);
   // Choosing another image drops what is shown: its size sets the space needed.
   let shownImage=image;
