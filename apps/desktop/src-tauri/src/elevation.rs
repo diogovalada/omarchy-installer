@@ -15,6 +15,8 @@ pub struct Connection {
 /// happens before any change. Other launch failures keep their own message.
 pub const DECLINED: &str = "Administrator access wasn't given";
 
+const CONNECT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 pub fn launch() -> Result<Connection, String> {
     platform::launch()
 }
@@ -131,7 +133,9 @@ mod platform {
         let verb = wide("runas");
         let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-        info.fMask = SEE_MASK_NOCLOSEPROCESS;
+        // Wait for the prompt to be answered before returning; otherwise the
+        // connect deadline below can run out while the prompt is still open.
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
         info.lpVerb = verb.as_ptr();
         info.lpFile = exe.as_ptr();
         info.lpParameters = parameters.as_ptr();
@@ -150,7 +154,9 @@ mod platform {
         }
         let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess) };
         let pid = unsafe { GetProcessId(process.as_raw_handle()) };
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Generous: the wait also ends at once if the helper exits, and an
+        // approval given late (the prompt left open) must still count.
+        let deadline = Instant::now() + CONNECT_DEADLINE;
         accept(&requests, &process, pid, deadline)?;
         accept(&events, &process, pid, deadline)?;
         let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -589,7 +595,9 @@ mod platform {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Could not request administrator approval: {e}"))?;
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Generous: the wait also ends at once if the helper exits, and an
+        // approval given late (the prompt left open) must still count.
+        let deadline = Instant::now() + CONNECT_DEADLINE;
         let accepted = (|| -> Result<UnixStream, String> {
             loop {
                 match listener.accept() {
