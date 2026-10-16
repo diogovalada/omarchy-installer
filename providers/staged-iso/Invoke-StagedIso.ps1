@@ -112,6 +112,10 @@ try {
 } catch {
     # Only staging can leave partial partitions behind for reviewed removal.
     $hint=if ($Action -eq 'stage') { ' If preparation already started, use Remove temporary installer before trying again.' } else { '' }
-    Emit 'error' $Action @{code='staged_iso_failed';message=($_.Exception.Message+$hint)}
+    # A .NET call's failure arrives wrapped ("Exception calling ..."); show
+    # its own message.
+    $failure=$_.Exception
+    if ($failure -is [Management.Automation.MethodInvocationException] -and $null -ne $failure.InnerException) { $failure=$failure.InnerException }
+    Emit 'error' $Action @{code='staged_iso_failed';message=($failure.Message+$hint)}
     exit 1
 } finally { if ($acquired) { $mutex.ReleaseMutex() }; if ($null -ne $mutex) { $mutex.Dispose() } }

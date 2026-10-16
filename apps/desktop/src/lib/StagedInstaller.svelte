@@ -392,7 +392,11 @@
   .beside{margin:0}.beside .text-action{padding:0}
   progress{width:100%;height:6px;margin:4px 0 12px;border:0;border-radius:3px;background:var(--surface-raised);appearance:none;-webkit-appearance:none}
   progress::-webkit-progress-bar{border-radius:3px;background:var(--surface-raised)}progress::-webkit-progress-value{border-radius:3px;background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
+  /* Work that can't be counted: the styled bar has no animation of its own. */
+  progress:not([value]){background:linear-gradient(90deg,transparent,var(--accent),transparent) 0 0/40% 100% no-repeat var(--surface-raised);animation:moving 1.4s ease-in-out infinite}
+  progress:not([value])::-webkit-progress-bar{background:transparent}
+  @keyframes moving{from{background-position:-40% 0}to{background-position:140% 0}}
   @keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
-  @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}}
+  @media(prefers-reduced-motion:reduce){.map-placeholder{animation:none}progress:not([value]){animation:none;background-position:50% 0}}
   @media(max-width:550px){h2{font-size:20px}.disk-row{flex-wrap:wrap}.disk-row .hint{order:3;flex-basis:100%}.preparing{padding:16px}.continue{grid-template-columns:1fr;grid-template-areas:"action" "toggle" "table";gap:10px}.submit{justify-self:stretch;flex-direction:column-reverse;align-items:stretch}}
 </style>
