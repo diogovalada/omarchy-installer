@@ -914,6 +914,15 @@ pub fn staged_iso(
             signature: vec![],
         }
     };
+    // A disk check's results hold for the image it ran for; the screen
+    // compares this after reopening, too.
+    let target = if matches!(action, StagedAction::Inspect) {
+        let mut target = target;
+        target["image"] = json!(source.sha256);
+        target
+    } else {
+        target
+    };
     setup.begin("direct", "running")?;
     setup.update(&app, |inner| {
         inner.snapshot.kind = None;
@@ -1459,7 +1468,11 @@ pub fn staged_background_check(
     setup: State<'_, Setup>,
     downloads: State<'_, Downloads>,
 ) -> Result<Snapshot, String> {
-    if !(KEEP_SESSION && crate::direct_install_policy::STAGED_ISO_TESTING) {
+    // Never ahead of a foreground operation: it is marked active before it
+    // stops a running check and takes the helper.
+    if !(KEEP_SESSION && crate::direct_install_policy::STAGED_ISO_TESTING)
+        || setup.active_operation()
+    {
         return setup.snapshot();
     }
     let Ok(source) = identity_source(&downloads) else {

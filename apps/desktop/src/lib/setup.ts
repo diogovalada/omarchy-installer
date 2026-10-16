@@ -14,7 +14,8 @@ export interface SetupSnapshot {
   // The running staged action and the recorded installer it acts on; set when
   // a staged command starts, and cleared when any other operation starts.
   // `confirmed` once the user approves the action's confirmation.
-  stagedTarget?:{action:string;operationId:string|null;confirmed?:boolean}|null;
+  // `image`: for a disk check, the image it ran for.
+  stagedTarget?:{action:string;operationId:string|null;confirmed?:boolean;image?:string}|null;
   // After approval, the review stays marked approved until the operation ends.
   stagedReview?:{summary:string;review?:StagedReviewPlan|null;approved?:boolean}|null;
   usbReview?:UsbReview|null;

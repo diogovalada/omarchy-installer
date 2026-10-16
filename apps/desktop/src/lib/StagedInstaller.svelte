@@ -40,9 +40,9 @@
   $: check=!image || $setup.snapshot?.stagedCheck?.identity===image ? $setup.snapshot?.stagedCheck : null;
   $: background=check?.status==='running' || check?.status==='stopping';
   $: checking=busy || background;
-  // A check run by hand counts only for the image it ran for.
-  let inspectedImage='';
-  $: own=busy || !image || inspectedImage===image ? result : null;
+  // A check run by hand counts only for the image it ran for, recorded with
+  // it, so it holds after the screen is reopened.
+  $: own=busy || !image || $setup.snapshot?.stagedTarget?.image===image ? result : null;
   $: scan=own?.disks || busy ? own : (check?.result ?? own);
   // Choosing another image drops what is shown: its size sets the space needed.
   let shownImage=image;
@@ -64,7 +64,7 @@
   }
   // A background check stopped for another action picks up again here.
   let resumed=false;
-  $: if(!recoveryOnly && !resumed && check?.status==='stopped' && !busy && !result?.disks) { resumed=true; void setup.backgroundCheck(); }
+  $: if(!recoveryOnly && !resumed && check?.status==='stopped' && !busy && !own?.disks) { resumed=true; void setup.backgroundCheck(); }
   $: if(error && analyzing) analyzing=null;
   $: disks=Array.from(new Map([
     ...(inspection?.choices ?? []).map(c=>[c.diskUniqueId,{id:c.diskUniqueId,number:c.diskNumber,size:c.diskSizeBytes,blocked:undefined as StagedBlockedDisk|undefined}] as const),
@@ -211,7 +211,7 @@
     void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
   }
   function inspect() {
-    inspection=undefined; analyzing=null; reading=true; heldDefault=''; inspectedImage=image;
+    inspection=undefined; analyzing=null; reading=true; heldDefault='';
     void setup.stagedIso('inspect');
   }
   // A partition being rechecked shows as checking until its new limit arrives.
@@ -246,7 +246,7 @@
   function analyze(region:StagedRegion) {
     if(!disk || !layout || busy || !testing || !imageKnown || !region.partitionNumber || !region.partitionGuid) return;
     const query={diskNumber:disk.number,diskUniqueId:disk.id,partitionNumber:region.partitionNumber,partitionGuid:region.partitionGuid};
-    analyzing=query; inspectedImage=image;
+    analyzing=query;
     void setup.stagedIso('inspect',null,null,query);
   }
   // Review takes a while after Windows asks for access; say so beside the

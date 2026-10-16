@@ -592,12 +592,16 @@ it('drops results already shown when another image is chosen, including a check 
   await view.rerender({sourceReady:false,image:'local'});
   await tick();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
-  // A check run by hand for the old image doesn't count for the new one.
-  await view.rerender({sourceReady:true,image:'official'});
-  await fireEvent.click(screen.getByRole('button',{name:'Refresh'}));
-  state.set({pending:false,snapshot:{...measured().snapshot,stagedCheck:checked('local')}});
+  // A check run by hand holds for its image, also after reopening the
+  // screen, and not for another image.
+  const byHand={pending:false,snapshot:{...measured().snapshot,stagedTarget:{action:'inspect',operationId:null,image:'official'},stagedCheck:{...checked('official'),status:'stopped',result:null}}};
+  state.set(byHand);
+  view.unmount();
+  const reopened=render(StagedInstaller,{sourceReady:true,image:'official'});
   await tick();
-  await view.rerender({sourceReady:false,image:'other'});
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeInTheDocument();
+  expect(calls.backgroundCheck).not.toHaveBeenCalled();
+  await reopened.rerender({sourceReady:false,image:'other'});
   await tick();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
 });
