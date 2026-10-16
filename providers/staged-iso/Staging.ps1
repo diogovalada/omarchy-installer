@@ -489,7 +489,8 @@ function Enter-StagingStep($Plan,[string]$Step,[string]$Stage,[string]$Message) 
     if (-not $Plan.PSObject.Properties['timings']) { $Plan | Add-Member -NotePropertyName timings -NotePropertyValue @() }
     $timings=@($Plan.timings)
     if ($timings.Count -and -not $timings[-1].end) { $timings[-1].end=$now }
-    $Plan.timings=$timings+@([ordered]@{step=$Step;start=$now;end=$null})
+    # No step: the last one ended, nothing starts.
+    $Plan.timings=if ($Step) { $timings+@([ordered]@{step=$Step;start=$now;end=$null}) } else { $timings }
     # Saved now, so an interrupted run still shows where it stopped.
     if ($Plan.PSObject.Properties['status'] -and $Plan.status -ne 'planned') { Save-StagingState $Plan }
     if ($Step) { Emit 'progress' $Stage @{message=$Message;step=$Step} }
