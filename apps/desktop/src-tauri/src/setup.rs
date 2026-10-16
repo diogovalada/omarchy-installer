@@ -240,7 +240,7 @@ fn record_failure(inner: &mut Inner, error: String) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
-    } else if error.starts_with(elevation::NOT_APPROVED) {
+    } else if error == elevation::DECLINED {
         // The prompt comes before any change.
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
@@ -2188,19 +2188,26 @@ mod usb_review_tests {
         let mut inner = setup.inner.lock().unwrap();
         inner.snapshot.status = "running".into();
         inner.snapshot.staged_target = Some(json!({"action":"firmware","operationId":"id"}));
-        record_failure(
-            &mut inner,
-            format!(
-                "{}: The operation was canceled by the user. (os error 1223)",
-                elevation::NOT_APPROVED
-            ),
-        );
+        record_failure(&mut inner, elevation::DECLINED.into());
         assert_eq!(inner.snapshot.status, "cancelled");
         assert_eq!(inner.snapshot.error, None);
         assert_eq!(
             inner.snapshot.message,
             "Administrator access wasn't given. Nothing was changed."
         );
+        // Any other launch failure keeps its reason.
+        inner.snapshot.status = "running".into();
+        record_failure(
+            &mut inner,
+            "Administrator approval was not completed: Not enough memory resources are available. (os error 8)".into(),
+        );
+        assert_eq!(inner.snapshot.status, "failed");
+        assert!(inner
+            .snapshot
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("os error 8"));
     }
 
     #[test]
