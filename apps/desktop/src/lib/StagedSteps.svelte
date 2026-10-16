@@ -61,13 +61,14 @@
       </ol>
       <p>If the firmware warns that BitLocker may ask for a recovery key, you can continue: this app paused BitLocker.</p>
       <p>Windows then starts again and this app reopens, so you can start the installer. Windows may ask you to set up your PIN again, so make sure you can sign in another way, such as your password or your Microsoft account’s recovery email or phone.</p>
-      <details class="how"><summary>Can’t change it?</summary><p>Some PCs only unlock Secure Boot after you set a firmware password, or call the setting “OS Type” (choose Other OS).</p></details>
     {:else}<p>{TEXT[current]}</p>{/if}
     {#if current===1 || current===2}<p>{installer}</p>{/if}
   {:else}
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>
   {/if}
   {#if primary}<button class="primary" disabled={busy} onclick={()=>act(primary)}>{labels[primary]}</button>{/if}
+  <!-- Below the button, so opening it moves nothing the user might click. -->
+  {#if ready && !underway && current===0}<details class="how"><summary>Can’t change it?</summary><p>Some PCs only unlock Secure Boot after you set a firmware password, or call the setting “OS Type” (choose Other OS).</p></details>{/if}
   {#if ready && !underway}
     <details>
       <summary>Starting Windows later</summary>

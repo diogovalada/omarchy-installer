@@ -194,7 +194,7 @@ namespace Omarchy.DirectX86 {
         // A one-time boot already pending is fine only if it is this entry's own,
         // left by an earlier arm whose restart hasn't happened yet.
         public static bool PendingBootAllowed(byte[] pending, string name) {
-            return pending == null || (pending.Length == 2 && BitConverter.ToUInt16(pending, 0) == StagingIndex(name));
+            return OneTimeBootAllowed(pending, StagingIndex(name));
         }
         public static void ArmStagingBoot(string name, byte[] option) {
             ushort index = StagingIndex(name); FirmwarePrivilege();

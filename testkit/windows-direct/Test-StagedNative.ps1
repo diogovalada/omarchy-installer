@@ -37,6 +37,11 @@ $renamed=[byte[]](@(0,0,0,0) + [BitConverter]::GetBytes([uint16]$pathLength) + [
 Assert ([Omarchy.DirectX86.NativeDisk]::SameStagingTarget($renamed,$option)) 'A renamed entry targeting the temporary loader must remain ours.'
 Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([Omarchy.DirectX86.NativeDisk]::StagingBootOption(5,200GB,$esp),$option)) 'An entry for another partition was treated as ours.'
 Assert (-not [Omarchy.DirectX86.NativeDisk]::SameStagingTarget([byte[]](1,0,0,0),$option)) 'A truncated entry was treated as ours.'
+# Windows' boot check refuses a pending one-time boot unless it is the caller's own.
+Assert ([Omarchy.DirectX86.NativeDisk]::OneTimeBootAllowed($null,-1)) 'No pending one-time boot was refused.'
+Assert (-not [Omarchy.DirectX86.NativeDisk]::OneTimeBootAllowed([BitConverter]::GetBytes([uint16]7),-1)) 'A pending one-time boot was accepted without an owner.'
+Assert ([Omarchy.DirectX86.NativeDisk]::OneTimeBootAllowed([BitConverter]::GetBytes([uint16]7),7)) "The staged installer's own pending boot was refused."
+Assert (-not [Omarchy.DirectX86.NativeDisk]::OneTimeBootAllowed([BitConverter]::GetBytes([uint16]8),7)) 'Another pending one-time boot was accepted.'
 # Arming again before the restart keeps this entry's own one-time boot; another is refused.
 Assert ([Omarchy.DirectX86.NativeDisk]::PendingBootAllowed($null,'Boot0007')) 'No pending one-time boot was refused.'
 Assert ([Omarchy.DirectX86.NativeDisk]::PendingBootAllowed([BitConverter]::GetBytes([uint16]7),'Boot0007')) 'Our own pending one-time boot was refused.'

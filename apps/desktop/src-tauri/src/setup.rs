@@ -240,6 +240,11 @@ fn record_failure(inner: &mut Inner, error: String) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
+    } else if error.starts_with(elevation::NOT_APPROVED) {
+        // The prompt comes before any change.
+        inner.snapshot.status = "cancelled".into();
+        inner.snapshot.error = None;
+        inner.snapshot.message = "Administrator access wasn't given. Nothing was changed.".into();
     } else if checking && inner.cancel.load(Ordering::Relaxed) {
         // A stopped disk check isn't a failure; partitions it measured stay.
         inner.snapshot.status = "cancelled".into();
@@ -2177,6 +2182,27 @@ mod usb_review_tests {
         assert!(guard.as_ref().unwrap().alive.load(Ordering::Relaxed));
         assert_eq!(launches.load(Ordering::Relaxed), before + 1);
     }
+    #[test]
+    fn a_declined_administrator_prompt_is_cancelled_without_an_error() {
+        let setup = Setup::default();
+        let mut inner = setup.inner.lock().unwrap();
+        inner.snapshot.status = "running".into();
+        inner.snapshot.staged_target = Some(json!({"action":"firmware","operationId":"id"}));
+        record_failure(
+            &mut inner,
+            format!(
+                "{}: The operation was canceled by the user. (os error 1223)",
+                elevation::NOT_APPROVED
+            ),
+        );
+        assert_eq!(inner.snapshot.status, "cancelled");
+        assert_eq!(inner.snapshot.error, None);
+        assert_eq!(
+            inner.snapshot.message,
+            "Administrator access wasn't given. Nothing was changed."
+        );
+    }
+
     #[test]
     fn a_stopped_disk_check_is_cancelled_and_keeps_what_it_measured() {
         let setup = Setup::default();

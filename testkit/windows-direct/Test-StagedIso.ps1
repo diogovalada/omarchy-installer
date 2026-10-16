@@ -547,7 +547,7 @@ try {
     Enter-StagingStep $plan 'verify' 'verifying-source' 'Verifying'
     Enter-StagingStep $plan 'copy' 'copying-installer' 'Copying'
     Enter-StagingStep $plan '' '' ''
-    Assert (@($plan.timings).Count -eq 3 -and $plan.timings[0].end -and $plan.timings[1].end -and $plan.timings[1].step -eq 'copy') 'Step timings were not recorded.'
+    Assert (@($plan.timings).Count -eq 2 -and $plan.timings[0].end -and $plan.timings[1].end -and $plan.timings[1].step -eq 'copy') 'Step timings were not recorded, or finishing added an empty one.'
     Assert ($script:emitted.Count -eq 2 -and $script:emitted[1].step -eq 'copy') 'Entering a step did not tell the app, or finishing did.'
     # Once preparing, each step change is saved, so an interrupted run keeps its timings.
     function Save-StagingState($State) { $script:saved++ }

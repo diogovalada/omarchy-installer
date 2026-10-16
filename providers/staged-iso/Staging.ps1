@@ -502,7 +502,8 @@ function Enter-StagingStep($Plan,[string]$Step,[string]$Stage,[string]$Message) 
     if (-not $Plan.PSObject.Properties['timings']) { $Plan | Add-Member -NotePropertyName timings -NotePropertyValue @() }
     $timings=@($Plan.timings)
     if ($timings.Count -and -not $timings[-1].end) { $timings[-1].end=$now }
-    $Plan.timings=$timings+@([ordered]@{step=$Step;start=$now;end=$null})
+    # No step: the last one ended, nothing starts.
+    $Plan.timings=if ($Step) { $timings+@([ordered]@{step=$Step;start=$now;end=$null}) } else { $timings }
     # Saved now, so an interrupted run still shows where it stopped.
     if ($Plan.PSObject.Properties['status'] -and $Plan.status -ne 'planned') { Save-StagingState $Plan }
     if ($Step) { Emit 'progress' $Stage @{message=$Message;step=$Step} }
@@ -678,7 +679,8 @@ function Invoke-StagingArm($State) {
     Assert-StagingEncryption $disk
     [void](Get-StagingDisk $disk $State.diskUniqueId)
     if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot is on. Use Restart to firmware settings to turn it off; BitLocker is suspended, so this does not need your recovery key.' }
-    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
+    # Selecting it again before the restart: its own pending one-time boot is fine.
+    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot([Convert]::ToInt32($State.boot.name.Substring(4),16))
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }
     $efi=Get-OwnedStagingPartition $State $State.partitions[0]
     if ([Convert]::ToBase64String([Omarchy.DirectX86.NativeDisk]::StagingBootOption($efi.PartitionNumber,$efi.Offset,[guid]$efi.Guid)) -cne $State.boot.option) { throw 'The temporary firmware target no longer matches its partition.' }
