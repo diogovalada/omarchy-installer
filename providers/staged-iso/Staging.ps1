@@ -639,7 +639,8 @@ function Invoke-StagingArm($State) {
     Assert-StagingEncryption $disk
     [void](Get-StagingDisk $disk $State.diskUniqueId)
     if (Confirm-SecureBootUEFI -ErrorAction Stop) { throw 'Secure Boot is on. Use Restart to firmware settings to turn it off; BitLocker is suspended, so this does not need your recovery key.' }
-    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot()
+    # Selecting it again before the restart: its own pending one-time boot is fine.
+    $windows=[Omarchy.DirectX86.NativeDisk]::InspectWindowsBoot([Convert]::ToInt32($State.boot.name.Substring(4),16))
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }
     $efi=Get-OwnedStagingPartition $State $State.partitions[0]
     if ([Convert]::ToBase64String([Omarchy.DirectX86.NativeDisk]::StagingBootOption($efi.PartitionNumber,$efi.Offset,[guid]$efi.Guid)) -cne $State.boot.option) { throw 'The temporary firmware target no longer matches its partition.' }
