@@ -553,6 +553,20 @@ Implemented as planned, with these details:
   ("Checking how much C: can shrink…"); the helper's technical stages keep
   the plain "Planning the changes…".
 
+## PR 3 notes (2026-10-16)
+
+Implemented as planned, with these details:
+
+- The helper's reader registers each operation as its request arrives, so a
+  Stop sent right after a request can't fall in a gap before it starts.
+- The desktop prepares everything that may show a dialog (the records
+  folder) before taking the session, as before sessions, so the first
+  operation's dialogs still come before its prompt.
+- A result or error tagged for another operation ends the exchange with an
+  error and drops the session.
+- "Check available space" drops "Windows will ask for administrator
+  access" once the session is ready.
+
 ## Not doing
 
 - **Running the whole app as administrator:** see Decisions.

@@ -67,6 +67,7 @@ pub fn run() {
             setup::dismiss_usb_review,
             setup::start_setup,
             setup::cancel_setup,
+            setup::start_admin_session,
             setup::respond_staged_review,
             apple_setup::apple_setup_status,
             apple_setup::apple_setup_action,

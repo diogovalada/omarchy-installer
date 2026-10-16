@@ -13,10 +13,18 @@ vi.mock('./lib/downloads', async importOriginal => {
 vi.mock('./lib/setup', async importOriginal => {
   const actual = await importOriginal<typeof import('./lib/setup')>();
   const { writable } = await import('svelte/store');
-  return { ...actual, setup:{ ...writable({ pending:false, snapshot:null }), refresh:vi.fn(), stagedIso:vi.fn() } };
+  return { ...actual, setup:{ ...writable({ pending:false, snapshot:null }), refresh:vi.fn(), stagedIso:vi.fn(), startAdminSession:vi.fn() } };
 });
 const state = setup as typeof setup & { set:(value:unknown)=>void };
 beforeEach(()=>{ vi.clearAllMocks(); state.set({pending:false,snapshot:{status:'idle',stagedTesting:false}}); });
+it('asks for administrator access once at launch and says why while asking',async()=>{
+  render(App);
+  expect(setup.startAdminSession).toHaveBeenCalledOnce();
+  expect(screen.queryByText(/needs administrator access/)).not.toBeInTheDocument();
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:false,admin:'asking'}});
+  await import('svelte').then(({tick})=>tick());
+  expect(screen.getByText('Omarchy Installer needs administrator access to check your disks and prepare installers.')).toHaveAttribute('role','status');
+});
 it('keeps normal native builds closed with no empty recovery section',()=>{
   render(App);
   expect(screen.getByRole('button',{name:'Install without USB'})).toBeDisabled();

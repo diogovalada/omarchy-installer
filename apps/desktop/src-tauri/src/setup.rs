@@ -75,6 +75,10 @@ pub struct Snapshot {
     // the app shows progress, also after reloading.
     steps: Option<Value>,
     step: Option<String>,
+    // Administrator access for this run: "asking" while the startup prompt is
+    // open, "ready" once approved, "declined"; none before asking or after
+    // the helper went away.
+    admin: Option<String>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,6 +109,8 @@ struct Inner {
     destinations: Vec<(String, Destination)>,
     usb_review: Option<PendingUsbReview>,
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
+    // The running operation's ID, which its cancel frame repeats.
+    operation: Option<String>,
     cancel: Arc<AtomicBool>,
     staged_review: Option<std::sync::mpsc::Sender<bool>>,
     // The user declined the staged write's review in this operation.
@@ -112,6 +118,45 @@ struct Inner {
 #[derive(Clone)]
 pub struct Setup {
     inner: Arc<Mutex<Inner>>,
+    // The elevated helper serving this app's operations. Held for the length
+    // of each operation, so a launch in progress (the prompt at startup) and
+    // an operation started meanwhile share one prompt.
+    session: Arc<Mutex<Option<Session>>>,
+}
+struct Session {
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    reader: BufReader<Box<dyn std::io::Read + Send>>,
+    alive: Arc<AtomicBool>,
+}
+impl Session {
+    fn new(connection: elevation::Connection) -> Self {
+        Self {
+            writer: Arc::new(Mutex::new(connection.writer)),
+            reader: BufReader::new(connection.reader),
+            alive: connection.alive,
+        }
+    }
+}
+// On Windows the helper serves every operation while the app is open; other
+// systems keep one helper (and one prompt) per operation until tested.
+const KEEP_SESSION: bool = cfg!(windows);
+/// The current session, starting one (with its prompt) only if there is none
+/// or its helper has exited since the last operation.
+fn acquire_session(
+    holder: &Mutex<Option<Session>>,
+    launch: impl FnOnce() -> Result<elevation::Connection, String>,
+) -> Result<std::sync::MutexGuard<'_, Option<Session>>, String> {
+    let mut guard = holder.lock().map_err(|_| "Helper session is unavailable")?;
+    if guard
+        .as_ref()
+        .is_some_and(|session| !session.alive.load(Ordering::Relaxed))
+    {
+        *guard = None;
+    }
+    if guard.is_none() {
+        *guard = Some(Session::new(launch()?));
+    }
+    Ok(guard)
 }
 impl Default for Setup {
     fn default() -> Self {
@@ -142,13 +187,16 @@ impl Default for Setup {
                     secure_boot: None,
                     steps: None,
                     step: None,
+                    admin: None,
                 },
                 destinations: vec![],
                 usb_review: None,
                 writer: None,
+                operation: None,
                 cancel: Arc::new(AtomicBool::new(false)),
                 staged_review: None,
             })),
+            session: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -166,6 +214,11 @@ fn record_failure(inner: &mut Inner, error: String) {
         inner.snapshot.status = "cancelled".into();
         inner.snapshot.error = None;
         inner.snapshot.message = "Nothing was changed.".into();
+    } else if error == elevation::DECLINED {
+        // The prompt comes before any change.
+        inner.snapshot.status = "cancelled".into();
+        inner.snapshot.error = None;
+        inner.snapshot.message = "Administrator access wasn't given. Nothing was changed.".into();
     } else if checking && inner.cancel.load(Ordering::Relaxed) {
         // A stopped disk check isn't a failure; partitions it measured stay.
         inner.snapshot.status = "cancelled".into();
@@ -1339,6 +1392,38 @@ pub fn respond_staged_review(approved: bool, setup: State<'_, Setup>) -> Result<
     setup.snapshot()
 }
 
+/// Asks for administrator access once, right after the window opens, so
+/// later operations need no prompt of their own. Windows only. Skipped while
+/// a session exists or an operation holds it (it then has one, or is
+/// launching one and will share it).
+#[tauri::command]
+pub fn start_admin_session(
+    app: tauri::AppHandle,
+    setup: State<'_, Setup>,
+) -> Result<Snapshot, String> {
+    if KEEP_SESSION {
+        let service = setup.inner().clone();
+        std::thread::spawn(move || {
+            let Ok(mut session) = service.session.try_lock() else {
+                return;
+            };
+            if session.is_some() {
+                return;
+            }
+            service.update(&app, |inner| inner.snapshot.admin = Some("asking".into()));
+            let admin = match elevation::launch() {
+                Ok(connection) => {
+                    *session = Some(Session::new(connection));
+                    "ready"
+                }
+                Err(_) => "declined",
+            };
+            service.update(&app, |inner| inner.snapshot.admin = Some(admin.into()));
+        });
+    }
+    setup.snapshot()
+}
+
 #[tauri::command]
 pub fn cancel_setup(setup: State<'_, Setup>) -> Result<Snapshot, String> {
     let mut inner = setup
@@ -1355,7 +1440,7 @@ pub fn cancel_setup(setup: State<'_, Setup>) -> Result<Snapshot, String> {
             &mut *writer
                 .lock()
                 .map_err(|_| "Helper connection is unavailable")?,
-            &json!({"protocol":1,"type":"cancel"}),
+            &json!({"protocol":1,"type":"cancel","operation":inner.operation}),
         )?;
     }
     Ok(inner.snapshot.clone())
@@ -1391,22 +1476,76 @@ fn run_elevated(
     app: &tauri::AppHandle,
     request: OperationRequest,
 ) -> Result<Value, String> {
-    let staged_inspection = matches!(
-        &request.destination,
-        Destination::StagedIso {
-            action: crate::setup_protocol::StagedAction::Inspect,
-            ..
-        }
+    // Before the prompt, as before sessions: choosing a records folder may
+    // show a dialog.
+    let prepared = Prepared {
+        staged_inspection: matches!(
+            &request.destination,
+            Destination::StagedIso {
+                action: crate::setup_protocol::StagedAction::Inspect,
+                ..
+            }
+        ),
+        usb_approval: crate::setup_protocol::usb_confirmation_plan(&request)?,
+        export: crate::operation_records::Export::choose(app, &request.destination)?,
+        #[cfg(windows)]
+        verified_iso: app.state::<Downloads>().verified_lease(&request.source),
+    };
+    let mut session = acquire_session(&service.session, elevation::launch)?;
+    service.update(app, |inner| inner.snapshot.admin = Some("ready".into()));
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    // A result or error from the helper ends the operation normally; any
+    // other ending leaves the session in an unknown state, so it is dropped.
+    let mut finished = false;
+    let outcome = exchange(
+        service,
+        app,
+        request,
+        prepared,
+        &operation_id,
+        session.as_mut().ok_or("Helper session is unavailable")?,
+        &mut finished,
     );
-    let usb_approval = crate::setup_protocol::usb_confirmation_plan(&request)?;
+    if !finished || !KEEP_SESSION {
+        *session = None;
+        service.update(app, |inner| {
+            if inner.snapshot.admin.as_deref() == Some("ready") {
+                inner.snapshot.admin = None;
+            }
+        });
+    }
+    outcome
+}
+
+/// What an operation prepares in the desktop before the helper runs it.
+struct Prepared {
+    staged_inspection: bool,
+    usb_approval: Option<Value>,
+    export: Option<crate::operation_records::Export>,
+    #[cfg(windows)]
+    verified_iso: Option<Arc<crate::iso_source::HeldIso>>,
+}
+
+fn exchange(
+    service: &Setup,
+    app: &tauri::AppHandle,
+    request: OperationRequest,
+    prepared: Prepared,
+    operation_id: &str,
+    session: &mut Session,
+    finished: &mut bool,
+) -> Result<Value, String> {
+    let Prepared {
+        staged_inspection,
+        usb_approval,
+        mut export,
+        #[cfg(windows)]
+        verified_iso,
+    } = prepared;
     let mut usb_approval_used = false;
-    let mut export = crate::operation_records::Export::choose(app, &request.destination)?;
     let mut exported_path = None;
     let mut export_error = None;
-    #[cfg(windows)]
-    let verified_iso = app.state::<Downloads>().verified_lease(&request.source);
-    let connection = elevation::launch()?;
-    let writer = Arc::new(Mutex::new(connection.writer));
+    let writer = Arc::clone(&session.writer);
     let mut reopen: Option<String> = None;
     let mut restarting = false;
     let mut envelope = serde_json::to_value(&request).map_err(|e| e.to_string())?;
@@ -1421,14 +1560,15 @@ fn run_elevated(
         &mut *writer
             .lock()
             .map_err(|_| "Helper connection is unavailable")?,
-        &envelope,
+        &json!({"protocol":1,"type":"request","operation":operation_id,"request":envelope}),
     )?;
     service.update(app, |inner| {
         inner.writer = Some(Arc::clone(&writer));
+        inner.operation = Some(operation_id.into());
         inner.snapshot.cancel_available = true;
     });
-    let mut reader = BufReader::new(connection.reader);
-    while let Some(value) = read_frame(&mut reader)? {
+    let reader = &mut session.reader;
+    while let Some(value) = read_frame(reader)? {
         // The restart is under way: keep the reopen entry from here on.
         restarting |= value["type"] == "event" && value["stage"] == "restarting";
         match value["type"].as_str() {
@@ -1545,7 +1685,7 @@ fn run_elevated(
                     &mut *writer
                         .lock()
                         .map_err(|_| "Helper connection is unavailable")?,
-                    &json!({"protocol":1,"type":"confirmation","binding":binding,"approved":approved}),
+                    &json!({"protocol":1,"type":"confirmation","operation":operation_id,"binding":binding,"approved":approved}),
                 )?;
             }
             Some("event") => service.update(app, |inner| {
@@ -1610,7 +1750,11 @@ fn run_elevated(
                     inner.snapshot.step = Some(step.into());
                 }
             }),
+            Some("result" | "error") if value["operation"] != operation_id => {
+                return Err("The helper answered for another operation".into());
+            }
             Some("result") => {
+                *finished = true;
                 let mut result = value["result"].clone();
                 // Secure Boot was already off, so the PC doesn't restart.
                 if let Some(command) = reopen.as_deref().filter(|_| result["secureBoot"] == false) {
@@ -1633,6 +1777,7 @@ fn run_elevated(
                 return Ok(result);
             }
             Some("error") => {
+                *finished = true;
                 // A failure before the restart began means the PC won't
                 // restart. A lost connection keeps the entry: that is
                 // usually the restart.
@@ -1656,6 +1801,86 @@ fn run_elevated(
 #[cfg(test)]
 mod usb_review_tests {
     use super::*;
+    fn connection() -> elevation::Connection {
+        elevation::Connection {
+            reader: Box::new(std::io::empty()),
+            writer: Box::new(std::io::sink()),
+            alive: Arc::new(AtomicBool::new(true)),
+        }
+    }
+    #[test]
+    fn overlapping_requests_share_one_prompt_and_a_lost_session_is_replaced() {
+        let holder = Arc::new(Mutex::new(None));
+        let launches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let threads: Vec<_> = (0..2)
+            .map(|_| {
+                let (holder, launches) = (Arc::clone(&holder), Arc::clone(&launches));
+                std::thread::spawn(move || {
+                    let guard = acquire_session(&holder, || {
+                        launches.fetch_add(1, Ordering::Relaxed);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        Ok(connection())
+                    })
+                    .unwrap();
+                    assert!(guard.is_some());
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(launches.load(Ordering::Relaxed), 1);
+        // A declined prompt leaves no session, so the next action asks again.
+        *holder.lock().unwrap() = None;
+        assert!(acquire_session(&holder, || Err("declined".into())).is_err());
+        assert!(holder.lock().unwrap().is_none());
+        drop(acquire_session(&holder, || Ok(connection())).unwrap());
+        assert!(holder.lock().unwrap().is_some());
+        // A helper that exited between operations is replaced, not reused.
+        let before = launches.load(Ordering::Relaxed);
+        holder
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .alive
+            .store(false, Ordering::Relaxed);
+        let guard = acquire_session(&holder, || {
+            launches.fetch_add(1, Ordering::Relaxed);
+            Ok(connection())
+        })
+        .unwrap();
+        assert!(guard.as_ref().unwrap().alive.load(Ordering::Relaxed));
+        assert_eq!(launches.load(Ordering::Relaxed), before + 1);
+    }
+    #[test]
+    fn a_declined_administrator_prompt_is_cancelled_without_an_error() {
+        let setup = Setup::default();
+        let mut inner = setup.inner.lock().unwrap();
+        inner.snapshot.status = "running".into();
+        inner.snapshot.staged_target = Some(json!({"action":"firmware","operationId":"id"}));
+        record_failure(&mut inner, elevation::DECLINED.into());
+        assert_eq!(inner.snapshot.status, "cancelled");
+        assert_eq!(inner.snapshot.error, None);
+        assert_eq!(
+            inner.snapshot.message,
+            "Administrator access wasn't given. Nothing was changed."
+        );
+        // Any other launch failure keeps its reason.
+        inner.snapshot.status = "running".into();
+        record_failure(
+            &mut inner,
+            "Administrator approval was not completed: Not enough memory resources are available. (os error 8)".into(),
+        );
+        assert_eq!(inner.snapshot.status, "failed");
+        assert!(inner
+            .snapshot
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("os error 8"));
+    }
+
     #[test]
     fn a_stopped_disk_check_is_cancelled_and_keeps_what_it_measured() {
         let setup = Setup::default();

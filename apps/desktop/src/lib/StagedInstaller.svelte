@@ -255,6 +255,7 @@
     <div class="navigation"><button class="back" disabled={busy} onclick={close}><ArrowLeft size={15}/>Back</button>{#if testing}<span class="badge">Test build</span>{/if}</div>
     <h2>Install without USB</h2>
     <p class="intro">Make room for Omarchy on this computer.</p>
+    {#if $setup.snapshot?.admin==='declined' && !busy}<p class="admin">Administrator access lets the installer check your disks in the background. <button class="text-action" onclick={()=>{void setup.startAdminSession();}}>Allow</button></p>{/if}
     <p class="visually-hidden" role="status">{checkStatus}</p>
     {#if review}
       <StagedReview summary={review.summary} plan={review.review} disk={inspection?.disks?.find(d=>d.diskNumber===review?.review?.diskNumber)} secureBoot={inspection?.secureBoot} pending={$setup.pending} {respond}/>
@@ -291,7 +292,7 @@
       {:else}
         <div class="start">
           <button class="primary" disabled={busy || !testing || !sourceReady} onclick={inspect}><HardDrive size={16}/>Check available space</button>
-          <p>{sourceReady ? 'Windows will ask for administrator access. Nothing is changed.' : 'Download the image above first.'}</p>
+          <p>{!sourceReady ? 'Download the image above first.' : $setup.snapshot?.admin==='ready' ? 'Nothing is changed.' : 'Windows will ask for administrator access. Nothing is changed.'}</p>
         </div>
       {/if}
     {:else}
@@ -375,6 +376,7 @@
   .line{margin:0;font-size:12px;color:var(--text)}.text-action{min-height:0;padding:0 0 0 6px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){border-color:transparent;background:transparent;color:var(--accent-hover)}
   .blocked{margin:14px 0 0;font-size:12px}
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
+  .admin{margin:8px 0 0;font-size:12px}.admin .text-action{padding:0 0 0 4px}
   .hint{margin:0 auto 0 0;font-size:11px;color:var(--text-dim)}
   .source-note{color:var(--text-dim)}.source-note::before{content:'·';margin:0 6px}
   .help{margin:0 0 8px}.help p{margin:0 0 6px;font-size:11px}.text-action.inline{padding:0}

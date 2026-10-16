@@ -6,7 +6,16 @@ use std::path::{Path, PathBuf};
 pub struct Connection {
     pub reader: Box<dyn Read + Send>,
     pub writer: Box<dyn Write + Send>,
+    /// Cleared when the launched helper process exits, so a session whose
+    /// helper died between operations is replaced instead of reused.
+    pub alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
+
+/// How a launch reports that the user declined the prompt, which always
+/// happens before any change. Other launch failures keep their own message.
+pub const DECLINED: &str = "Administrator access wasn't given";
+
+const CONNECT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 pub fn launch() -> Result<Connection, String> {
     platform::launch()
@@ -124,12 +133,17 @@ mod platform {
         let verb = wide("runas");
         let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-        info.fMask = SEE_MASK_NOCLOSEPROCESS;
+        // Wait for the prompt to be answered before returning; otherwise the
+        // connect deadline below can run out while the prompt is still open.
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
         info.lpVerb = verb.as_ptr();
         info.lpFile = exe.as_ptr();
         info.lpParameters = parameters.as_ptr();
         info.nShow = SW_HIDE;
         if unsafe { ShellExecuteExW(&mut info) } == 0 {
+            if unsafe { GetLastError() } == ERROR_CANCELLED {
+                return Err(DECLINED.into());
+            }
             return Err(format!(
                 "Administrator approval was not completed: {}",
                 os_error()
@@ -140,15 +154,21 @@ mod platform {
         }
         let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess) };
         let pid = unsafe { GetProcessId(process.as_raw_handle()) };
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Generous: the wait also ends at once if the helper exits, and an
+        // approval given late (the prompt left open) must still count.
+        let deadline = Instant::now() + CONNECT_DEADLINE;
         accept(&requests, &process, pid, deadline)?;
         accept(&events, &process, pid, deadline)?;
-        std::thread::spawn(move || unsafe {
-            WaitForSingleObject(process.as_raw_handle(), INFINITE);
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let watched = std::sync::Arc::clone(&alive);
+        std::thread::spawn(move || {
+            unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) };
+            watched.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         Ok(Connection {
             reader: Box::new(events),
             writer: Box::new(requests),
+            alive,
         })
     }
     pub fn connect(id: &str, parent: u32) -> Result<Connection, String> {
@@ -195,6 +215,7 @@ mod platform {
         Ok(Connection {
             reader: Box::new(requests),
             writer: Box::new(events),
+            alive: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
     pub fn protected_directory(parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {
@@ -574,7 +595,9 @@ mod platform {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Could not request administrator approval: {e}"))?;
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Generous: the wait also ends at once if the helper exits, and an
+        // approval given late (the prompt left open) must still count.
+        let deadline = Instant::now() + CONNECT_DEADLINE;
         let accepted = (|| -> Result<UnixStream, String> {
             loop {
                 match listener.accept() {
@@ -624,12 +647,16 @@ mod platform {
         drop(listener);
         let _ = std::fs::remove_file(directory.join("control"));
         let _ = std::fs::remove_dir(&directory);
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let watched = std::sync::Arc::clone(&alive);
         std::thread::spawn(move || {
             let _ = child.wait();
+            watched.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         Ok(Connection {
             reader: Box::new(stream.try_clone().map_err(|e| e.to_string())?),
             writer: Box::new(stream),
+            alive,
         })
     }
     pub fn connect(id: &str, parent: u32) -> Result<Connection, String> {
@@ -674,6 +701,7 @@ mod platform {
         Ok(Connection {
             reader: Box::new(stream.try_clone().map_err(|e| e.to_string())?),
             writer: Box::new(stream),
+            alive: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
     pub fn protected_directory(parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {
