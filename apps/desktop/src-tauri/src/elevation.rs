@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 pub struct Connection {
     pub reader: Box<dyn Read + Send>,
     pub writer: Box<dyn Write + Send>,
+    /// Cleared when the launched helper process exits, so a session whose
+    /// helper died between operations is replaced instead of reused.
+    pub alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub fn launch() -> Result<Connection, String> {
@@ -143,12 +146,16 @@ mod platform {
         let deadline = Instant::now() + Duration::from_secs(120);
         accept(&requests, &process, pid, deadline)?;
         accept(&events, &process, pid, deadline)?;
-        std::thread::spawn(move || unsafe {
-            WaitForSingleObject(process.as_raw_handle(), INFINITE);
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let watched = std::sync::Arc::clone(&alive);
+        std::thread::spawn(move || {
+            unsafe { WaitForSingleObject(process.as_raw_handle(), INFINITE) };
+            watched.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         Ok(Connection {
             reader: Box::new(events),
             writer: Box::new(requests),
+            alive,
         })
     }
     pub fn connect(id: &str, parent: u32) -> Result<Connection, String> {
@@ -195,6 +202,7 @@ mod platform {
         Ok(Connection {
             reader: Box::new(requests),
             writer: Box::new(events),
+            alive: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
     pub fn protected_directory(parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {
@@ -624,12 +632,16 @@ mod platform {
         drop(listener);
         let _ = std::fs::remove_file(directory.join("control"));
         let _ = std::fs::remove_dir(&directory);
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let watched = std::sync::Arc::clone(&alive);
         std::thread::spawn(move || {
             let _ = child.wait();
+            watched.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         Ok(Connection {
             reader: Box::new(stream.try_clone().map_err(|e| e.to_string())?),
             writer: Box::new(stream),
+            alive,
         })
     }
     pub fn connect(id: &str, parent: u32) -> Result<Connection, String> {
@@ -674,6 +686,7 @@ mod platform {
         Ok(Connection {
             reader: Box::new(stream.try_clone().map_err(|e| e.to_string())?),
             writer: Box::new(stream),
+            alive: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
     pub fn protected_directory(parent: Option<&Path>, name: &str) -> Result<PathBuf, String> {

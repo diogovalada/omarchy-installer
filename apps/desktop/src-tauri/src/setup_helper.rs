@@ -103,8 +103,13 @@ fn serve(
         &mpsc::Receiver<Value>,
     ) -> Result<Value, String>,
 ) {
-    let output: Emitter = Arc::new(Mutex::new(writer));
     let running: Arc<Mutex<Option<Running>>> = Arc::new(Mutex::new(None));
+    let broken = Arc::new(AtomicBool::new(false));
+    let output: Emitter = Arc::new(Mutex::new(Box::new(Watched {
+        inner: writer,
+        broken: Arc::clone(&broken),
+        running: Arc::clone(&running),
+    })));
     let (requests, incoming) =
         mpsc::channel::<(String, Value, Arc<AtomicBool>, mpsc::Receiver<Value>)>();
     let shared = Arc::clone(&running);
@@ -163,15 +168,54 @@ fn serve(
         if let Ok(mut current) = running.lock() {
             *current = None;
         }
-        emit(
-            &output,
-            match result {
-                Ok(result) => json!({"protocol":1,"type":"result","operation":id,"result":result}),
-                Err(error) => {
-                    json!({"protocol":1,"type":"error","operation":id,"message":error,"cancelled":cancel.load(Ordering::Relaxed)})
-                }
-            },
-        );
+        let frame = match result {
+            Ok(result) => json!({"protocol":1,"type":"result","operation":id,"result":result}),
+            Err(error) => {
+                json!({"protocol":1,"type":"error","operation":id,"message":error,"cancelled":cancel.load(Ordering::Relaxed)})
+            }
+        };
+        let sent = output
+            .lock()
+            .map_err(|_| "Helper output is unavailable".to_owned())
+            .and_then(|mut writer| write_frame(&mut *writer, &frame));
+        if let Err(error) = sent {
+            // Too large to send (nothing was written): say so, so the desktop
+            // isn't left waiting. A broken channel ends the session below.
+            emit(
+                &output,
+                json!({"protocol":1,"type":"error","operation":id,"message":format!("The helper couldn't send this operation's result: {error}"),"cancelled":false}),
+            );
+        }
+        if broken.load(Ordering::Relaxed) {
+            break;
+        }
+    }
+}
+
+/// The channel to the desktop. A failed write means the desktop can't follow
+/// along any more: the running operation is cancelled (it still finishes what
+/// it can't stop) and the session ends after it.
+struct Watched {
+    inner: Box<dyn Write + Send>,
+    broken: Arc<AtomicBool>,
+    running: Arc<Mutex<Option<Running>>>,
+}
+impl Watched {
+    fn failed(&self) {
+        self.broken.store(true, Ordering::Relaxed);
+        if let Ok(current) = self.running.lock() {
+            if let Some(op) = current.as_ref() {
+                op.cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+}
+impl Write for Watched {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(bytes).inspect_err(|_| self.failed())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush().inspect_err(|_| self.failed())
     }
 }
 
@@ -860,6 +904,72 @@ mod session_tests {
             served
         };
         served.join().unwrap();
+    }
+
+    // Fails every write, as a broken output pipe would.
+    struct Broken;
+    impl Write for Broken {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn a_failed_write_cancels_the_operation_and_ends_the_session() {
+        let (mut writer, helper_reader) = pipe();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&stopped);
+        let served = std::thread::spawn(move || {
+            serve(
+                Box::new(helper_reader),
+                Box::new(Broken),
+                move |_, output, cancel, _| {
+                    emit(
+                        output,
+                        json!({"protocol":1,"type":"event","stage":"working"}),
+                    );
+                    seen.store(wait_for(&cancel, Duration::from_secs(5)), Ordering::Relaxed);
+                    Ok(json!({}))
+                },
+            )
+        });
+        write_frame(
+            &mut writer,
+            &json!({"protocol":1,"type":"request","operation":"one","request":{}}),
+        )
+        .unwrap();
+        // The request side stays open; the session still ends.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !served.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "the session didn't end after a failed write"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(stopped.load(Ordering::Relaxed));
+        drop(writer);
+    }
+
+    #[test]
+    fn a_result_too_large_to_send_becomes_an_error_for_its_operation() {
+        let mut desktop = Desktop::start(Box::new(|_, _, _, _| {
+            Ok(json!({"text":"x".repeat(300 * 1024)}))
+        }));
+        desktop.request("one", json!({}));
+        let answer = desktop.next();
+        assert_eq!(
+            (answer["type"].as_str(), answer["operation"].as_str()),
+            (Some("error"), Some("one"))
+        );
+        assert!(answer["message"]
+            .as_str()
+            .unwrap()
+            .contains("couldn't send"));
+        assert!(desktop.ended());
     }
 
     #[test]

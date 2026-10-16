@@ -126,24 +126,33 @@ pub struct Setup {
 struct Session {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     reader: BufReader<Box<dyn std::io::Read + Send>>,
+    alive: Arc<AtomicBool>,
 }
 impl Session {
     fn new(connection: elevation::Connection) -> Self {
         Self {
             writer: Arc::new(Mutex::new(connection.writer)),
             reader: BufReader::new(connection.reader),
+            alive: connection.alive,
         }
     }
 }
 // On Windows the helper serves every operation while the app is open; other
 // systems keep one helper (and one prompt) per operation until tested.
 const KEEP_SESSION: bool = cfg!(windows);
-/// The current session, starting one (with its prompt) only if there is none.
+/// The current session, starting one (with its prompt) only if there is none
+/// or its helper has exited since the last operation.
 fn acquire_session(
     holder: &Mutex<Option<Session>>,
     launch: impl FnOnce() -> Result<elevation::Connection, String>,
 ) -> Result<std::sync::MutexGuard<'_, Option<Session>>, String> {
     let mut guard = holder.lock().map_err(|_| "Helper session is unavailable")?;
+    if guard
+        .as_ref()
+        .is_some_and(|session| !session.alive.load(Ordering::Relaxed))
+    {
+        *guard = None;
+    }
     if guard.is_none() {
         *guard = Some(Session::new(launch()?));
     }
@@ -1791,6 +1800,7 @@ mod usb_review_tests {
         elevation::Connection {
             reader: Box::new(std::io::empty()),
             writer: Box::new(std::io::sink()),
+            alive: Arc::new(AtomicBool::new(true)),
         }
     }
     #[test]
@@ -1821,6 +1831,22 @@ mod usb_review_tests {
         assert!(holder.lock().unwrap().is_none());
         drop(acquire_session(&holder, || Ok(connection())).unwrap());
         assert!(holder.lock().unwrap().is_some());
+        // A helper that exited between operations is replaced, not reused.
+        let before = launches.load(Ordering::Relaxed);
+        holder
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .alive
+            .store(false, Ordering::Relaxed);
+        let guard = acquire_session(&holder, || {
+            launches.fetch_add(1, Ordering::Relaxed);
+            Ok(connection())
+        })
+        .unwrap();
+        assert!(guard.as_ref().unwrap().alive.load(Ordering::Relaxed));
+        assert_eq!(launches.load(Ordering::Relaxed), before + 1);
     }
     #[test]
     fn a_stopped_disk_check_is_cancelled_and_keeps_what_it_measured() {
