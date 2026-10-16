@@ -46,7 +46,7 @@ function Start-StagingSuspension($Plan,[uint32]$AuthenticatedPid) {
         Assert-SameEncryptionVolume $volume $facts
         $lock=Get-EncryptionLock $facts
         try {
-            Emit 'progress' 'suspending-bitlocker' @{message=('Suspending BitLocker protection on '+$volume.driveLetter+'; data remains encrypted...')}
+            Emit 'progress' 'suspending-bitlocker' @{message=('Suspending BitLocker protection on '+$volume.driveLetter+'; data remains encrypted...');step='bitlocker'}
             [void](Start-EncryptionPreparation (Get-FactsHash $facts) 'suspend' $volume.volumeId)
         } finally { $lock.Dispose() }
     }
@@ -73,7 +73,10 @@ function Assert-StagingFree($Disk,[long]$Start,[long]$Size) {
         if ($Start -lt [long]$p.Offset+[long]$p.Size -and [long]$p.Offset -lt $Start+$Size) { throw 'Staging or installation space overlaps an existing partition.' }
     }
 }
-function Get-StagingChoices($Release,$Resize=$null) {
+# With a cancel file, its events keep Stop available, and it stops before
+# each disk and before measuring.
+function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
+    $Stoppable=[bool]$CancelPath
     $choices=@(); $blocked=@(); $disks=@(); $overhead=512MB+(Align-Up ([long]$Release.sizeBytes+1GB))
     $script:minimumBytes=[long]$overhead
     if ($null -ne $Resize) {
@@ -83,11 +86,16 @@ function Get-StagingChoices($Release,$Resize=$null) {
         $matches=@(Get-InspectedPartitions $resizeDisk | Where-Object { $_.PartitionNumber -eq $Resize.partitionNumber -and [guid]$_.Guid -eq [guid]$Resize.partitionGuid })
         if ($matches.Count -ne 1) { throw 'The partition changed. Refresh disks before checking resize options.' }
     }
-    Emit 'progress' 'inspecting' @{message='Reading disks and Windows encryption status...'}
+    Emit 'progress' 'inspecting' @{cancelAvailable=$Stoppable;message='Reading disks and Windows encryption status...'}
     # Reported so the app can explain when to turn it off; staging never needs it off.
     $secureBoot=try { [bool](Confirm-SecureBootUEFI -ErrorAction Stop) } catch { $null }
     $encryptionSnapshot=Get-BitLockerSnapshot -ForStaging
+    $measured=$false
     foreach ($disk in @(Get-Disk)) {
+        # Outside the per-disk try: a stop isn't a disk that can't be used.
+        # Once the requested partition is measured, finish so its result
+        # isn't lost; the caller stops before the next measurement.
+        if (-not $measured) { Assert-StagingCheckRunning $CancelPath }
         $encryption=@()
         try {
             [void](Get-StagingDisk $disk.Number $disk.UniqueId)
@@ -101,7 +109,7 @@ function Get-StagingChoices($Release,$Resize=$null) {
                       protectionStatus=[int]$_.protectionStatus;lockStatus=[int]$_.lockStatus}
                 })
             }
-            Emit 'progress' 'inspecting' @{message=('Reading partitions on Disk '+$disk.Number+'...')}
+            Emit 'progress' 'inspecting' @{cancelAvailable=$Stoppable;message=('Reading partitions on Disk '+$disk.Number+'...')}
             $diskChoices=@(); $regions=@(); $unallocated=[long]0; $largest=[long]0
             $layoutBefore=try { [Omarchy.DirectX86.NativeDisk]::LayoutHash($disk.Number) } catch { '' }
             $parts=@(Get-InspectedPartitions $disk | Sort-Object Offset); $cursor=[long]1MB
@@ -148,8 +156,9 @@ function Get-StagingChoices($Release,$Resize=$null) {
                         else { $region.resizeReason='Only NTFS partitions can be resized here.' }
                     } catch { $region.resizeReason='Cannot read this filesystem. Unlock it if needed, then refresh.' }
                     if ($null -ne $Resize -and $Resize.diskNumber -eq $disk.Number -and $Resize.diskUniqueId -ceq [string]$disk.UniqueId -and $Resize.partitionNumber -eq $p.PartitionNumber -and [guid]$Resize.partitionGuid -eq [guid]$p.Guid -and $region.resizeState -eq 'unchecked') {
-                        Emit 'progress' 'analyzing-resize' @{message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
-                        $candidate=Get-ShrinkCandidate $p
+                        Assert-StagingCheckRunning $CancelPath
+                        Emit 'progress' 'analyzing-resize' @{cancelAvailable=$Stoppable;message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
+                        $candidate=Get-ShrinkCandidate $p; $measured=$true
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
                         $region.reserveBytes=[long]$candidate.reserveBytes
                         $region.limitedByFiles=[bool]$candidate.limitedByFiles
@@ -179,7 +188,9 @@ function Get-StagingChoices($Release,$Resize=$null) {
                 $choice.largestFreeAfterStagingBytes=if ($remaining.Count) { [long](($remaining | Measure-Object -Maximum).Maximum) } else { [long]0 }
             }
             $choices+=$diskChoices
-        } catch { $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
+        } catch {
+            if ($_.Exception.Message -ceq 'The disk check was stopped.') { throw }
+            $blocked+=@{diskNumber=[int]$disk.Number;diskUniqueId=[string]$disk.UniqueId;diskSizeBytes=[long]$disk.Size;reason=$_.Exception.Message;encryption=$encryption} }
     }
     return @{choices=$choices;blocked=$blocked;disks=$disks;minimumLinuxBytes=$Release.minimumLinuxBytes;temporaryBytes=$overhead;secureBoot=$secureBoot}
 }
@@ -202,16 +213,24 @@ function Merge-StagingAnalysis($Inventory,$Measured,$Query) {
     $Inventory.choices=@($Inventory.choices | Where-Object { $_.diskUniqueId -cne $Query.diskUniqueId -or $_.target.target_kind -ne 'shrink' -or $_.target.partition_guid -cne $Query.partitionGuid })+@($candidate)
     return $Inventory
 }
-function Get-StagingInspection($Release,$Resize=$null) {
-    $result=Get-StagingChoices $Release $Resize
+# Stop requests arrive as a file from the helper. A measurement already
+# running finishes: Windows can't interrupt it.
+function Assert-StagingCheckRunning([string]$CancelPath) {
+    if ($CancelPath -and (Test-Path -LiteralPath $CancelPath)) { throw 'The disk check was stopped.' }
+}
+function Get-StagingInspection($Release,$Resize=$null,[string]$CancelPath='') {
+    Assert-StagingCheckRunning $CancelPath
+    $stoppable=[bool]$CancelPath
+    $result=Get-StagingChoices $Release $Resize $CancelPath
     if ($null -ne $Resize) { return $result }
-    Emit 'progress' 'inspecting' @{message='Disks are ready. Checking Windows resize limits...';stagedIsoInspection=$result}
+    Emit 'progress' 'inspecting' @{cancelAvailable=$stoppable;message='Disks are ready. Checking Windows resize limits...';stagedIsoInspection=$result}
     foreach ($disk in @($result.disks)) {
         foreach ($region in @($disk.regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'unchecked' })) {
+            Assert-StagingCheckRunning $CancelPath
             $query=[pscustomobject]@{diskNumber=$disk.diskNumber;diskUniqueId=$disk.diskUniqueId;partitionNumber=$region.partitionNumber;partitionGuid=$region.partitionGuid}
-            $measured=Get-StagingChoices $Release $query
+            $measured=Get-StagingChoices $Release $query $CancelPath
             $result=Merge-StagingAnalysis $result $measured $query
-            Emit 'progress' 'analyzing-resize' @{message=('Checked resize limit for '+$region.label+' on Disk '+$disk.diskNumber+'.');stagedIsoInspection=$result}
+            Emit 'progress' 'analyzing-resize' @{cancelAvailable=$stoppable;message=('Checked resize limit for '+$region.label+' on Disk '+$disk.diskNumber+'.');stagedIsoInspection=$result}
         }
     }
     return $result
@@ -245,6 +264,8 @@ function Get-StagingPlan($Request) {
     } elseif ($Request.targetKind -eq 'shrink') {
         $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $Request.shrinkPartitionNumber -ErrorAction Stop
         if ([guid]$part.Guid -ne [guid]$Request.shrinkPartitionGuid) { throw 'Shrink partition changed.' }
+        $name=if ([string]$part.DriveLetter -match '^[A-Za-z]$') { [string]$part.DriveLetter+':' } else { 'Partition '+$part.PartitionNumber }
+        Emit 'progress' 'planning' @{message=('Checking how much '+$name+' can shrink. This can take a few minutes.')}
         $candidate=Get-ShrinkCandidate $part
         if (-not $candidate.eligible -or $candidate.maximumAllocationBytes -lt $total) { throw 'Windows cannot release the requested space while retaining its reserve.' }
         # The installer sits right after the shrunk partition, so Windows can
@@ -383,8 +404,24 @@ function Get-StagingConfig($State) {
     # would only reread the whole live image on every installer boot.
     return "set timeout=0`nmenuentry 'Start official Omarchy installer' {`n  search --no-floppy --file --set=root /omarchy-stage-$guid`n  linux /$kernel archisobasedir=arch archisodevice=/dev/disk/by-partuuid/$guid copytoram=n quiet splash xe.enable_panel_replay=0 initramfs_async=0`n  initrd /$initrd`n}`n"
 }
+# SHA-256 of a file, reporting each chunk read to $Progress.
+function Get-StagingFileHash([string]$Path,[scriptblock]$Progress=$null) {
+    $sha=[Security.Cryptography.SHA256]::Create(); $buffer=New-Object byte[] 4194304
+    try {
+        $reader=[IO.File]::OpenRead($Path)
+        try {
+            while (($read=$reader.Read($buffer,0,$buffer.Length)) -gt 0) {
+                [void]$sha.TransformBlock($buffer,0,$read,$null,0)
+                if ($null -ne $Progress) { & $Progress $read }
+            }
+            [void]$sha.TransformFinalBlock($buffer,0,0)
+        } finally { $reader.Dispose() }
+        return ([BitConverter]::ToString($sha.Hash)).Replace('-','').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+}
 # Copy while hashing the source, then compare a readback of the destination.
-# Returns the hash; an expected hash, when given, must match the source.
+# Returns the hash; an expected hash, when given, must match the source. Both
+# passes report bytes to $Progress.
 function Copy-StagedFile([string]$Source,[string]$Destination,[string]$ExpectedHash='',[scriptblock]$Progress=$null) {
     if (Test-Path -LiteralPath $Destination) { throw 'Refusing to overwrite a staged file.' }
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination))
@@ -406,7 +443,7 @@ function Copy-StagedFile([string]$Source,[string]$Destination,[string]$ExpectedH
         $hash=([BitConverter]::ToString($sha.Hash)).Replace('-','').ToLowerInvariant()
     } finally { $sha.Dispose() }
     if ($ExpectedHash -and $hash -cne $ExpectedHash) { throw 'Staged source file changed.' }
-    if ((Sha $Destination) -cne $hash) { throw 'Staged file readback failed.' }
+    if ((Get-StagingFileHash $Destination $Progress) -cne $hash) { throw 'Staged file readback failed.' }
     return $hash
 }
 function Write-StagedText([string]$Path,[string]$Text) {
@@ -432,6 +469,32 @@ function Write-StagingBootFiles($State,[string]$Mount,[string]$Loader) {
     [IO.File]::Move($pendingConfig,(Join-Path $menu 'grub.cfg'))
     [IO.Directory]::Delete($scratch)
 }
+# The write's steps, from the reviewed plan, so the app shows what's coming.
+function Get-StagingSteps($Plan) {
+    $steps=@(@{id='verify';label='Verify the installer image'})
+    $volumes=if ($Plan.PSObject.Properties['bitLocker']) { @($Plan.bitLocker) } else { @() }
+    $paused=@($volumes | Where-Object { $_ -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ([string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
+    if ($paused.Count) { $steps+=@{id='bitlocker';label=('Pause BitLocker on '+($paused -join ', '))} }
+    if ($null -ne $Plan.shrink) {
+        $name=if ([string]$Plan.shrink.driveLetter) { [string]$Plan.shrink.driveLetter+':' } else { 'Partition '+$Plan.shrink.partitionNumber }
+        $steps+=@{id='shrink';label=('Shrink '+$name)}
+    }
+    $steps+=@(@{id='partitions';label='Create the installer partitions'},@{id='copy';label='Copy and check the installer'},@{id='startup';label='Add the startup entry'})
+    return $steps
+}
+# Starts a step: tells the app, and records when the previous one ended and
+# this one started, for the test runs' timings.
+function Enter-StagingStep($Plan,[string]$Step,[string]$Stage,[string]$Message) {
+    $now=[DateTime]::UtcNow.ToString('o')
+    if (-not $Plan.PSObject.Properties['timings']) { $Plan | Add-Member -NotePropertyName timings -NotePropertyValue @() }
+    $timings=@($Plan.timings)
+    if ($timings.Count -and -not $timings[-1].end) { $timings[-1].end=$now }
+    # No step: the last one ended, nothing starts.
+    $Plan.timings=if ($Step) { $timings+@([ordered]@{step=$Step;start=$now;end=$null}) } else { $timings }
+    # Saved now, so an interrupted run still shows where it stopped.
+    if ($Plan.PSObject.Properties['status'] -and $Plan.status -ne 'planned') { Save-StagingState $Plan }
+    if ($Step) { Emit 'progress' $Stage @{message=$Message;step=$Step} }
+}
 function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath='') {
     [void](Get-StagingRelease $Plan.sourceSha256 $Plan.sourceLength)
     Assert-PhysicalDiskIdentity $Plan
@@ -448,15 +511,28 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
     $lease=New-Object Omarchy.DirectX86.NativeSource($Plan.sourceIsoPath,[long]$Plan.sourceLength)
     $mounted=$false
     try {
-        Emit 'progress' 'verifying-source' @{message='Verifying the installer image before disk changes...'}
-        if ((Sha $Plan.sourceIsoPath) -cne $Plan.sourceSha256) { throw 'Official ISO changed after verification.' }
+        $steps=@(Get-StagingSteps $Plan)
+        Emit 'progress' 'staging-steps' @{message='Verifying the installer image before disk changes...';steps=$steps}
+        Enter-StagingStep $Plan 'verify' 'verifying-source' 'Verifying the installer image before disk changes...'
+        $verified=@{done=[long]0;reported=[long]0}
+        $verifying={
+            param([long]$Count)
+            $verified.done+=$Count
+            if ($verified.done-$verified.reported -ge 64MB -or $verified.done -ge [long]$Plan.sourceLength) {
+                $verified.reported=$verified.done
+                Emit 'progress' 'verifying-source' @{message='Verifying the installer image before disk changes...';step='verify';completedBytes=$verified.done;totalBytes=[long]$Plan.sourceLength}
+            }
+        }
+        if ((Get-StagingFileHash $Plan.sourceIsoPath $verifying) -cne $Plan.sourceSha256) { throw 'Official ISO changed after verification.' }
+        # Mounting and listing files can't be counted: an uncounted stage
+        # replaces the finished hash bar.
+        Emit 'progress' 'checking-files' @{message='Checking installer files and staging capacity...';step='verify'}
         $image=Get-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop
         if ($image.Attached) { throw 'Unmount this ISO before staging; the installer only removes mounts it creates.' }
         $image=Mount-DiskImage -ImagePath $Plan.sourceIsoPath -Access ReadOnly -PassThru -ErrorAction Stop; $mounted=$true
         $volumes=@($image | Get-Volume -ErrorAction Stop)
         if ($volumes.Count -ne 1 -or -not $volumes[0].DriveLetter) { throw 'Mounted ISO has no unique readable volume.' }
         $isoRoot=[string]$volumes[0].DriveLetter+':\'
-        Emit 'progress' 'checking-files' @{message='Checking installer files and staging capacity...'}
         $files=@(Get-IsoInventory $isoRoot)
         if (-not $Plan.release.bootQualified) {
             Set-TestingBootPaths $Plan.release $files
@@ -468,10 +544,14 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         if (($files | Measure-Object sizeBytes -Sum).Sum -gt $Plan.partitions[1].sizeBytes-512MB) { throw 'Extracted ISO exceeds the planned staging capacity.' }
         $Plan.files=$files; $Plan.status='allocation-starting'; Save-StagingState $Plan
         Assert-PhysicalDiskIdentity $Plan
+        if (@($steps | Where-Object { $_.id -eq 'bitlocker' }).Count) { Enter-StagingStep $Plan 'bitlocker' 'suspending-bitlocker' 'Pausing BitLocker; data stays encrypted...' }
         Start-StagingSuspension $Plan $AuthenticatedPid
         $layout=$Plan.layoutSha256
-        Emit 'progress' 'allocating-staging' @{message='Preparing the reviewed free space and temporary installer partitions...'}
-        if ($null -ne $Plan.shrink) { $layout=Invoke-ConfirmedShrink $Plan $directory }
+        if ($null -ne $Plan.shrink) {
+            Enter-StagingStep $Plan 'shrink' 'shrinking' 'Shrinking the partition. This can take several minutes...'
+            $layout=Invoke-ConfirmedShrink $Plan $directory
+        }
+        Enter-StagingStep $Plan 'partitions' 'allocating-staging' 'Creating the temporary installer partitions...'
         Assert-StagingFree (Get-StagingDisk $Plan.diskNumber $Plan.diskUniqueId) $Plan.linuxOffsetBytes ($Plan.linuxBytes+512MB+$Plan.partitions[1].sizeBytes)
         [void][Omarchy.DirectX86.NativeDisk]::AllocateStaging($Plan.diskNumber,$layout,$Plan.partitions[0].offsetBytes,$Plan.partitions[1].sizeBytes,[guid]$Plan.partitions[0].guid,[guid]$Plan.partitions[1].guid)
         $Plan.status='copying'; Save-StagingState $Plan
@@ -491,14 +571,16 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
                 if ($owned.role -eq 'source') {
                     # Cancellation is cooperative and only offered while copying.
                     # The partial installer stays recorded for reviewed removal.
-                    $copyState=@{copied=[long]0;reported=[long]0;total=[long]($files | Measure-Object sizeBytes -Sum).Sum}
+                    # Each file is written, then read back to check it: two passes.
+                    Enter-StagingStep $Plan 'copy' 'copying-installer' 'Copying and checking the installer...'
+                    $copyState=@{copied=[long]0;reported=[long]0;total=2*[long]($files | Measure-Object sizeBytes -Sum).Sum}
                     $step={
                         param([long]$Count)
                         $copyState.copied+=$Count
                         if ($copyState.copied-$copyState.reported -ge 64MB -or $copyState.copied -eq $copyState.total) {
                             $copyState.reported=$copyState.copied
                             if ($CancelPath -and (Test-Path -LiteralPath $CancelPath)) { throw 'Preparation was cancelled.' }
-                            Emit 'progress' 'copying-installer' @{message='Copying and verifying the installer...';completedBytes=$copyState.copied;totalBytes=$copyState.total;cancelAvailable=[bool]$CancelPath}
+                            Emit 'progress' 'copying-installer' @{message='Copying and checking the installer...';step='copy';completedBytes=$copyState.copied;totalBytes=$copyState.total;cancelAvailable=[bool]$CancelPath}
                         }
                     }
                     foreach ($file in $files) {
@@ -511,12 +593,14 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
                 }
             } finally { Dismount-StagingPartition $Plan $owned $mount }
         }
+        Enter-StagingStep $Plan 'startup' 'registering-boot' 'Adding the startup entry...'
         Assert-StagingEncryption $Plan.diskNumber
         $efi=Get-OwnedStagingPartition $Plan $Plan.partitions[0]
         $option=[Omarchy.DirectX86.NativeDisk]::StagingBootOption($efi.PartitionNumber,$efi.Offset,[guid]$efi.Guid)
         $Plan.boot=@{name=[Omarchy.DirectX86.NativeDisk]::ReserveStagingBootName();option=[Convert]::ToBase64String($option)}
         $Plan.status='registering-boot'; Save-StagingState $Plan
         [Omarchy.DirectX86.NativeDisk]::RegisterStagingBoot($Plan.boot.name,$option,$Plan.windowsBoot.bootOrderSha256)
+        Enter-StagingStep $Plan '' '' ''
         $Plan.status='staged'; Save-StagingState $Plan
         return Get-StagingSummary $Plan
     } finally { try { if ($mounted) { [void](Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop) } } finally { $lease.Dispose() } }
@@ -561,8 +645,18 @@ function Invoke-StagingArm($State) {
     if ($windows.entrySha256 -cne $State.windowsBoot.entrySha256) { throw 'Windows Boot Manager changed since staging.' }
     $efi=Get-OwnedStagingPartition $State $State.partitions[0]
     if ([Convert]::ToBase64String([Omarchy.DirectX86.NativeDisk]::StagingBootOption($efi.PartitionNumber,$efi.Offset,[guid]$efi.Guid)) -cne $State.boot.option) { throw 'The temporary firmware target no longer matches its partition.' }
+    $total=[long](@($State.files) | Measure-Object sizeBytes -Sum).Sum
+    $checked=@{done=[long]0;reported=[long]0}
+    $checking={
+        param([long]$Count)
+        $checked.done+=$Count
+        if ($checked.done-$checked.reported -ge 64MB -or $checked.done -ge $total) {
+            $checked.reported=$checked.done
+            Emit 'progress' 'verifying-staging' @{message='Checking the installer files...';completedBytes=$checked.done;totalBytes=$total}
+        }
+    }
     foreach ($owned in $State.partitions) {
-        Emit 'progress' 'verifying-staging' @{message='Rechecking staged files before selecting the next startup...'}
+        Emit 'progress' 'verifying-staging' @{message='Checking the installer files...'}
         $mount=Mount-StagingPartition $State $owned
         try {
             if ($owned.role -eq 'source') {
@@ -570,7 +664,7 @@ function Invoke-StagingArm($State) {
                     Assert-StagingRelativePath $file.path
                     if ($file.sha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'The staging record has no verified hash for an installer file.' }
                     $path=Join-Path $mount $file.path
-                    if ((Get-Item -LiteralPath $path).Length -ne $file.sizeBytes -or (Sha $path) -cne $file.sha256) { throw 'Installer files changed since staging.' }
+                    if ((Get-Item -LiteralPath $path).Length -ne $file.sizeBytes -or (Get-StagingFileHash $path $checking) -cne $file.sha256) { throw 'Installer files changed since staging.' }
                 }
                 if ([IO.File]::ReadAllText((Join-Path $mount ('omarchy-stage-'+$owned.guid))) -cne $State.operationId) { throw 'Staging source marker changed.' }
             } else {

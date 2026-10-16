@@ -540,6 +540,19 @@ Implemented as planned, with these details:
   the boot-menu tip beside it.
 - Review's Secure Boot-off bullet now reads "Next: restart into the installer."
 
+## PR 2 notes (2026-10-15)
+
+Implemented as planned, with these details:
+
+- Stop checking was hidden for most of the check: every provider event set
+  `cancelAvailable` to false. Inspection events now keep it while a cancel
+  file exists, so Stop stays available.
+- A stopped check ends as cancelled with "Disk check stopped." and no error;
+  partitions not yet measured read "wasn't checked" with Refresh.
+- The text beside Review shows only the planning step's own message
+  ("Checking how much C: can shrink…"); the helper's technical stages keep
+  the plain "Planning the changes…".
+
 ## Not doing
 
 - **Running the whole app as administrator:** see Decisions.

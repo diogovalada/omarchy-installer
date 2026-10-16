@@ -1218,9 +1218,23 @@ fn execute(
                 if selection.is_some() || operation_id.is_some() {
                     return Err("Inspection does not accept a destination".into());
                 }
-                return run(
-                    "inspect",
-                    &json!({"sourceSha256":request.source.sha256,"sourceLength":request.source.length,"resize":resize}),
+                // Stop is cooperative: the provider checks this file before
+                // each measurement and lets a running one finish.
+                let cancel_path = workspace.join("staged-cancel");
+                let path = write_request(
+                    &workspace,
+                    "staged-inspect-request.json",
+                    &json!({"sourceSha256":request.source.sha256,"sourceLength":request.source.length,"resize":resize,"cancelPath":cancel_path}),
+                )?;
+                let mut command = provider_process::staged_command(&runtime, "inspect", &path)?;
+                provider_process::privileged_environment(&mut command, &workspace)?;
+                return provider_process::run(
+                    command,
+                    None,
+                    Arc::clone(&cancel),
+                    Some(cancel_path),
+                    true,
+                    |value| provider_event(output, value),
                 );
             }
             if resize.is_some() {

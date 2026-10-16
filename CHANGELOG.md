@@ -59,6 +59,14 @@ downloads. Published versions and their artifacts are immutable.
   restart that hasn't happened.
 - USB: the steps after writing say the installer can't use a disk with
   BitLocker on it, even paused.
+- Install without USB (testing builds): preparing shows its steps (verify,
+  pause BitLocker, shrink, create partitions, copy and check, startup entry)
+  with ticks, a percentage where the work is counted, and a moving bar for the
+  shrink. Copy progress includes checking the copied files; checking them
+  again before restarting into the installer shows a bar too. Planning says
+  when it is measuring the partition. Stop checking stays available during the
+  disk check and stops it after the partition being measured; the partitions
+  already measured stay.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

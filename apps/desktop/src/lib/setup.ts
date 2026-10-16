@@ -26,6 +26,9 @@ export interface SetupSnapshot {
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
   // Secure Boot as Windows shows it to standard users; null when unknown.
   secureBoot?: boolean | null;
+  // A staged preparation's steps, from the provider, and the current one.
+  steps?: {id:string;label:string}[] | null;
+  step?: string | null;
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
 // `replaces`: the partition to delete in the installer (Replace Windows).

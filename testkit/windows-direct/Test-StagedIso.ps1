@@ -220,9 +220,23 @@ foreach ($conversion in @(2,3,4,5)) { $script:snapshot.volumes[0].conversionStat
     $found=Get-StagingChoices $release $query
     Assert ($found.choices.Count -eq 0 -and $found.disks[0].regions[0].resizeState -eq 'checked' -and $found.disks[0].regions[0].maximumReleaseBytes -eq 5GB-2MB) 'Insufficient shrink space must retain the measured limit and partition.'
     Assert ($found.disks[0].regions[0].resizeReason -like 'Windows cannot move some files*') 'A Windows shrink limit was blamed on the free-space reserve.'
+    # Stop pressed while C: is measured: the next disk is still read, so C:'s
+    # result is returned rather than lost.
+    $temp=Join-Path $env:TEMP ('omarchy-stop-keep-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); $cancel=Join-Path $temp 'staged-cancel'
+    $other=[pscustomobject]@{Number=1;UniqueId='other';Size=[long]100GB}
+    function Get-Disk { return @($disk,$other) }
+    function Get-StagingDisk($Number,$Identity) { if ($Number -eq 1) { return $other }; return $disk }
+    function Get-InspectedPartitions($Disk) { if ($Disk.Number -eq 0) { return @($part) }; return @() }
+    function Get-PartitionSupportedSize { $script:shrinkCalls++; [IO.File]::WriteAllText($cancel,''); return @{SizeMin=$script:shrinkLimit} }
+    try {
+        $kept=Get-StagingChoices $release $query $cancel
+        Assert ($kept.disks.Count -eq 2 -and $kept.disks[0].regions[0].resizeState -eq 'checked') 'Stop discarded the measurement that had just finished.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
     $query.partitionGuid='44444444-4444-4444-4444-444444444444'
+    function Get-Disk { return $disk }
     Reject { Get-StagingChoices $release $query } 'Resize query accepted a replaced partition.'
-    Assert ($script:shrinkCalls -eq 2) 'Changed partition reached shrink analysis.'
+    Assert ($script:shrinkCalls -eq 3) 'Changed partition reached shrink analysis.'
 }
 
 # One privileged inspection emits the inventory before running the expensive
@@ -424,7 +438,10 @@ try {
 # room for Omarchy right after the temporary installer.
 & {
     $planDisk=[pscustomobject]@{Number=0;UniqueId='plan-disk';Size=[long]500GB;SerialNumber='serial'}
-    $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='66666666-6666-6666-6666-666666666666';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'}
+    $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='66666666-6666-6666-6666-666666666666';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';DriveLetter='C'}
+    # Planning says what it waits for while Windows measures.
+    function Emit($Type,$Stage,$Fields) { if ($Fields.message) { $script:planningMessages+=$Fields.message } }
+    $script:planningMessages=@()
     function Get-StagingRelease { return [pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB} }
     function Confirm-SecureBootUEFI { throw 'Planning must not require Secure Boot to be off.' }
     function Get-StagingDisk { return $planDisk }
@@ -439,6 +456,7 @@ try {
     Assert ($plan.linuxBytes -eq 40GB -and $plan.shrink.allocationBytes -eq $staging+40GB) 'Space for Omarchy was not added to the shrink.'
     Assert ($plan.partitions[0].offsetBytes -eq $plan.shrink.freedOffsetBytes -and $plan.shrink.afterSizeBytes -eq $plan.shrink.freedOffsetBytes-1MB) 'The installer must sit right after the shrunk partition.'
     Assert ($plan.largestFreeAfterStagingBytes -eq 40GB -and $plan.shrink.driveLetter -eq 'C') 'Omarchy space or the drive letter is missing from the plan.'
+    Assert ($script:planningMessages -contains 'Checking how much C: can shrink. This can take a few minutes.') 'Planning did not say it was measuring C:.'
     $request.linuxBytes=[long]0
     $replace=Get-StagingPlan $request
     Assert ($replace.linuxBytes -eq 0 -and $replace.shrink.allocationBytes -eq $staging) 'Replacing Windows must shrink only for the temporary installer.'
@@ -460,7 +478,7 @@ try {
         $src=Join-Path $dir 'source'; [IO.File]::WriteAllBytes($src,[byte[]](1..200))
         $counted=@{bytes=[long]0}
         $hash=Copy-StagedFile $src (Join-Path $dir 'copy') '' { param($Count) $counted.bytes+=$Count }
-        Assert ($hash -ceq (Sha $src) -and $counted.bytes -eq 200) 'Copy did not return the source hash or report every byte.'
+        Assert ($hash -ceq (Sha $src) -and $counted.bytes -eq 400) 'Copy did not return the source hash or report every byte of both passes.'
         Reject { Copy-StagedFile $src (Join-Path $dir 'cancelled') '' { param($Count) throw 'Preparation was cancelled.' } } 'A cancelled copy completed.'
         $config=Get-StagingConfig ([pscustomobject]@{partitions=@(@{},@{guid=[guid]::NewGuid().ToString()});release=[pscustomobject]@{kernelPath='arch/boot/x86_64/vmlinuz-linux';initrdPath='arch/boot/x86_64/initramfs-linux.img'}})
         Assert ($config -notmatch 'checksum=' -and $config -match 'set timeout=0') 'The staged boot entry rereads the image or waits on a one-entry menu.'
@@ -508,5 +526,90 @@ try {
     Assert ((Get-StagingSummary (& $record 'shrink' 0 '')).replaces -ceq 'Partition 3') 'A partition without a letter was not named.'
     $old=& $record 'free' 0 ''; $old.PSObject.Properties.Remove('targetKind')
     Assert ($null -eq (Get-StagingSummary $old).replaces) 'An older record without a target kind asked to delete a partition.'
+}
+# Preparing lists its steps from the reviewed plan.
+& {
+    $ids={ param($plan) (@(Get-StagingSteps $plan) | ForEach-Object { $_.id }) -join ',' }
+    $free=[pscustomobject]@{bitLocker=@();shrink=$null}
+    Assert ((& $ids $free) -ceq 'verify,partitions,copy,startup') 'Free space listed the wrong steps.'
+    $shrink=[pscustomobject]@{bitLocker=@([pscustomobject]@{driveLetter='C:';protectionStatus=1},[pscustomobject]@{driveLetter='D:';protectionStatus=0});shrink=[pscustomobject]@{driveLetter='C';partitionNumber=3}}
+    $steps=@(Get-StagingSteps $shrink)
+    Assert ((& $ids $shrink) -ceq 'verify,bitlocker,shrink,partitions,copy,startup') 'A shrink with BitLocker listed the wrong steps.'
+    Assert ($steps[1].label -ceq 'Pause BitLocker on C:' -and $steps[2].label -ceq 'Shrink C:') 'Steps did not name the partitions.'
+    $older=[pscustomobject]@{shrink=[pscustomobject]@{driveLetter='';partitionNumber=4}}
+    Assert ((@(Get-StagingSteps $older))[1].label -ceq 'Shrink Partition 4') 'A record without BitLocker data or a letter was mislabelled.'
+}
+# Steps record when each started and ended, for the test runs' timings.
+& {
+    function Emit($Type,$Stage,$Fields) { $script:emitted+=,$Fields }
+    $script:emitted=@()
+    $plan=[pscustomobject]@{operationId='timed';status='planned'}
+    Enter-StagingStep $plan 'verify' 'verifying-source' 'Verifying'
+    Enter-StagingStep $plan 'copy' 'copying-installer' 'Copying'
+    Enter-StagingStep $plan '' '' ''
+    Assert (@($plan.timings).Count -eq 2 -and $plan.timings[0].end -and $plan.timings[1].end -and $plan.timings[1].step -eq 'copy') 'Step timings were not recorded, or finishing added an empty one.'
+    Assert ($script:emitted.Count -eq 2 -and $script:emitted[1].step -eq 'copy') 'Entering a step did not tell the app, or finishing did.'
+    # Once preparing, each step change is saved, so an interrupted run keeps its timings.
+    function Save-StagingState($State) { $script:saved++ }
+    $script:saved=0; $plan.status='preparing'
+    Enter-StagingStep $plan 'startup' 'registering-boot' 'Adding'
+    Assert ($script:saved -eq 1) 'A step change was not saved.'
+}
+# The disk loop itself stops before reading the next disk.
+& {
+    $temp=Join-Path $env:TEMP ('omarchy-stop-loop-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); $cancel=Join-Path $temp 'staged-cancel'; [IO.File]::WriteAllText($cancel,'')
+    function Emit { }
+    function Confirm-SecureBootUEFI { return $true }
+    function Get-BitLockerSnapshot { return @{known=$false;volumes=@()} }
+    function Get-Disk { return @([pscustomobject]@{Number=0;UniqueId='a';Size=[long]500GB},[pscustomobject]@{Number=1;UniqueId='b';Size=[long]500GB}) }
+    function Get-StagingDisk { $script:read++; throw 'Disks must not be read after Stop.' }
+    try {
+        $script:read=0; $stopped=$false
+        try { [void](Get-StagingChoices ([pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB}) $null $cancel) } catch { $stopped=$_.Exception.Message -ceq 'The disk check was stopped.' }
+        Assert ($stopped -and $script:read -eq 0) 'The disk loop read a disk after Stop.'
+        # A stop inside a disk's own reading (before measuring) isn't recorded as an unusable disk.
+        [IO.File]::Delete($cancel)
+        function Get-StagingDisk { throw 'The disk check was stopped.' }
+        $stopped=$false
+        try { [void](Get-StagingChoices ([pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB}) $null $cancel) } catch { $stopped=$_.Exception.Message -ceq 'The disk check was stopped.' }
+        Assert $stopped 'A stop while reading a disk became a blocked disk.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
+}
+# The chunked hash matches Get-FileHash, and copying counts the readback too.
+& {
+    $temp=Join-Path $env:TEMP ('omarchy-hash-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp)
+    try {
+        $source=Join-Path $temp 'source'; $bytes=New-Object byte[] (5MB+123); (New-Object Random 7).NextBytes($bytes); [IO.File]::WriteAllBytes($source,$bytes)
+        $counted=@{bytes=[long]0}; $count={ param([long]$n) $counted.bytes+=$n }
+        Assert ((Get-StagingFileHash $source $count) -ceq (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -and $counted.bytes -eq $bytes.Length) 'The chunked hash was wrong or missed bytes.'
+        $counted.bytes=0
+        [void](Copy-StagedFile $source (Join-Path $temp 'copy') '' $count)
+        Assert ($counted.bytes -eq 2*$bytes.Length) 'Copy progress did not count the readback.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
+}
+# Stop takes effect before the next partition is measured.
+& {
+    $temp=Join-Path $env:TEMP ('omarchy-stop-'+[guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($temp); $cancel=Join-Path $temp 'staged-cancel'
+    function Emit { }
+    $first=@{diskNumber=0;diskUniqueId='d';diskSizeBytes=[long]500GB;regions=@(@{kind='partition';partitionNumber=3;partitionGuid='a';resizeState='unchecked';label='C:'},@{kind='partition';partitionNumber=4;partitionGuid='b';resizeState='unchecked';label='D:'})}
+    function Get-StagingChoices($Release,$Resize) {
+        if ($null -eq $Resize) { return @{disks=@($first);choices=@();blocked=@()} }
+        $script:measured+=$Resize.partitionNumber
+        # The user stops while the first measurement runs.
+        [IO.File]::WriteAllText($cancel,'')
+        return @{disks=@($first);choices=@();blocked=@()}
+    }
+    function Merge-StagingAnalysis($Inventory,$Measured,$Query) { return $Inventory }
+    try {
+        $script:measured=@(); $stopped=$false
+        try { [void](Get-StagingInspection @{} $null $cancel) } catch { $stopped=$_.Exception.Message -ceq 'The disk check was stopped.' }
+        Assert ($stopped -and $script:measured.Count -eq 1) 'Stop did not end the check before the next partition.'
+        $script:measured=@(); $stopped=$false
+        try { [void](Get-StagingInspection @{} $null $cancel) } catch { $stopped=$true }
+        Assert ($stopped -and $script:measured.Count -eq 0) 'A stopped check still measured.'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 }
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'

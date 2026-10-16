@@ -40,6 +40,13 @@ function Read-Json([string]$Path) {
     if ((Get-Item -LiteralPath $Path).Length -gt 16777216) { throw 'Staging record exceeds its size limit.' }
     return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 }
+# The helper creates this file beside the request to ask for cooperative
+# cancellation.
+function Get-CancelPath($Request) {
+    $cancel=if ($Request.PSObject.Properties['cancelPath']) { [string]$Request.cancelPath } else { '' }
+    if ($cancel -and ((Split-Path -Parent $cancel) -ine (Split-Path -Parent $RequestPath) -or [IO.Path]::GetFileName($cancel) -cne 'staged-cancel')) { throw 'Invalid cancellation request.' }
+    return $cancel
+}
 function Sha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Write-Json([string]$Path,$Value) {
     if (Test-Path -LiteralPath $Path) { throw 'Staging journal entry already exists.' }
@@ -64,10 +71,11 @@ try {
     $request=Read-Json $RequestPath
     switch ($Action) {
         'inspect' {
-            Assert-Fields $request @('sourceSha256','sourceLength','resize') @('sourceSha256','sourceLength')
+            Assert-Fields $request @('sourceSha256','sourceLength','resize','cancelPath') @('sourceSha256','sourceLength')
             $resize=if ($request.PSObject.Properties['resize']) { $request.resize } else { $null }
+            $cancel=Get-CancelPath $request
             $release=Get-StagingRelease $request.sourceSha256 $request.sourceLength
-            $result=Get-StagingInspection $release $resize
+            $result=Get-StagingInspection $release $resize $cancel
         }
         'plan' {
             $plan=Get-StagingPlan $request
@@ -79,9 +87,7 @@ try {
             Assert-Fields $request @('planPath','planSha256','desktopProcessId','cancelPath') @('planPath','planSha256','desktopProcessId')
             $path=Assert-Path $request.planPath
             if ((Split-Path -Parent $path) -ine (Split-Path -Parent $RequestPath) -or [IO.Path]::GetFileName($path) -cne 'staged-plan.json' -or (Sha $path) -cne $request.planSha256) { throw 'The confirmed protected plan changed.' }
-            # The helper creates this file to request cooperative cancellation.
-            $cancel=if ($request.PSObject.Properties['cancelPath']) { [string]$request.cancelPath } else { '' }
-            if ($cancel -and ((Split-Path -Parent $cancel) -ine (Split-Path -Parent $RequestPath) -or [IO.Path]::GetFileName($cancel) -cne 'staged-cancel')) { throw 'Invalid cancellation request.' }
+            $cancel=Get-CancelPath $request
             $worker=Join-Path $PSScriptRoot '../windows-bitlocker/BitLockerSetup.ps1'
             $result=& {
                 param($Plan,[uint32]$AuthenticatedPid,[string]$WorkerPath,[string]$CancelPath)
