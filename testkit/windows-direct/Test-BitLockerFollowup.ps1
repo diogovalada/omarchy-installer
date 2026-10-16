@@ -216,13 +216,15 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
         Assert (-not (Test-StagedInstallerWaiting $summary)) 'An unreadable summary hid Resume.'
     } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
 }
-# A waiting installer points back to the app and hides BitLocker settings;
-# other states keep their choices.
+# A waiting installer points back to the app, hides BitLocker settings and
+# can't stop the reminder that later says to resume; other states keep their
+# choices.
 & {
     $waiting=Get-FollowupView 'suspended' $true $false 'C:'
-    Assert ($waiting.text -like '*waiting on this PC*open Omarchy Installer.' -and $null -eq $waiting.settings -and $waiting.decline -ceq 'Stop reminders' -and $waiting.declineEnabled) 'A waiting installer did not point back to the app.'
+    Assert ($waiting.text -like '*waiting on this PC*Continue in Omarchy Installer.' -and $null -eq $waiting.settings) 'A waiting installer did not point back to the app.'
+    Assert ($waiting.decline -ceq 'Stop reminders' -and -not $waiting.declineEnabled) 'A waiting installer allowed stopping reminders.'
     $installed=Get-FollowupView 'suspended' $false $true 'C:'
-    Assert ($installed.settings -ceq 'Resume protection' -and $installed.decline -ceq 'Leave suspended' -and $installed.text -like '*suspended on C:*') 'A finished installation lost Resume protection.'
+    Assert ($installed.settings -ceq 'Resume protection' -and $installed.decline -ceq 'Keep paused' -and $installed.text -clike 'BitLocker protection on C: is paused.*' -and $installed.declineEnabled) 'A finished installation lost Resume protection.'
     Assert ((Get-FollowupView 'suspended' $false $false 'C:').settings -ceq 'Open BitLocker settings') 'A foreign suspension lost BitLocker settings.'
     Assert ((Get-FollowupView 'ask' $false $false 'C:').decline -ceq 'Keep BitLocker off') 'Asking lost Keep BitLocker off.'
     $decrypting=Get-FollowupView 'decrypting' $false $false 'C:'

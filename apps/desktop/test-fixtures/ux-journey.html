@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Install without USB journey</title></head>
+<body><div id="app"></div><script type="module">
+// Development-only fixture for a UX pass: the whole app, in-memory responses,
+// no native or disk access. ?s=<scenario>; see `scenarios` below.
+const GiB=1024**3, MiB=1024**2;
+const q=new URLSearchParams(location.search);
+const s=q.get('s') ?? 'home-asking';
+const release={version:'4.0.2',file_name:'omarchy-4.0.2.iso',length:6227752960,sha256:'a'.repeat(64),signer_fingerprint:'B'.repeat(40)};
+const id='11111111-1111-4111-8111-111111111111';
+const temporaryBytes=7.5*GiB, minimumLinuxBytes=32*GiB;
+let dl={status:'complete',release,received_bytes:release.length,total_bytes:release.length,existing_image:true,image_locked:true,cancel_requested:false,image_path:'C:/Users/Example/Downloads/Omarchy/omarchy-4.0.2.iso',error:null,destination_directory:'C:/Users/Example/Downloads/Omarchy',host_os:'windows',host_architecture:'x86_64'};
+const downloading=fraction=>Object.assign(dl,{status:'downloading',existing_image:false,image_path:null,image_locked:false,received_bytes:Math.round(release.length*fraction)});
+// A laptop disk: EFI, MSR, C: (BitLocker on), recovery.
+let offset=MiB, n=0;
+const region=(r)=>{const out={kind:'partition',fileSystem:'',freeBytes:null,resizeState:'unavailable',resizeReason:'System or unsupported partition; kept unchanged.',maximumReleaseBytes:null,reserveBytes:null,isWindows:false,...r,offsetBytes:offset,partitionNumber:++n,partitionGuid:`guid-${n}`};offset+=r.sizeBytes;return out;};
+const efi=region({label:'EFI system',sizeBytes:260*MiB});
+const msr=region({label:'Microsoft reserved',sizeBytes:16*MiB});
+const cSize=475*GiB, cFree=290*GiB;
+const c=region({label:'C:',sizeBytes:cSize,fileSystem:'NTFS',freeBytes:cFree,resizeState:'unchecked',resizeReason:'',reserveBytes:48*GiB,isWindows:true});
+const rec=region({label:'Windows recovery',sizeBytes:GiB});
+const diskSize=offset+MiB;
+const encryption=[{driveLetter:'C:',isOsVolume:true,conversionStatus:1,protectionStatus:1,lockStatus:0}];
+const measured={...c,resizeState:'checked',maximumReleaseBytes:180*GiB};
+const disk=(cRegion)=>({diskNumber:0,diskUniqueId:'disk-0',diskSizeBytes:diskSize,regions:[efi,msr,cRegion,rec],unallocatedBytes:0,largestFreeBytes:0,encryption,layoutSha256:'layout-0'});
+const choice={diskNumber:0,diskUniqueId:'disk-0',label:'Resize C:',target:{target_kind:'shrink',partition_number:c.partitionNumber,partition_guid:c.partitionGuid},diskSizeBytes:diskSize,encryption,largestFreeAfterStagingBytes:0};
+const inventory=(done)=>({choices:done?[choice]:[],blocked:[],disks:[disk(done?measured:c)],minimumLinuxBytes,temporaryBytes,secureBoot:true,image:release.sha256});
+const check=(status,done)=>({status,result:inventory(done),message:done?'':'Checking how much C: can shrink. Windows may take several minutes; no partitions are being changed.',identity:release.sha256});
+const base={kind:null,status:'idle',stage:'',message:'',choices:[],requirements:[],bytes:0,totalBytes:0,cancelAvailable:false,cancelRequested:false,error:null,receipt:null,stagedTesting:true,stagedIso:null,admin:'ready',secureBoot:true,stagedCheck:null};
+let snap=structuredClone(base);
+// The reviewed plan: keep Windows, 64 GiB for Omarchy.
+const omarchyBytes=64*GiB;
+const start=Math.floor((c.offsetBytes+c.sizeBytes)/MiB)*MiB-temporaryBytes-omarchyBytes;
+const review={operationId:id,diskNumber:0,diskSizeBytes:diskSize,layoutSha256:'layout-0',targetKind:'shrink',
+  shrink:{label:'C:',partitionGuid:c.partitionGuid,offsetBytes:c.offsetBytes,beforeSizeBytes:c.sizeBytes,afterSizeBytes:start-c.offsetBytes},
+  temporary:{offsetBytes:start,sizeBytes:temporaryBytes},omarchy:{offsetBytes:start+temporaryBytes,sizeBytes:omarchyBytes},
+  largestFreeAfterBytes:omarchyBytes,minimumOmarchyBytes:minimumLinuxBytes,bitLocker:['C:'],warning:'experimental'};
+const size=b=>(b/GiB).toFixed(1);
+const summary=`EXPERIMENTAL TESTING BUILD: real disk changes. This official ISO may fail to boot from staging or refuse same-disk installation.\n\nPrepare the installer on Disk 0?\n\nShrink C: from ${size(c.sizeBytes)} to ${size(start-c.offsetBytes)} GiB. Leave 64 GiB unallocated for Omarchy after it. Create two temporary installer partitions. Windows Boot Manager and the boot order are kept. Afterwards, the largest free space is 64.0 GiB.\n\nSuspend BitLocker protection on C: without decrypting. It stays suspended until you resume it; a reminder at Windows sign-in helps you do that after installing.\n\nThis does not install Omarchy yet. Next, select the installer for the next restart. Keep the temporary installer until Omarchy starts on its own.`;
+const steps=[{id:'verify',label:'Verify the installer image'},{id:'preflight',label:'Check that C: can still shrink'},{id:'bitlocker',label:'Pause BitLocker on C:'},{id:'shrink',label:'Shrink C:'},{id:'partitions',label:'Create the installer partitions'},{id:'copy',label:'Copy and check the installer'},{id:'startup',label:'Add the startup entry'}];
+const stepMessages={verify:'Verifying the installer image before disk changes...',preflight:'Checking the partition can still shrink. This can take a few minutes...',bitlocker:'Pausing BitLocker; data stays encrypted...',shrink:'Shrinking the partition. This can take several minutes...',partitions:'Creating the temporary installer partitions...',copy:'Copying and checking the installer...',startup:'Adding the startup entry...'};
+const operation=(status,restartedSinceScheduled=false)=>({operationId:id,status,diskNumber:0,linuxBytes:omarchyBytes,temporaryBytes,message:'',restartedSinceScheduled,replaces:null});
+const preparing=step=>Object.assign(snap,{status:'running',kind:null,stage:'staged-installer',stagedTarget:{action:'stage',operationId:null,confirmed:true},stagedReview:{summary,review,approved:true},steps,step,message:stepMessages[step],cancelAvailable:step==='copy' || step==='startup',bytes:step==='copy'?Math.round(2*release.length*0.46):0,totalBytes:step==='copy'?2*release.length:0,stagedIso:null});
+const recorded=(op)=>Object.assign(snap,{stagedRecovery:{operations:[op],recordErrors:[]},stagedIso:null});
+// Scenario setup. "flow-*" scenarios open Install without USB (done by the
+// capture script, which clicks the button).
+const scenarios={
+  'home-asking':()=>{downloading(.38);snap.admin='asking';},
+  'home-checking':()=>{downloading(.62);snap.stagedCheck=check('running',false);},
+  'flow-checking':()=>{downloading(.62);snap.stagedCheck=check('running',false);},
+  'flow-downloading':()=>{downloading(.85);snap.stagedCheck=check('done',true);},
+  'flow-ready':()=>{snap.stagedCheck=check('done',true);},
+  'flow-planning':()=>{snap.stagedCheck=check('done',true);},
+  'flow-review':()=>{snap.stagedCheck=check('done',true);},
+  'flow-prep-shrink':()=>{snap.stagedCheck=check('done',true);},
+  'flow-prep-copy':()=>{snap.stagedCheck=check('done',true);},
+  'flow-declined':()=>{snap.admin='declined';},
+  'flow-error':()=>{snap.stagedCheck=check('done',true);},
+  'flow-card-firmware':()=>{recorded(operation('staged'));},
+  'home-card-firmware':()=>{recorded(operation('staged'));},
+  'home-reopened':()=>{snap.admin='asking';snap.secureBoot=false;recorded(operation('staged'));},
+  'home-reopened-ready':()=>{snap.secureBoot=false;recorded(operation('staged'));},
+  'home-scheduled':()=>{snap.secureBoot=false;recorded(operation('boot-scheduled'));},
+  'home-cleanup':()=>{snap.secureBoot=false;recorded(operation('boot-scheduled',true));},
+  'home-unfinished':()=>{recorded(operation('copying'));}
+};
+scenarios[s]();
+window.isTauri=true;
+const out=()=>structuredClone(snap);
+window.__TAURI_INTERNALS__={invoke:async(command,args={})=>{
+  if(command==='download_status')return structuredClone(dl);
+  if(command==='resolve_download')return structuredClone(dl);
+  if(command==='setup_status')return out();
+  if(command==='start_admin_session')return out();
+  if(command==='staged_background_check')return null;
+  if(command==='staged_iso' && args.action==='inspect'){Object.assign(snap,{status:'complete',stage:'complete',stagedIso:inventory(true)});return out();}
+  if(command==='staged_iso' && args.action==='stage'){
+    if(s==='flow-error'){throw 'Windows can no longer shrink C: by 71.5 GiB. Files may have moved since the check. Refresh, then choose the space again.';}
+    Object.assign(snap,{status:'running',stage:'planning',message:'Checking how much C: can shrink. This can take a few minutes.',stagedTarget:{action:'stage',operationId:null},stagedIso:null,stagedReview:null});
+    if(s!=='flow-planning') setTimeout(()=>Object.assign(snap,{stage:'staged-installer',message:'',stagedReview:{summary,review}}),300);
+    return out();
+  }
+  if(command==='respond_staged_review'){
+    if(args.approved){preparing(s==='flow-prep-copy'?'copy':'shrink');}
+    else Object.assign(snap,{stagedReview:null,status:'cancelled',message:'Nothing was changed.'});
+    return out();
+  }
+  if(command==='cancel_setup')return out();
+  throw new Error('Fixture does not implement '+command);
+}};
+await import('/src/main.ts');
+window.__fixtureReady=true;
+</script></body></html>

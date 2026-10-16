@@ -74,4 +74,9 @@ it('surfaces an interrupted installer without invoking the privileged checker',(
   expect(screen.getByRole('heading',{name:"Preparing the installer didn't finish · Disk 0"})).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toBeEnabled();
   expect(setup.stagedIso).not.toHaveBeenCalled();
+  // It comes before the options, as when the app reopens after the firmware
+  // restart, and the "choose how to install" line is gone.
+  const card=screen.getByRole('region',{name:'Temporary installer'});
+  expect(card.compareDocumentPosition(screen.getByRole('button',{name:'Create bootable USB'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByText(/Choose an option|Choose how to install/)).not.toBeInTheDocument();
 });

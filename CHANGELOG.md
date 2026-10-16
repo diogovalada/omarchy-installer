@@ -71,7 +71,7 @@ downloads. Published versions and their artifacts are immutable.
   opens, and one elevated helper then serves every operation until the app
   closes, so checking disks, preparing and the firmware restart need no
   further prompts. Declining keeps the old behavior: each action asks when
-  it needs to. Install without USB offers Allow after a decline.
+  it needs to.
 - Install without USB (testing builds): once administrator access is granted
   and the image is known, disks are checked in the background, Windows' own
   disk first, so results are waiting when you open the screen, even before
@@ -80,6 +80,14 @@ downloads. Published versions and their artifacts are immutable.
   the last check before shrinking now runs before BitLocker is paused: if
   Windows can no longer shrink that far, nothing is changed and no installer
   is left to remove.
+- Install without USB (testing builds): when a temporary installer exists,
+  its card comes first on the home screen, so after the firmware restart the
+  reopened app shows Restart into the installer without scrolling. Beside the
+  flow, the image panel shrinks to one line while downloading too. Errors
+  show their message instead of hiding it under "Show details". Preparing
+  keeps Stop visible and says it works once copying starts. While an
+  installer waits, the BitLocker reminder points back to the app and can't
+  stop reminders, so the one that later says to resume isn't lost.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

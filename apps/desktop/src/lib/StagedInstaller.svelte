@@ -276,7 +276,6 @@
     <div class="navigation"><button class="back" disabled={busy} onclick={close}><ArrowLeft size={15}/>Back</button>{#if testing}<span class="badge">Test build</span>{/if}</div>
     <h2>Install without USB</h2>
     <p class="intro">Make room for Omarchy on this computer.</p>
-    {#if $setup.snapshot?.admin==='declined' && !busy}<p class="admin">Administrator access lets the installer check your disks in the background. <button class="text-action" onclick={()=>{void setup.startAdminSession();}}>Allow</button></p>{/if}
     <p class="visually-hidden" role="status">{checkStatus}</p>
     {#if review}
       <StagedReview summary={review.summary} plan={review.review} disk={inspection?.disks?.find(d=>d.diskNumber===review?.review?.diskNumber)} secureBoot={inspection?.secureBoot} pending={$setup.pending} {respond}/>
@@ -302,7 +301,9 @@
           {#if measured}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Preparing the installer"></progress>{/if}
         {/if}
         <p>Keep this window open.</p>
-        {#if $setup.snapshot?.cancelAvailable}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{/if}
+        <!-- Shown throughout, so it doesn't appear midway; the helper allows
+             stopping from the copy on. -->
+        <div class="stop"><button disabled={$setup.pending || $setup.snapshot?.cancelRequested || !$setup.snapshot?.cancelAvailable} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{#if !$setup.snapshot?.cancelAvailable}<small>You can stop once copying starts.</small>{/if}</div>
       </div>
     {:else if operations.length && !checkingBeside}
       <!-- The recorded installer's steps below stand in for the choose screen. -->
@@ -359,7 +360,7 @@
         {/if}
         <div class="continue">
           {#if layout}<StagedPartitionTable regions={layout.regions} statusText={tableStatus} unallocatedBytes={layout.unallocatedBytes}/>{/if}
-          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">{planningMessage}</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{:else if !sourceReady}<span class="waiting">Download the image above first.</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
+          {#if choice}<div class="submit">{#if waitingFor}<span class="waiting">Still checking {waitingFor}…</span>{:else if requesting}<span class="waiting" role="status">{planningMessage}</span>{:else if declined}<span class="waiting" role="status">{declined}</span>{:else if !sourceReady}<span class="waiting">Available once the image has downloaded.</span>{/if}<button class="primary" disabled={busy || !!error || !testing || !sourceReady} onclick={stage}>Review changes<ArrowRight size={16}/></button></div>{/if}
         </div>
       {/if}
     {/if}
@@ -380,7 +381,8 @@
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{stopLabel}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
-  {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><details><summary>Show details</summary><p>{error}</p></details></div>{/if}
+  <!-- The helper's messages are short and usually say what to do next. -->
+  {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><p>{error}</p></div>{/if}
 </section>
 {/if}
 
@@ -397,7 +399,6 @@
   .line{margin:0;font-size:12px;color:var(--text)}.text-action{min-height:0;padding:0 0 0 6px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){border-color:transparent;background:transparent;color:var(--accent-hover)}
   .blocked{margin:14px 0 0;font-size:12px}
   .allocation{margin-top:18px}.allocation p,.no-space{margin:0 0 8px;font-size:12px}.no-space{margin-top:18px;color:var(--text)}
-  .admin{margin:8px 0 0;font-size:12px}.admin .text-action{padding:0 0 0 4px}
   .hint{margin:0 auto 0 0;font-size:11px;color:var(--text-dim)}
   .source-note{color:var(--text-dim)}.source-note::before{content:'·';margin:0 6px}
   .help{margin:0 0 8px}.help p{margin:0 0 6px;font-size:11px}.text-action.inline{padding:0}
@@ -409,7 +410,8 @@
   .progress-steps .done{color:var(--text-muted)}.progress-steps .done::before{content:'✓';top:0;border:0;width:auto;height:auto;font-size:11px;color:var(--text-muted)}
   .progress-steps .current{color:var(--text);font-weight:700}.progress-steps .current::before{border-color:var(--accent);background:var(--accent)}
   .progress-steps small{font-size:11px;font-weight:400;color:var(--text-dim)}.progress-steps progress{margin:0}
-  .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{overflow-wrap:anywhere}
+  .failure{border-left:2px solid var(--error);padding:12px 16px;font-size:12px;margin:16px 0}.failure p{margin:6px 0 0;font-size:12px;overflow-wrap:anywhere}
+  .stop{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}.stop small{font-size:11px;color:var(--text-dim)}
   .beside{margin:0}.beside .text-action{padding:0}
   progress{width:100%;height:6px;margin:4px 0 12px;border:0;border-radius:3px;background:var(--surface-raised);appearance:none;-webkit-appearance:none}
   progress::-webkit-progress-bar{border-radius:3px;background:var(--surface-raised)}progress::-webkit-progress-value{border-radius:3px;background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
