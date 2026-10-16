@@ -44,8 +44,17 @@ describe('single-screen native download flow', () => {
     expect(screen.queryByRole('button',{name:'Pause'})).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button',{name:'Image details'}));
     expect(screen.getByRole('button',{name:'Pause'})).toBeEnabled();
-    // Expanded, the full panel's own bar is the only one.
+    // Expanded, the full panel's own bar is the only one, under one heading.
     expect(screen.getAllByRole('progressbar')).toHaveLength(1);
+    expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);
+  });
+  it('stays one line when collapsed, whatever the image state', async () => {
+    await setState(state('ready', {received_bytes:0}));
+    render(DownloadPanel, {collapsed:true});
+    expect(screen.getByRole('heading',{name:'Omarchy 3.4.1 · Ready to download'})).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button',{name:'Image details'}));
+    expect(screen.getByRole('button',{name:/Download/})).toBeEnabled();
   });
   it('locks image changes during installation while allowing details to expand', async () => {
     await setState(state('complete', {image_path:'C:\\fixture.iso'}));

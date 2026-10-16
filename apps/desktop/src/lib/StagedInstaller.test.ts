@@ -654,6 +654,11 @@ it('lists the preparation steps, ticking finished ones and showing the current o
   expect(items()[4]).toHaveTextContent('Copy and check the installer · 25%');
   expect(screen.getByRole('progressbar',{name:'Copy and check the installer'})).toHaveAttribute('value',String(3*GiB));
   expect(screen.getByRole('button',{name:'Stop preparing'})).toBeEnabled();
+  // After copying, stopping isn't offered again, and the note doesn't promise it.
+  state.set(at('startup'));
+  await tick();
+  expect(screen.getByRole('button',{name:'Stop preparing'})).toBeDisabled();
+  expect(screen.queryByText('You can stop once copying starts.')).not.toBeInTheDocument();
 });
 it('says it finishes the partition being measured when the check is stopped',async()=>{
   const checking=(cancelRequested:boolean)=>({pending:false,snapshot:{status:'running',stage:'analyzing-resize',stagedTesting:true,cancelAvailable:true,cancelRequested,stagedIso:{choices:[],blocked:[],disks:[fullDisk],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}});

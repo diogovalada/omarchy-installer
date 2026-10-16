@@ -145,6 +145,7 @@
   // one with its bar (a percentage when counted in bytes).
   $: steps=$setup.snapshot?.steps ?? [];
   $: stepIndex=steps.findIndex(s=>s.id===$setup.snapshot?.step);
+  $: beforeCopy=stepIndex>=0 && stepIndex<steps.findIndex(s=>s.id==='copy');
   $: percent=measured ? Math.floor(100*($setup.snapshot?.bytes ?? 0)/($setup.snapshot?.totalBytes ?? 1)) : null;
   $: operations=($setup.snapshot?.stagedRecovery?.operations ?? result?.operations ?? []).filter(op=>op.status!=='cleaned' && !(result?.operationId===op.operationId && result.status==='cleaned'));
   $: recordErrors=$setup.snapshot?.stagedRecovery?.recordErrors ?? result?.recordErrors ?? [];
@@ -302,8 +303,8 @@
         {/if}
         <p>Keep this window open.</p>
         <!-- Shown throughout, so it doesn't appear midway; the helper allows
-             stopping from the copy on. -->
-        <div class="stop"><button disabled={$setup.pending || $setup.snapshot?.cancelRequested || !$setup.snapshot?.cancelAvailable} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{#if !$setup.snapshot?.cancelAvailable}<small>You can stop once copying starts.</small>{/if}</div>
+             stopping only while copying. -->
+        <div class="stop"><button disabled={$setup.pending || $setup.snapshot?.cancelRequested || !$setup.snapshot?.cancelAvailable} onclick={()=>{void setup.cancel();}}>Stop preparing</button>{#if beforeCopy}<small>You can stop once copying starts.</small>{/if}</div>
       </div>
     {:else if operations.length && !checkingBeside}
       <!-- The recorded installer's steps below stand in for the choose screen. -->

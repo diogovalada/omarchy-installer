@@ -52,7 +52,7 @@
       <!-- In the gap below the header, so it moves nothing when it goes. -->
       {#if $setup.snapshot?.admin==='asking'}<p class="admin" role="status">Omarchy Installer needs administrator access to check your disks and prepare installers.</p>{/if}
     </header>
-    <DownloadPanel compact={option !== null || recorded} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
+    <DownloadPanel compact={option !== null} collapsed={recorded && option === null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
     {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} {image} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       {#if windowsHost}<StagedInstaller recoveryOnly {sourceReady} prepareAgain={()=>{option='direct';}}/>{/if}
       <section class="next-actions" aria-label="Installation options">

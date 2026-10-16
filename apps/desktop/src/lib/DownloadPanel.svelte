@@ -5,6 +5,9 @@
   import { downloads, formatBytes, isActive } from './downloads';
   export let compact = false;
   export let locked = false;
+  // One line whatever the image's state, so something else on the screen
+  // comes first (a temporary installer on the home screen).
+  export let collapsed = false;
   let expanded = false;
   $: snapshot = $downloads.snapshot;
   $: release = snapshot?.release;
@@ -20,7 +23,7 @@
   $: statusText = complete ? readyLabel : ({ idle: 'Checking release…', resolving: 'Checking release…', ready: snapshot?.existing_image ? 'Image found · verification required' : 'Ready to download', preparing: 'Preparing…', downloading: 'Downloading · ' + Math.floor(percent) + '%', verifying: 'Verifying · ' + Math.floor(percent) + '%', saving: 'Saving…', complete: 'Image unavailable', cancelled: snapshot?.existing_image ? 'Verification cancelled' : 'Download paused', failed: snapshot?.existing_image ? 'Verification failed' : 'Download failed' })[snapshot?.status ?? 'idle'];
   // Beside a flow, one line: the ready image, or the download in progress
   // (Pause is under Image details), so the flow stays in view.
-  $: summary = compact && (complete || transfer);
+  $: summary = collapsed || (compact && (complete || transfer));
   $: summaryText = complete ? readyLabel : snapshot?.cancel_requested ? 'Stopping…' : statusText;
   onMount(() => { void downloads.refresh().then(() => { if ($downloads.snapshot?.status === 'idle') void downloads.resolve(); }); });
 </script>
@@ -28,11 +31,11 @@
 <section class="download-panel" class:compact={summary} aria-label="Omarchy image download">
   {#if summary}
     <div class="image-summary"><h1 aria-label={`Omarchy ${release?.version} · ${summaryText}`}><span role="status" class:testing={verificationSkipped || localImage} class:transferring={!complete}>{#if authenticated}<Check size={17}/>{/if}Omarchy {release?.version} · {summaryText}</span></h1><button class="text-button" aria-expanded={expanded} onclick={()=>{expanded=!expanded;}}>{expanded ? 'Hide image details' : 'Image details'}</button></div>
-    {#if !complete && !expanded}{#if indeterminate}<progress class="summary-progress" max="100" aria-label={statusText}></progress>{:else}<progress class="summary-progress" max="100" value={percent} aria-label="Download progress"></progress>{/if}{/if}
+    {#if transfer && !expanded}{#if indeterminate}<progress class="summary-progress" max="100" aria-label={statusText}></progress>{:else}<progress class="summary-progress" max="100" value={percent} aria-label="Download progress"></progress>{/if}{/if}
   {/if}
   {#if !summary || expanded}
   <div class="release">
-    <div>{#if compact && complete}<h2>Omarchy {release?.version}</h2>{:else}<h1>Omarchy {release?.version ?? 'ISO'}</h1>{/if}<p>x86-64{#if release}<span> · {formatBytes(release.length)}</span>{/if}</p></div>
+    <div>{#if summary}<h2>Omarchy {release?.version}</h2>{:else}<h1>Omarchy {release?.version ?? 'ISO'}</h1>{/if}<p>x86-64{#if release}<span> · {formatBytes(release.length)}</span>{/if}</p></div>
     <img src={quattro} alt="Omarchy Quattro wallpaper"/>
   </div>
   <div class="download-body">
