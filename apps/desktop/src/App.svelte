@@ -24,6 +24,9 @@
   $: if (!option && setupActive($setup.snapshot?.status)) option=$setup.snapshot?.kind ?? null;
   onMount(() => {
     void setup.refresh();
+    // Asks for administrator access once, over a window the user can see;
+    // later operations then need no prompt (Windows only).
+    void setup.startAdminSession();
     const timer = setInterval(() => { void downloads.refresh(); void setup.refresh(); if (appleHost) void appleSetup.refresh(); }, 1000);
     return () => clearInterval(timer);
   });
@@ -32,6 +35,7 @@
 <main class="setup">
   <div class="setup-content">
     <header><div class="wordmark"><OmarchyWordmark/></div><span>Installer <span class="edition">/ Community edition</span></span></header>
+    {#if $setup.snapshot?.admin==='asking'}<p class="admin" role="status">Omarchy Installer needs administrator access to check your disks and prepare installers.</p>{/if}
     <DownloadPanel compact={option !== null} locked={setupActive($setup.snapshot?.status) || $setup.pending}/>
     {#if option==='direct' && appleHost}<AppleSetupPanel close={closeOption}/>{:else if option==='direct' && $downloads.snapshot?.host_os==='windows'}<StagedInstaller close={closeOption} {sourceReady} useUsb={()=>{option='usb';}}/>{:else if option}<SetupPanel kind={option} close={closeOption}/>{:else}
       <section class="next-actions" aria-label="Installation options">
@@ -59,6 +63,7 @@
   .next-actions button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
   .next-actions button:disabled{opacity:.65;color:var(--text-muted);cursor:not-allowed}
   .next-actions p{margin:-6px 0 0;text-align:center;color:var(--text-muted);font-size:11px;line-height:1.7}
+  .admin{margin:-14px 0 16px;color:var(--text-muted);font-size:11px;line-height:1.7}
   .availability{margin:12px 0 0;color:var(--text-dim);font-size:10px;text-align:center;line-height:1.7}
   footer{margin-top:28px;color:var(--text-dim);font-size:10px;text-align:center;line-height:1.7}
   @media(max-width:550px){.setup{padding:24px 16px}header{margin-bottom:24px;gap:16px}.wordmark{width:165px}.edition{display:none}.next-actions{gap:12px;margin-top:20px}.next-actions button{font-size:12px;gap:9px;min-height:66px}footer{font-size:9px}}

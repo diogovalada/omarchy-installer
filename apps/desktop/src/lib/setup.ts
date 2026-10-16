@@ -26,6 +26,9 @@ export interface SetupSnapshot {
   recovery?: {filesPath:string;mutationStarted:boolean;message:string;cleanup:{complete:boolean;removedBytes?:number}}|null;
   // Secure Boot as Windows shows it to standard users; null when unknown.
   secureBoot?: boolean | null;
+  // Administrator access for this run (Windows): asking at startup, ready,
+  // or declined; null before asking or after the helper went away.
+  admin?: 'asking' | 'ready' | 'declined' | null;
   // A staged preparation's steps, from the provider, and the current one.
   steps?: {id:string;label:string}[] | null;
   step?: string | null;
@@ -77,6 +80,7 @@ export const setup = { subscribe:state.subscribe, refresh,
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),
   respondStagedReview:(approved:boolean) => command('respond_staged_review',{approved}),
+  startAdminSession:() => command('start_admin_session'),
   cancel:() => command('cancel_setup') };
 
 export function usbIssueSummary(inspection:UsbInspection):string {

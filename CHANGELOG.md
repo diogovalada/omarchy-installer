@@ -65,6 +65,11 @@ downloads. Published versions and their artifacts are immutable.
   when it is measuring the partition. Stop checking stays available during the
   disk check and stops it after the partition being measured; the partitions
   already measured stay.
+- Windows: the app asks for administrator access once, right after it
+  opens, and one elevated helper then serves every operation until the app
+  closes, so checking disks, preparing and the firmware restart need no
+  further prompts. Declining keeps the old behavior: each action asks when
+  it needs to. Install without USB offers Allow after a decline.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StagedInstaller from './StagedInstaller.svelte';
 import { setup } from './setup';
-const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn()}));
+const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn()}));
 vi.mock('./setup',async importOriginal=>{
   const actual=await importOriginal<typeof import('./setup')>();
   const {writable}=await import('svelte/store');
@@ -11,6 +11,19 @@ vi.mock('./setup',async importOriginal=>{
 const state=setup as typeof setup & {set:(value:unknown)=>void};
 beforeEach(()=>{vi.clearAllMocks();state.set({pending:false,snapshot:null});});
 const tick=()=>import('svelte').then(({tick})=>tick());
+it('offers administrator access again after it was declined at launch',async()=>{
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'declined'}});
+  render(StagedInstaller,{sourceReady:true});
+  expect(screen.getByText(/lets the installer check your disks in the background/)).toBeInTheDocument();
+  expect(screen.getByText('Windows will ask for administrator access. Nothing is changed.')).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Allow'}));
+  expect(calls.startAdminSession).toHaveBeenCalledOnce();
+  // Once approved, checking needs no prompt.
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,admin:'ready'}});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Allow'})).not.toBeInTheDocument();
+  expect(screen.getByText('Nothing is changed.')).toBeInTheDocument();
+});
 it('shows nothing and does not elevate when no temporary installer exists',()=>{
   render(StagedInstaller,{recoveryOnly:true});
   expect(calls.stagedIso).not.toHaveBeenCalled();

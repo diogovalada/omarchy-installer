@@ -69,9 +69,119 @@ fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
 
 pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     let connection = elevation::connect(id, parent)?;
-    let output = Arc::new(Mutex::new(connection.writer));
-    let mut reader = BufReader::new(connection.reader);
-    let mut envelope = read_frame(&mut reader)?.ok_or("Missing operation request")?;
+    serve(
+        connection.reader,
+        connection.writer,
+        |envelope, output, cancel, confirmations| {
+            run_request(envelope, parent, output, cancel, confirmations)
+        },
+    );
+    Ok(())
+}
+
+/// One operation's frames: its cancellation flag and where its confirmation
+/// answers go.
+struct Running {
+    id: String,
+    cancel: Arc<AtomicBool>,
+    confirm: mpsc::Sender<Value>,
+}
+
+/// Serves operations one at a time for as long as the desktop keeps the
+/// connection. Each request carries an operation ID that cancel and
+/// confirmation frames repeat, so a late Stop or answer for an operation that
+/// already ended is ignored rather than reaching the next one. A closed
+/// connection or a malformed frame cancels the running operation, which
+/// still finishes what it can't stop, and then ends the session.
+fn serve(
+    reader: Box<dyn std::io::Read + Send>,
+    writer: Box<dyn Write + Send>,
+    mut run: impl FnMut(
+        Value,
+        &Emitter,
+        Arc<AtomicBool>,
+        &mpsc::Receiver<Value>,
+    ) -> Result<Value, String>,
+) {
+    let output: Emitter = Arc::new(Mutex::new(writer));
+    let running: Arc<Mutex<Option<Running>>> = Arc::new(Mutex::new(None));
+    let (requests, incoming) =
+        mpsc::channel::<(String, Value, Arc<AtomicBool>, mpsc::Receiver<Value>)>();
+    let shared = Arc::clone(&running);
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        while let Ok(Some(frame)) = read_frame(&mut reader) {
+            let Some(id) = frame["operation"].as_str().map(str::to_owned) else {
+                break;
+            };
+            let Ok(mut current) = shared.lock() else {
+                break;
+            };
+            match frame["type"].as_str() {
+                // The reader registers the operation itself, so its Stop is
+                // never lost between arrival and start. The desktop sends a
+                // request only after the previous result.
+                Some("request") if current.is_none() => {
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    let (confirm, confirmations) = mpsc::channel();
+                    *current = Some(Running {
+                        id: id.clone(),
+                        cancel: Arc::clone(&cancel),
+                        confirm,
+                    });
+                    if requests
+                        .send((id, frame["request"].clone(), cancel, confirmations))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Some("cancel") => {
+                    if let Some(op) = current.as_ref().filter(|op| op.id == id) {
+                        op.cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+                Some("confirmation") => {
+                    if let Some(op) = current.as_ref().filter(|op| op.id == id) {
+                        let _ = op.confirm.send(frame);
+                    }
+                }
+                _ => break,
+            }
+        }
+        // Closed, malformed or out of order: stop the running operation and
+        // accept nothing more.
+        if let Ok(current) = shared.lock() {
+            if let Some(op) = current.as_ref() {
+                op.cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    });
+    for (id, envelope, cancel, confirmations) in incoming {
+        let result = run(envelope, &output, Arc::clone(&cancel), &confirmations);
+        // Cleared before reporting, so the next request is accepted.
+        if let Ok(mut current) = running.lock() {
+            *current = None;
+        }
+        emit(
+            &output,
+            match result {
+                Ok(result) => json!({"protocol":1,"type":"result","operation":id,"result":result}),
+                Err(error) => {
+                    json!({"protocol":1,"type":"error","operation":id,"message":error,"cancelled":cancel.load(Ordering::Relaxed)})
+                }
+            },
+        );
+    }
+}
+
+fn run_request(
+    mut envelope: Value,
+    parent: u32,
+    output: &Emitter,
+    cancel: Arc<AtomicBool>,
+    confirmations: &mpsc::Receiver<Value>,
+) -> Result<Value, String> {
     let source_verification = envelope
         .as_object_mut()
         .ok_or("Invalid operation request")?
@@ -93,57 +203,17 @@ pub fn entry(id: &str, parent: u32) -> Result<(), String> {
     if request.protocol != 1 {
         return Err("Unsupported operation protocol".into());
     }
-    let cancel = Arc::new(AtomicBool::new(false));
-    let cancellation = Arc::clone(&cancel);
-    let (confirm_sender, confirmations) = mpsc::channel();
-    std::thread::spawn(move || loop {
-        match read_frame(&mut reader) {
-            Ok(Some(message)) if message.get("type").and_then(Value::as_str) == Some("cancel") => {
-                cancellation.store(true, Ordering::Relaxed);
-            }
-            Ok(Some(message))
-                if message.get("type").and_then(Value::as_str) == Some("confirmation") =>
-            {
-                if confirm_sender.send(message).is_err() {
-                    break;
-                }
-            }
-            Ok(Some(_)) => {
-                cancellation.store(true, Ordering::Relaxed);
-                break;
-            }
-            _ => {
-                cancellation.store(true, Ordering::Relaxed);
-                break;
-            }
-        }
-    });
-    match execute(
+    execute(
         request,
         parent,
         records_directory.as_deref(),
         source_verification
             .as_ref()
             .map(|binding| (binding, parent)),
-        &output,
-        Arc::clone(&cancel),
-        &confirmations,
-    ) {
-        Ok(result) => {
-            emit(
-                &output,
-                json!({"protocol":1,"type":"result","result":result}),
-            );
-            Ok(())
-        }
-        Err(error) => {
-            emit(
-                &output,
-                json!({"protocol":1,"type":"error","message":error,"cancelled":cancel.load(Ordering::Relaxed)}),
-            );
-            Err(error)
-        }
-    }
+        output,
+        cancel,
+        confirmations,
+    )
 }
 
 pub(crate) const FIRMWARE_SUMMARY: &str = "Restart into firmware settings now? Save your work first. Turn off Secure Boot (usually under Security, Boot or Authentication), leave TPM on, then save and exit. Windows starts again and this app reopens. Windows may ask you to set up your PIN again.";
@@ -583,6 +653,220 @@ fn safe_label(value: Option<&Value>) -> String {
         })
         .take(160)
         .collect()
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use std::io::{BufRead, Read};
+    use std::time::Instant;
+
+    // In-memory pipes standing in for the named pipes.
+    struct PipeReader {
+        incoming: mpsc::Receiver<Vec<u8>>,
+        buffer: Vec<u8>,
+        position: usize,
+    }
+    impl Read for PipeReader {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            if self.position == self.buffer.len() {
+                match self.incoming.recv() {
+                    Ok(bytes) => {
+                        self.buffer = bytes;
+                        self.position = 0;
+                    }
+                    Err(_) => return Ok(0),
+                }
+            }
+            let count = out.len().min(self.buffer.len() - self.position);
+            out[..count].copy_from_slice(&self.buffer[self.position..self.position + count]);
+            self.position += count;
+            Ok(count)
+        }
+    }
+    struct PipeWriter(mpsc::Sender<Vec<u8>>);
+    impl Write for PipeWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .send(bytes.to_vec())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn pipe() -> (PipeWriter, PipeReader) {
+        let (sender, incoming) = mpsc::channel();
+        (
+            PipeWriter(sender),
+            PipeReader {
+                incoming,
+                buffer: vec![],
+                position: 0,
+            },
+        )
+    }
+    type Run = Box<
+        dyn FnMut(Value, &Emitter, Arc<AtomicBool>, &mpsc::Receiver<Value>) -> Result<Value, String>
+            + Send,
+    >;
+    // The desktop's ends of a session served on another thread.
+    struct Desktop {
+        writer: Option<PipeWriter>,
+        reader: BufReader<PipeReader>,
+        served: std::thread::JoinHandle<()>,
+    }
+    impl Desktop {
+        fn start(run: Run) -> Self {
+            let (writer, helper_reader) = pipe();
+            let (helper_writer, reader) = pipe();
+            let served = std::thread::spawn(move || {
+                serve(Box::new(helper_reader), Box::new(helper_writer), run)
+            });
+            Self {
+                writer: Some(writer),
+                reader: BufReader::new(reader),
+                served,
+            }
+        }
+        fn send(&mut self, frame: Value) {
+            write_frame(self.writer.as_mut().unwrap(), &frame).unwrap();
+        }
+        fn request(&mut self, id: &str, request: Value) {
+            self.send(json!({"protocol":1,"type":"request","operation":id,"request":request}));
+        }
+        fn next(&mut self) -> Value {
+            read_frame(&mut self.reader)
+                .unwrap()
+                .expect("the helper closed the connection")
+        }
+        fn ended(mut self) -> bool {
+            self.writer = None;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !self.served.is_finished() {
+                if Instant::now() > deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // Nothing more is sent once the session ends.
+            self.reader.fill_buf().map(|b| b.is_empty()).unwrap_or(true)
+        }
+    }
+    fn wait_for(flag: &AtomicBool, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while !flag.load(Ordering::Relaxed) {
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    #[test]
+    fn operations_share_one_connection() {
+        let mut desktop =
+            Desktop::start(Box::new(|request, _, _, _| Ok(json!({"n":request["n"]}))));
+        for (id, n) in [("one", 1), ("two", 2)] {
+            desktop.request(id, json!({"n":n}));
+            let result = desktop.next();
+            assert_eq!(
+                (result["type"].as_str(), result["operation"].as_str()),
+                (Some("result"), Some(id))
+            );
+            assert_eq!(result["result"]["n"], n);
+        }
+        assert!(desktop.ended());
+    }
+
+    #[test]
+    fn stop_reaches_only_the_running_operation() {
+        let mut desktop = Desktop::start(Box::new(|request, _, cancel, _| {
+            if request["wait"] == true {
+                Ok(json!({"stopped": wait_for(&cancel, Duration::from_secs(5))}))
+            } else {
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(json!({"stopped": cancel.load(Ordering::Relaxed)}))
+            }
+        }));
+        desktop.request("one", json!({"wait":true}));
+        desktop.send(json!({"protocol":1,"type":"cancel","operation":"one"}));
+        assert_eq!(desktop.next()["result"]["stopped"], true);
+        // A Stop for the operation that already ended doesn't reach the next.
+        desktop.send(json!({"protocol":1,"type":"cancel","operation":"one"}));
+        desktop.request("two", json!({"wait":false}));
+        desktop.send(json!({"protocol":1,"type":"cancel","operation":"one"}));
+        let result = desktop.next();
+        assert_eq!(
+            (result["operation"].as_str(), &result["result"]["stopped"]),
+            (Some("two"), &json!(false))
+        );
+        assert!(desktop.ended());
+    }
+
+    #[test]
+    fn answers_go_to_their_own_operation() {
+        let mut desktop = Desktop::start(Box::new(|_, _, _, confirmations| {
+            let answer = confirmations
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"binding":answer["binding"]}))
+        }));
+        desktop.request("two", json!({}));
+        desktop.send(json!({"protocol":1,"type":"confirmation","operation":"one","binding":"late","approved":true}));
+        desktop.send(json!({"protocol":1,"type":"confirmation","operation":"two","binding":"mine","approved":true}));
+        assert_eq!(desktop.next()["result"]["binding"], "mine");
+        assert!(desktop.ended());
+    }
+
+    #[test]
+    fn a_malformed_frame_ends_the_session_after_the_running_work_finishes() {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&stopped);
+        let mut desktop = Desktop::start(Box::new(move |_, _, cancel, _| {
+            // Work that can't stop: it finishes, noting that it was asked to.
+            seen.store(wait_for(&cancel, Duration::from_secs(5)), Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(100));
+            Ok(json!({"finished":true}))
+        }));
+        desktop.request("one", json!({}));
+        desktop.send(json!({"protocol":1,"type":"bogus"}));
+        assert_eq!(desktop.next()["result"]["finished"], true);
+        assert!(stopped.load(Ordering::Relaxed));
+        assert!(desktop.ended());
+    }
+
+    #[test]
+    fn a_closed_connection_cancels_the_running_operation_and_ends_after_it() {
+        let mut desktop = Desktop::start(Box::new(|_, _, cancel, _| {
+            Ok(json!({"stopped": wait_for(&cancel, Duration::from_secs(5))}))
+        }));
+        desktop.request("one", json!({}));
+        let served = {
+            let Desktop {
+                writer,
+                reader,
+                served,
+            } = desktop;
+            drop(writer);
+            let mut reader = reader;
+            // The result still goes out; the desktop may be gone.
+            assert_eq!(
+                read_frame(&mut reader).unwrap().unwrap()["result"]["stopped"],
+                true
+            );
+            served
+        };
+        served.join().unwrap();
+    }
+
+    #[test]
+    fn an_idle_closed_connection_ends_the_session_at_once() {
+        let desktop = Desktop::start(Box::new(|_, _, _, _| Ok(json!({}))));
+        assert!(desktop.ended());
+    }
 }
 
 #[cfg(test)]
