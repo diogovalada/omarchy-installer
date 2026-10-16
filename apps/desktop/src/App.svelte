@@ -22,6 +22,12 @@
   $: testingDirect = downloads.native && $setup.snapshot?.stagedTesting === true && $downloads.snapshot?.host_os === 'windows' && $downloads.snapshot?.host_architecture === 'x86_64';
   $: sourceReady = $downloads.snapshot?.status === 'complete' && !!$downloads.snapshot.image_path;
   $: if (!option && setupActive($setup.snapshot?.status)) option=$setup.snapshot?.kind ?? null;
+  // Once administrator access is granted and the image is known, check disks
+  // in the background so Install without USB has results waiting. Not while
+  // a temporary installer exists: its steps replace the choose screen.
+  let checkedImage = '';
+  $: image = $downloads.snapshot?.release?.sha256 ?? '';
+  $: if (testingDirect && $setup.snapshot?.admin === 'ready' && image && image !== checkedImage && !$setup.snapshot?.stagedRecovery?.operations?.length) { checkedImage = image; void setup.backgroundCheck(); }
   onMount(() => {
     void setup.refresh();
     // Asks for administrator access once, over a window the user can see;

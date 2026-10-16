@@ -29,6 +29,9 @@ export interface SetupSnapshot {
   // Administrator access for this run (Windows): asking at startup, ready,
   // or declined; null before asking or after the helper went away.
   admin?: 'asking' | 'ready' | 'declined' | null;
+  // The disk check run in the background at launch (testing builds): kept
+  // apart from the main status, with the image it was for.
+  stagedCheck?: {status:'running'|'stopping'|'stopped'|'done'|'failed';result:SetupSnapshot['stagedIso'];message:string;identity:string} | null;
   // A staged preparation's steps, from the provider, and the current one.
   steps?: {id:string;label:string}[] | null;
   step?: string | null;
@@ -81,6 +84,8 @@ export const setup = { subscribe:state.subscribe, refresh,
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),
   respondStagedReview:(approved:boolean) => command('respond_staged_review',{approved}),
   startAdminSession:() => command('start_admin_session'),
+  // Not a user action: no pending state, and nothing to report if it can't start.
+  backgroundCheck:() => isTauri() ? invoke('staged_background_check').then(()=>undefined,()=>undefined) : Promise.resolve(),
   cancel:() => command('cancel_setup') };
 
 export function usbIssueSummary(inspection:UsbInspection):string {

@@ -263,6 +263,115 @@ fn run_request(
 pub(crate) const FIRMWARE_SUMMARY: &str = "Restart into firmware settings now? Save your work first. Turn off Secure Boot (usually under Security, Boot or Authentication), leave TPM on, then save and exit. Windows starts again and this app reopens. Windows may ask you to set up your PIN again.";
 pub(crate) const FIRMWARE_REOPENS: &str = "Windows starts again and this app reopens.";
 
+/// Windows' shrink minimums this helper measured, kept for the session so
+/// planning doesn't measure again. Only the helper's own inspection results
+/// go in; nothing the desktop sends does. The provider uses one only if the
+/// partition's offset and size still match, and the write measures again
+/// before shrinking.
+mod measurements {
+    use serde_json::{json, Value};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    const FRESH: Duration = Duration::from_secs(30 * 60);
+    struct Measured {
+        disk: String,
+        partition: String,
+        offset: u64,
+        size: u64,
+        bytes: u64,
+        at: Instant,
+    }
+    static MEASURED: Mutex<Vec<Measured>> = Mutex::new(Vec::new());
+
+    pub(super) fn remember(inspection: &Value) {
+        let Ok(mut measured) = MEASURED.lock() else {
+            return;
+        };
+        for disk in inspection["disks"].as_array().into_iter().flatten() {
+            let Some(disk_id) = disk["diskUniqueId"].as_str() else {
+                continue;
+            };
+            for region in disk["regions"].as_array().into_iter().flatten() {
+                let (Some(partition), Some(offset), Some(size), Some(bytes)) = (
+                    region["partitionGuid"].as_str(),
+                    region["offsetBytes"].as_u64(),
+                    region["sizeBytes"].as_u64(),
+                    region["windowsMinimumBytes"].as_u64(),
+                ) else {
+                    continue;
+                };
+                if region["resizeState"] != "checked" || bytes == 0 {
+                    continue;
+                }
+                // The same result arrives in several events; keep the time
+                // it was first seen for these exact facts.
+                if measured.iter().any(|m| {
+                    m.disk == disk_id
+                        && m.partition.eq_ignore_ascii_case(partition)
+                        && (m.offset, m.size, m.bytes) == (offset, size, bytes)
+                }) {
+                    continue;
+                }
+                measured.retain(|m| {
+                    !(m.disk == disk_id && m.partition.eq_ignore_ascii_case(partition))
+                });
+                measured.push(Measured {
+                    disk: disk_id.into(),
+                    partition: partition.into(),
+                    offset,
+                    size,
+                    bytes,
+                    at: Instant::now(),
+                });
+            }
+        }
+    }
+
+    pub(super) fn recall(disk: &str, partition: &str) -> Option<Value> {
+        let measured = MEASURED.lock().ok()?;
+        let m = measured.iter().find(|m| {
+            m.disk == disk && m.partition.eq_ignore_ascii_case(partition) && m.at.elapsed() < FRESH
+        })?;
+        Some(json!({"bytes":m.bytes,"offsetBytes":m.offset,"sizeBytes":m.size}))
+    }
+
+    #[cfg(test)]
+    pub(super) fn forget() {
+        if let Ok(mut measured) = MEASURED.lock() {
+            measured.clear();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn only_checked_measurements_are_recalled_for_their_own_partition() {
+            forget();
+            let inspection = |state: &str, bytes: Value| {
+                json!({"disks":[{"diskUniqueId":"disk","regions":[
+                    {"kind":"partition","partitionGuid":"GUID-C","offsetBytes":1048576,"sizeBytes":500,"resizeState":state,"windowsMinimumBytes":bytes},
+                    {"kind":"free","offsetBytes":0,"sizeBytes":10}
+                ]}]})
+            };
+            remember(&inspection("unchecked", Value::Null));
+            assert_eq!(recall("disk", "guid-c"), None);
+            remember(&inspection("checked", json!(300)));
+            assert_eq!(
+                recall("disk", "guid-c"),
+                Some(json!({"bytes":300,"offsetBytes":1048576,"sizeBytes":500}))
+            );
+            assert_eq!(recall("other-disk", "guid-c"), None);
+            // A newer measurement of the same partition replaces it.
+            remember(&inspection("checked", json!(310)));
+            assert_eq!(recall("disk", "guid-c").unwrap()["bytes"], 310);
+            forget();
+        }
+    }
+}
+
 /// What to do in the installer, which the app can't show once it runs. A
 /// replaced partition (`replaces` in the staging summary) is deleted there.
 pub(crate) fn installer_instruction(replaces: Option<&str>) -> String {
@@ -1622,14 +1731,19 @@ fn execute(
                 )?;
                 let mut command = provider_process::staged_command(&runtime, "inspect", &path)?;
                 provider_process::privileged_environment(&mut command, &workspace)?;
-                return provider_process::run(
+                let result = provider_process::run(
                     command,
                     None,
                     Arc::clone(&cancel),
                     Some(cancel_path),
                     true,
-                    |value| provider_event(output, value),
-                );
+                    |value| {
+                        measurements::remember(&value["stagedIsoInspection"]);
+                        provider_event(output, value)
+                    },
+                )?;
+                measurements::remember(&result);
+                return Ok(result);
             }
             if resize.is_some() {
                 return Err("Resize analysis is only accepted during inspection".into());
@@ -1667,6 +1781,11 @@ fn execute(
                         input["shrinkPartitionGuid"] = json!(partition_guid);
                         if choice.linux_bytes > 0 {
                             input["linuxBytes"] = json!(choice.linux_bytes);
+                        }
+                        if let Some(known) =
+                            measurements::recall(&choice.disk_unique_id, partition_guid)
+                        {
+                            input["knownMinimum"] = known;
                         }
                     }
                     DirectTarget::Delete { .. } => {

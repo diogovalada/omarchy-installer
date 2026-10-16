@@ -70,6 +70,14 @@ downloads. Published versions and their artifacts are immutable.
   closes, so checking disks, preparing and the firmware restart need no
   further prompts. Declining keeps the old behavior: each action asks when
   it needs to. Install without USB offers Allow after a decline.
+- Install without USB (testing builds): once administrator access is granted
+  and the image is known, disks are checked in the background, Windows' own
+  disk first, so results are waiting when you open the screen, even before
+  the download finishes. Any action stops the check after the partition being
+  measured. Planning reuses that measurement instead of measuring again, and
+  the last check before shrinking now runs before BitLocker is paused: if
+  Windows can no longer shrink that far, nothing is changed and no installer
+  is left to remove.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StagedInstaller from './StagedInstaller.svelte';
 import { setup } from './setup';
-const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn()}));
+const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn(),backgroundCheck:vi.fn()}));
 vi.mock('./setup',async importOriginal=>{
   const actual=await importOriginal<typeof import('./setup')>();
   const {writable}=await import('svelte/store');
@@ -568,6 +568,35 @@ it('shows copy progress and offers to stop only while copying',async()=>{
   expect(screen.getByRole('progressbar',{name:'Progress'})).toHaveAttribute('value',String(2*1024**3));
   await fireEvent.click(screen.getByRole('button',{name:'Stop preparing'}));
   expect(calls.cancel).toHaveBeenCalledOnce();
+});
+it('shows the background check before the download, and Review waits for the image',async()=>{
+  const background=(status:string,regions:unknown[])=>({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status,message:'',identity:'iso',result:{choices:status==='done' ? [encrypted] : [],blocked:[],disks:[{...fullDisk,regions}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}});
+  // Still measuring C:, before the image is downloaded.
+  state.set(background('running',[fullDisk.regions[0]]));
+  render(StagedInstaller,{sourceReady:false});
+  await tick();
+  expect(screen.queryByRole('button',{name:'Check available space'})).not.toBeInTheDocument();
+  expect(screen.getAllByText('Checking how much C: can shrink. This can take a few minutes.').length).toBeGreaterThan(0);
+  // Measured: the space can be chosen, but Review needs the image.
+  state.set(background('done',[checkedC]));
+  await tick();
+  expect(screen.getByText('Download the image above first.')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeDisabled();
+});
+it('lets a measured partition go to Review while the background check goes on',async()=>{
+  const data={kind:'partition',partitionNumber:5,partitionGuid:'data',offsetBytes:501*GiB,sizeBytes:400*GiB,label:'D:',fileSystem:'NTFS',freeBytes:300*GiB,resizeState:'unchecked',isWindows:false};
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'running',message:'',identity:'iso',result:{choices:[encrypted],blocked:[],disks:[{...fullDisk,diskSizeBytes:1000*GiB,regions:[checkedC,data]}],minimumLinuxBytes:32*GiB,temporaryBytes:8*GiB,secureBoot:true}}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('button',{name:'Review changes'})).toBeEnabled();
+  await fireEvent.click(screen.getByRole('button',{name:'Review changes'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('stage',expect.objectContaining({diskUniqueId:'windows-disk'}));
+});
+it('picks a stopped background check up again when the screen opens',async()=>{
+  state.set({pending:false,snapshot:{status:'idle',stagedTesting:true,stagedCheck:{status:'stopped',message:'',identity:'iso',result:null}}});
+  render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(calls.backgroundCheck).toHaveBeenCalledOnce();
 });
 it('lists the preparation steps, ticking finished ones and showing the current one',async()=>{
   const steps=[{id:'verify',label:'Verify the installer image'},{id:'bitlocker',label:'Pause BitLocker on C:'},{id:'shrink',label:'Shrink C:'},{id:'partitions',label:'Create the installer partitions'},{id:'copy',label:'Copy and check the installer'},{id:'startup',label:'Add the startup entry'}];

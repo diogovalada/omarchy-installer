@@ -160,6 +160,8 @@ function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
                         Emit 'progress' 'analyzing-resize' @{cancelAvailable=$Stoppable;message=('Checking how much '+$region.label+' can shrink. Windows may take several minutes; no partitions are being changed.')}
                         $candidate=Get-ShrinkCandidate $p; $measured=$true
                         $region.maximumReleaseBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.maximumAllocationBytes } else { $null }
+                        # The helper keeps this to plan without measuring again.
+                        $region.windowsMinimumBytes=if ($candidate.windowsMinimumSizeBytes -gt 0) { [long]$candidate.windowsMinimumSizeBytes } else { $null }
                         $region.reserveBytes=[long]$candidate.reserveBytes
                         $region.limitedByFiles=[bool]$candidate.limitedByFiles
                         $region.filesReleaseBytes=if ($null -ne $candidate.filesReleaseBytes) { [long]$candidate.filesReleaseBytes } else { $null }
@@ -224,8 +226,13 @@ function Get-StagingInspection($Release,$Resize=$null,[string]$CancelPath='') {
     $result=Get-StagingChoices $Release $Resize $CancelPath
     if ($null -ne $Resize) { return $result }
     Emit 'progress' 'inspecting' @{cancelAvailable=$stoppable;message='Disks are ready. Checking Windows resize limits...';stagedIsoInspection=$result}
-    foreach ($disk in @($result.disks)) {
-        foreach ($region in @($disk.regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'unchecked' })) {
+    # Windows' own disk and partition first: they're the likely space source.
+    # (Windows PowerShell's Sort-Object isn't stable, so split instead.)
+    $windowsDisk={ @($_.regions | Where-Object { $_['isWindows'] -eq $true }).Count -gt 0 }
+    $disks=@($result.disks | Where-Object $windowsDisk)+@($result.disks | Where-Object { -not (& $windowsDisk) })
+    foreach ($disk in $disks) {
+        $unchecked=@($disk.regions | Where-Object { $_.kind -eq 'partition' -and $_.resizeState -eq 'unchecked' })
+        foreach ($region in @($unchecked | Where-Object { $_['isWindows'] -eq $true })+@($unchecked | Where-Object { $_['isWindows'] -ne $true })) {
             Assert-StagingCheckRunning $CancelPath
             $query=[pscustomobject]@{diskNumber=$disk.diskNumber;diskUniqueId=$disk.diskUniqueId;partitionNumber=$region.partitionNumber;partitionGuid=$region.partitionGuid}
             $measured=Get-StagingChoices $Release $query $CancelPath
@@ -245,7 +252,7 @@ function Get-LargestFreeRegion($Partitions,[long]$DiskSize) {
     return $largest
 }
 function Get-StagingPlan($Request) {
-    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid','linuxBytes') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind')
+    Assert-Fields $Request @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind','startOffsetBytes','shrinkPartitionNumber','shrinkPartitionGuid','linuxBytes','knownMinimum') @('sourceIsoPath','sourceSha256','sourceLength','diskNumber','diskUniqueId','targetKind')
     $release=Get-StagingRelease $Request.sourceSha256 $Request.sourceLength
     # Secure Boot is checked when selecting the installer startup. By then
     # staging has suspended BitLocker, so turning it off cannot trigger recovery.
@@ -264,9 +271,16 @@ function Get-StagingPlan($Request) {
     } elseif ($Request.targetKind -eq 'shrink') {
         $part=Get-Partition -DiskNumber $disk.Number -PartitionNumber $Request.shrinkPartitionNumber -ErrorAction Stop
         if ([guid]$part.Guid -ne [guid]$Request.shrinkPartitionGuid) { throw 'Shrink partition changed.' }
-        $name=if ([string]$part.DriveLetter -match '^[A-Za-z]$') { [string]$part.DriveLetter+':' } else { 'Partition '+$part.PartitionNumber }
-        Emit 'progress' 'planning' @{message=('Checking how much '+$name+' can shrink. This can take a few minutes.')}
-        $candidate=Get-ShrinkCandidate $part
+        # The helper's own measurement from this session, if it's for this
+        # partition as it is now; the final check before shrinking measures
+        # again anyway.
+        $known=[long]0
+        if ($Request.PSObject.Properties['knownMinimum'] -and $null -ne $Request.knownMinimum -and [long]$Request.knownMinimum.offsetBytes -eq [long]$part.Offset -and [long]$Request.knownMinimum.sizeBytes -eq [long]$part.Size) { $known=[long]$Request.knownMinimum.bytes }
+        if ($known -le 0) {
+            $name=if ([string]$part.DriveLetter -match '^[A-Za-z]$') { [string]$part.DriveLetter+':' } else { 'Partition '+$part.PartitionNumber }
+            Emit 'progress' 'planning' @{message=('Checking how much '+$name+' can shrink. This can take a few minutes.')}
+        }
+        $candidate=Get-ShrinkCandidate $part $known
         if (-not $candidate.eligible -or $candidate.maximumAllocationBytes -lt $total) { throw 'Windows cannot release the requested space while retaining its reserve.' }
         # The installer sits right after the shrunk partition, so Windows can
         # reclaim it with Extend Volume later; Omarchy's space follows it.
@@ -475,10 +489,9 @@ function Get-StagingSteps($Plan) {
     $volumes=if ($Plan.PSObject.Properties['bitLocker']) { @($Plan.bitLocker) } else { @() }
     $paused=@($volumes | Where-Object { $_ -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ([string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
     if ($paused.Count) { $steps+=@{id='bitlocker';label=('Pause BitLocker on '+($paused -join ', '))} }
-    if ($null -ne $Plan.shrink) {
-        $name=if ([string]$Plan.shrink.driveLetter) { [string]$Plan.shrink.driveLetter+':' } else { 'Partition '+$Plan.shrink.partitionNumber }
-        $steps+=@{id='shrink';label=('Shrink '+$name)}
-    }
+    $name=if ($null -eq $Plan.shrink) { '' } elseif ([string]$Plan.shrink.driveLetter) { [string]$Plan.shrink.driveLetter+':' } else { 'Partition '+$Plan.shrink.partitionNumber }
+    if ($name) { $steps=@($steps[0])+@(@{id='preflight';label=('Check that '+$name+' can still shrink')})+@($steps | Select-Object -Skip 1) }
+    if ($name) { $steps+=@{id='shrink';label=('Shrink '+$name)} }
     $steps+=@(@{id='partitions';label='Create the installer partitions'},@{id='copy';label='Copy and check the installer'},@{id='startup';label='Add the startup entry'})
     return $steps
 }
@@ -541,6 +554,9 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
             if (@($files | Where-Object { $_.path -ceq $needed }).Count -ne 1) { throw "Required official ISO file is missing: $needed" }
         }
         if (($files | Measure-Object sizeBytes -Sum).Sum -gt $Plan.partitions[1].sizeBytes-512MB) { throw 'Extracted ISO exceeds the planned staging capacity.' }
+        # Measured before anything changes, so a limit that went stale since
+        # planning fails with nothing changed, not after BitLocker is paused.
+        $minimum=if ($null -ne $Plan.shrink) { Get-StagingShrinkPreflight $Plan } else { [long]0 }
         $Plan.files=$files; $Plan.status='allocation-starting'; Save-StagingState $Plan
         Assert-PhysicalDiskIdentity $Plan
         if (@($steps | Where-Object { $_.id -eq 'bitlocker' }).Count) { Enter-StagingStep $Plan 'bitlocker' 'suspending-bitlocker' 'Pausing BitLocker; data stays encrypted...' }
@@ -548,7 +564,7 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         $layout=$Plan.layoutSha256
         if ($null -ne $Plan.shrink) {
             Enter-StagingStep $Plan 'shrink' 'shrinking' 'Shrinking the partition. This can take several minutes...'
-            $layout=Invoke-ConfirmedShrink $Plan $directory
+            $layout=Invoke-ConfirmedShrink $Plan $directory $minimum
         }
         Enter-StagingStep $Plan 'partitions' 'allocating-staging' 'Creating the temporary installer partitions...'
         Assert-StagingFree (Get-StagingDisk $Plan.diskNumber $Plan.diskUniqueId) $Plan.linuxOffsetBytes ($Plan.linuxBytes+512MB+$Plan.partitions[1].sizeBytes)
@@ -603,6 +619,29 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         $Plan.status='staged'; Save-StagingState $Plan
         return Get-StagingSummary $Plan
     } finally { try { if ($mounted) { [void](Dismount-DiskImage -ImagePath $Plan.sourceIsoPath -ErrorAction Stop) } } finally { $lease.Dispose() } }
+}
+# Measures the partition to shrink while nothing has changed yet. A limit that
+# no longer fits removes the record (no installer was made) and fails plainly.
+# Returns Windows' minimum for the shrink itself.
+function Get-StagingShrinkPreflight($Plan) {
+    Enter-StagingStep $Plan 'preflight' 'checking-shrink' 'Checking the partition can still shrink. This can take a few minutes...'
+    $part=Get-Partition -DiskNumber $Plan.diskNumber -PartitionNumber $Plan.shrink.partitionNumber -ErrorAction Stop
+    $preflight=Get-ShrinkCandidate $part
+    if ([string]$part.Guid -cne $Plan.shrink.partitionGuid -or -not $preflight.eligible -or $preflight.volumeId -ine $Plan.shrink.volumeId -or [long]$Plan.shrink.afterSizeBytes -lt [long]$preflight.minimumSizeBytes) {
+        Remove-StagingRecord $Plan
+        $name=if ([string]$Plan.shrink.driveLetter) { [string]$Plan.shrink.driveLetter+':' } else { 'the partition' }
+        throw ('Windows can no longer shrink '+$name+' that far. Nothing was changed. Check again.')
+    }
+    return [long]$preflight.windowsMinimumSizeBytes
+}
+# Before BitLocker or the disk changed (still `preparing`), a failed write
+# leaves no installer to remove: its record goes.
+function Remove-StagingRecord($State) {
+    if ($State.status -ne 'preparing') { throw 'Only a record from before any change can be removed.' }
+    $directory=Get-StagingDirectory $State.operationId
+    Assert-ProtectedDirectory $directory
+    Remove-Item -LiteralPath $directory -Recurse -Force
+    Write-StagingSummary
 }
 function Get-StagingSummary($State) {
     $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}

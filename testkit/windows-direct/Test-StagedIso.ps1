@@ -534,10 +534,10 @@ try {
     Assert ((& $ids $free) -ceq 'verify,partitions,copy,startup') 'Free space listed the wrong steps.'
     $shrink=[pscustomobject]@{bitLocker=@([pscustomobject]@{driveLetter='C:';protectionStatus=1},[pscustomobject]@{driveLetter='D:';protectionStatus=0});shrink=[pscustomobject]@{driveLetter='C';partitionNumber=3}}
     $steps=@(Get-StagingSteps $shrink)
-    Assert ((& $ids $shrink) -ceq 'verify,bitlocker,shrink,partitions,copy,startup') 'A shrink with BitLocker listed the wrong steps.'
-    Assert ($steps[1].label -ceq 'Pause BitLocker on C:' -and $steps[2].label -ceq 'Shrink C:') 'Steps did not name the partitions.'
+    Assert ((& $ids $shrink) -ceq 'verify,preflight,bitlocker,shrink,partitions,copy,startup') 'A shrink with BitLocker listed the wrong steps.'
+    Assert ($steps[1].label -ceq 'Check that C: can still shrink' -and $steps[2].label -ceq 'Pause BitLocker on C:' -and $steps[3].label -ceq 'Shrink C:') 'Steps did not name the partitions.'
     $older=[pscustomobject]@{shrink=[pscustomobject]@{driveLetter='';partitionNumber=4}}
-    Assert ((@(Get-StagingSteps $older))[1].label -ceq 'Shrink Partition 4') 'A record without BitLocker data or a letter was mislabelled.'
+    Assert ((@(Get-StagingSteps $older))[2].label -ceq 'Shrink Partition 4') 'A record without BitLocker data or a letter was mislabelled.'
 }
 # Steps record when each started and ended, for the test runs' timings.
 & {
@@ -611,5 +611,65 @@ try {
         try { [void](Get-StagingInspection @{} $null $cancel) } catch { $stopped=$true }
         Assert ($stopped -and $script:measured.Count -eq 0) 'A stopped check still measured.'
     } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
+}
+# The final check measures before BitLocker or the disk change; a stale limit
+# removes the record and fails plainly.
+& {
+    function Enter-StagingStep { }
+    $part=[pscustomobject]@{Guid='g';PartitionNumber=3}
+    function Get-Partition { return $part }
+    function Remove-StagingRecord($State) { $script:removed++ }
+    $plan=[pscustomobject]@{diskNumber=0;status='preparing';operationId='o';shrink=[pscustomobject]@{partitionNumber=3;partitionGuid='g';volumeId='v';driveLetter='C';afterSizeBytes=[long]80GB}}
+    function Get-ShrinkCandidate($Partition,$Known) { return @{eligible=$true;volumeId='v';minimumSizeBytes=[long]70GB;windowsMinimumSizeBytes=[long]60GB} }
+    $script:removed=0
+    Assert ((Get-StagingShrinkPreflight $plan) -eq 60GB -and $script:removed -eq 0) 'A shrink that still fits did not return its fresh minimum.'
+    function Get-ShrinkCandidate($Partition,$Known) { return @{eligible=$true;volumeId='v';minimumSizeBytes=[long]90GB;windowsMinimumSizeBytes=[long]85GB} }
+    $message=''
+    try { [void](Get-StagingShrinkPreflight $plan) } catch { $message=$_.Exception.Message }
+    Assert ($message -ceq 'Windows can no longer shrink C: that far. Nothing was changed. Check again.' -and $script:removed -eq 1) 'A stale limit did not fail plainly or left the record.'
+    $part.Guid='other'; $script:removed=0
+    Reject { Get-StagingShrinkPreflight $plan } 'A replaced partition passed the final check.'
+}
+# The staged write measures before pausing BitLocker (source order), and
+# shrinks with that measurement.
+& {
+    $source=Get-Content -LiteralPath (Join-Path $root 'providers/staged-iso/Staging.ps1') -Raw
+    $write=$source.Substring($source.IndexOf('function Invoke-StagingWrite'))
+    Assert ($write.IndexOf('Get-StagingShrinkPreflight') -lt $write.IndexOf('Start-StagingSuspension') -and $write.IndexOf('Invoke-ConfirmedShrink $Plan $directory $minimum') -gt 0) 'The final check no longer runs before BitLocker is paused.'
+}
+# Windows' own disk and partition are measured first.
+& {
+    function Emit { }
+    $data=@{diskNumber=0;diskUniqueId='data';diskSizeBytes=[long]1TB;regions=@(@{kind='partition';partitionNumber=1;partitionGuid='d';resizeState='unchecked';label='D:';isWindows=$false})}
+    $system=@{diskNumber=1;diskUniqueId='system';diskSizeBytes=[long]500GB;regions=@(@{kind='partition';partitionNumber=2;partitionGuid='e';resizeState='unchecked';label='E:';isWindows=$false},@{kind='partition';partitionNumber=3;partitionGuid='c';resizeState='unchecked';label='C:';isWindows=$true})}
+    function Get-StagingChoices($Release,$Resize) {
+        if ($null -ne $Resize) { $script:order+=$Resize.partitionGuid }
+        return @{disks=@($data,$system);choices=@();blocked=@()}
+    }
+    function Merge-StagingAnalysis($Inventory,$Measured,$Query) { return $Inventory }
+    $script:order=@()
+    [void](Get-StagingInspection @{} $null '')
+    Assert (($script:order -join ',') -ceq 'c,e,d') "Windows' partition was not measured first."
+}
+# Planning reuses the helper's own measurement only for the partition as it is now.
+& {
+    $planDisk=[pscustomobject]@{Number=0;UniqueId='plan-disk';Size=[long]500GB;SerialNumber='serial'}
+    $windowsPart=[pscustomobject]@{DiskNumber=0;PartitionNumber=3;Guid='77777777-7777-7777-7777-777777777777';Offset=[long]1MB;Size=[long](500GB-2MB);GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';DriveLetter='C'}
+    function Get-StagingRelease { return [pscustomobject]@{sizeBytes=[long]6GB;minimumLinuxBytes=[long]32GB} }
+    function Get-StagingDisk { return $planDisk }
+    function Get-StagingEncryption { return @() }
+    function Get-Partition { return $windowsPart }
+    function Get-ShrinkCandidate($Partition,[long]$Known) { $script:known=$Known; return @{eligible=$true;maximumAllocationBytes=[long]100GB;volumeId='volume';driveLetter='C'} }
+    function Get-InspectedPartitions { return @($windowsPart) }
+    function Assert-Path($Path) { return $Path }
+    function Emit($Type,$Stage,$Fields) { if ($Stage -eq 'planning') { $script:measuring=$true } }
+    $request=[pscustomobject]@{sourceIsoPath='C:\omarchy.iso';sourceSha256=('a'*64);sourceLength=[long]6GB;diskNumber=0;diskUniqueId='plan-disk';targetKind='shrink';shrinkPartitionNumber=3;shrinkPartitionGuid=$windowsPart.Guid;linuxBytes=[long]0;knownMinimum=[pscustomobject]@{bytes=[long]300GB;offsetBytes=[long]1MB;sizeBytes=[long](500GB-2MB)}}
+    $script:known=-1; $script:measuring=$false
+    [void](Get-StagingPlan $request)
+    Assert ($script:known -eq 300GB -and -not $script:measuring) 'Planning measured again despite a fresh measurement of this partition.'
+    $request.knownMinimum.sizeBytes=[long]400GB
+    $script:known=-1; $script:measuring=$false
+    [void](Get-StagingPlan $request)
+    Assert ($script:known -eq 0 -and $script:measuring) 'Planning reused a measurement of a partition that has since changed.'
 }
 Write-Output 'Passed staging release/ownership/encryption/copy and mocked cleanup tests; no host changes.'
