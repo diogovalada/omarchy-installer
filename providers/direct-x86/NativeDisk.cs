@@ -407,14 +407,21 @@ namespace Omarchy.DirectX86 {
             public int partitionNumber;
             public long offsetBytes, sizeBytes;
         }
-        public static WindowsBootTarget InspectWindowsBoot() {
+        public static WindowsBootTarget InspectWindowsBoot() { return InspectWindowsBoot(-1); }
+        // A pending one-time boot is refused unless it is the caller's own
+        // entry (`allowedPendingIndex`), as when selecting the staged
+        // installer again before the restart it was selected for.
+        public static bool OneTimeBootAllowed(byte[] next, int allowedPendingIndex) {
+            return next == null || (allowedPendingIndex >= 0 && next.Length == 2 && BitConverter.ToUInt16(next, 0) == allowedPendingIndex);
+        }
+        public static WindowsBootTarget InspectWindowsBoot(int allowedPendingIndex) {
             FirmwarePrivilege();
             byte[] order = GetVariable("BootOrder");
             // The pinned Limine EFI-entry protocol has a 128-entry order buffer.
             // Reserve one slot for our menu before changing anything.
             if (order == null || order.Length == 0 || order.Length % 2 != 0 || order.Length > 254)
                 throw new InvalidDataException("The existing firmware boot order is unsupported");
-            if (GetVariable("BootNext") != null)
+            if (!OneTimeBootAllowed(GetVariable("BootNext"), allowedPendingIndex))
                 throw new InvalidDataException("A one-time firmware boot is scheduled. Complete that startup before installing");
             var indices = new System.Collections.Generic.HashSet<ushort>();
             WindowsBootTarget found = null;
