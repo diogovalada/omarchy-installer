@@ -88,6 +88,8 @@ downloads. Published versions and their artifacts are immutable.
   keeps Stop visible and says it works once copying starts. While an
   installer waits, the BitLocker reminder points back to the app and can't
   stop reminders, so the one that later says to resume isn't lost.
+- Install without USB (testing builds): the temporary partitions are labelled
+  OMARCHY_EFI and OMARCHY_INSTALLER instead of both OMARCHY_TMP.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
