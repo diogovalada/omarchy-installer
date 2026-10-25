@@ -575,12 +575,14 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
             $part=Get-OwnedStagingPartition $Plan $owned
             $volume=Get-StagingVolume $part
             if ([string]$volume.FileSystem -notin @('','Unknown','RAW')) { throw 'New staging partition is not an empty raw volume.' }
-            $fs=if ($owned.role -eq 'efi') { 'FAT32' } else { 'NTFS' }
+            # Distinct labels, so Windows disk tools tell the two apart. FAT32
+            # labels are at most 11 characters.
+            $fs,$label=if ($owned.role -eq 'efi') { 'FAT32','OMARCHY_EFI' } else { 'NTFS','OMARCHY_INSTALLER' }
             # Win32_Volume.Format fails with "unknown error" on EFI system
             # partitions; the Storage module's volume formats both (quick by default).
             $storageVolumes=@(Get-CimInstance -Namespace root/Microsoft/Windows/Storage -ClassName MSFT_Volume -ErrorAction Stop | Where-Object { $_.Path -ieq $volume.DeviceID })
             if ($storageVolumes.Count -ne 1) { throw 'Staging volume could not be identified.' }
-            $formatted=Invoke-CimMethod -InputObject $storageVolumes[0] -MethodName Format -Arguments @{FileSystem=$fs;FileSystemLabel='OMARCHY_TMP'} -ErrorAction Stop
+            $formatted=Invoke-CimMethod -InputObject $storageVolumes[0] -MethodName Format -Arguments @{FileSystem=$fs;FileSystemLabel=$label} -ErrorAction Stop
             if ($formatted.ReturnValue -ne 0 -or (Get-StagingVolume (Get-OwnedStagingPartition $Plan $owned)).FileSystem -cne $fs) { throw 'Staging filesystem format failed or did not verify.' }
             $mount=Mount-StagingPartition $Plan $owned
             try {
