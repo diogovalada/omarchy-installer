@@ -90,6 +90,11 @@ downloads. Published versions and their artifacts are immutable.
   stop reminders, so the one that later says to resume isn't lost.
 - Install without USB (testing builds): the temporary partitions are labelled
   OMARCHY_EFI and OMARCHY_INSTALLER instead of both OMARCHY_TMP.
+- Install without USB (testing builds): the BitLocker reminder offers Resume
+  protection for any pause it made, including one whose record was cut short,
+  and no longer opens Windows' BitLocker page, which may not offer resuming.
+  Resume is checked again when clicked, in case an installer was prepared
+  while the reminder was open.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
