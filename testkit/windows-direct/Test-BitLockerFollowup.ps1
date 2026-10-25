@@ -191,13 +191,33 @@ function Invoke-EncryptionQuery($Volume,$Method,$Arguments) {
 }
 function Remove-EncryptionReminder($Guid) { $script:events.Add('remove') }
 $state.origin='manual-opt-in'
-Reject { Resume-OwnedProtection $state 'mock' } 'Manual suspension was adopted.'
-$state.origin='installer-suspension'; $state.status='armed'
-Reject { Resume-OwnedProtection $state 'mock' } 'Unconfirmed suspension was adopted.'
+Reject { Resume-OwnedProtection $state 'mock' $false } 'Manual suspension was adopted.'
+$state.origin='installer-suspension'
+Reject { Resume-OwnedProtection $state 'mock' $true } 'Resumed while an installer waits.'
+$state.status='declined'
+Reject { Resume-OwnedProtection $state 'mock' $false } 'A finished reminder resumed protection.'
 Assert ($script:events.Count -eq 0) 'Rejected resume changed protection.'
 $state.status='pending'
-Resume-OwnedProtection $state 'mock'
+Resume-OwnedProtection $state 'mock' $false
 Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only verified resumption may retire the reminder.'
+# A pause whose receipt was interrupted is still the reminder's own pause.
+$script:events.Clear(); $script:current.protection=0; $state.status='armed'
+Resume-OwnedProtection $state 'mock' $false
+Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'An interrupted receipt could not be resumed.'
+# Offers: a pause shows Resume, whether or not its receipt was written; a
+# waiting installer hides it; anything else offers no action button.
+& {
+    $owned=[pscustomobject]@{schema=1;origin='installer-suspension';status='armed';volume=(Facts);createdBootUtc='old-boot'}
+    $offer=Get-FollowupOffer $owned (Facts 1 0) $false
+    Assert ($offer.decision -eq 'suspended' -and $offer.canResume) 'An interrupted receipt did not offer Resume.'
+    $offer=Get-FollowupOffer $owned (Facts 1 0) $true
+    Assert ($offer.decision -eq 'suspended' -and $offer.waiting -and -not $offer.canResume) 'A waiting installer offered Resume.'
+    Assert ((Get-FollowupOffer $owned (Facts 0 0) $false).decision -eq 'uncertain') 'An interrupted decryption was shown as a pause.'
+    $owned.status='pending'
+    Assert (-not (Get-FollowupOffer $owned (Facts 3 0) $false).canResume) 'Decryption offered Resume.'
+    $owned.origin='manual-opt-in'
+    Assert (-not (Get-FollowupOffer $owned (Facts 1 0) $false).canResume) 'A manual reminder offered Resume.'
+}
 # A prepared installer that has not been selected for startup hides Resume;
 # unreadable or missing summaries keep the normal choices.
 & {
@@ -216,7 +236,7 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
         Assert (-not (Test-StagedInstallerWaiting $summary)) 'An unreadable summary hid Resume.'
     } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
 }
-# A waiting installer points back to the app, hides BitLocker settings and
+# A waiting installer points back to the app, hides Resume and
 # can't stop the reminder that later says to resume; other states keep their
 # choices.
 & {
@@ -225,7 +245,9 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'Only ver
     Assert ($waiting.decline -ceq 'Stop reminders' -and -not $waiting.declineEnabled) 'A waiting installer allowed stopping reminders.'
     $installed=Get-FollowupView 'suspended' $false $true 'C:'
     Assert ($installed.settings -ceq 'Resume protection' -and $installed.decline -ceq 'Keep paused' -and $installed.text -clike 'BitLocker protection on C: is paused.*' -and $installed.declineEnabled) 'A finished installation lost Resume protection.'
-    Assert ((Get-FollowupView 'suspended' $false $false 'C:').settings -ceq 'Open BitLocker settings') 'A foreign suspension lost BitLocker settings.'
+    foreach ($decision in @('suspended','ask','uncertain','encrypting','decrypting')) {
+        Assert ($null -eq (Get-FollowupView $decision $false $false 'C:').settings) ('Offered an action button for '+$decision)
+    }
     Assert ((Get-FollowupView 'ask' $false $false 'C:').decline -ceq 'Keep BitLocker off') 'Asking lost Keep BitLocker off.'
     $decrypting=Get-FollowupView 'decrypting' $false $false 'C:'
     Assert (-not $decrypting.declineEnabled -and $decrypting.later -ceq 'Remind me next time') 'Decryption allowed stopping reminders.'

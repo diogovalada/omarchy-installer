@@ -217,9 +217,11 @@ function Assert-EncryptionOwner([uint32]$ProcessId) {
     $owner=Invoke-CimMethod -InputObject $desktop -MethodName GetOwnerSid -ErrorAction Stop
     if ($owner.ReturnValue -ne 0 -or $owner.Sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Use the same administrator account running the installer for suspension and its sign-in reminder.' }
 }
-function Resume-OwnedProtection($State,[string]$Path) {
+function Resume-OwnedProtection($State,[string]$Path,[bool]$InstallerWaiting) {
     $facts=Get-EncryptionFacts $State.volume.volumeId
-    if ($State.origin -ne 'installer-suspension' -or $State.status -ne 'pending' -or (Get-FollowupDecision $State $facts) -ne 'suspended') { throw 'Only an app-owned, confirmed suspension can be resumed here. Check Windows settings.' }
+    $offer=Get-FollowupOffer $State $facts $InstallerWaiting
+    if ($offer.waiting) { throw 'An Omarchy installer is waiting on this PC. Keep BitLocker paused until Omarchy is installed.' }
+    if (-not $offer.canResume) { throw 'Only a pause this installer made can be resumed here. Check Windows settings.' }
     $matches=@(Get-CimInstance -Namespace 'root/CIMV2/Security/MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume | Where-Object { $_.DeviceID -ceq $facts.volumeId -and $_.PersistentVolumeID -ceq $facts.persistentVolumeId })
     if ($matches.Count -ne 1) { throw 'Volume identity changed before resuming protection.' }
     [void](Invoke-EncryptionQuery $matches[0] 'EnableKeyProtectors')
@@ -245,17 +247,30 @@ function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::Ge
         return $false
     } catch { return $false }
 }
+# Which view the reminder shows and whether it offers Resume. A pause whose
+# receipt was interrupted (a crash between suspending and recording it) still
+# shows and resumes as a pause, behind the same confirmation: the reminder was
+# registered before that suspension, and resuming is the safe direction.
+function Get-FollowupOffer($State,$Facts,[bool]$InstallerWaiting) {
+    $decision=Get-FollowupDecision $State $Facts
+    $paused=$State.origin -eq 'installer-suspension' -and $decision -in @('suspended','uncertain') -and $Facts.conversion -eq 1 -and $Facts.protection -eq 0 -and $Facts.locked -eq 0
+    if ($paused) { $decision='suspended' }
+    $waiting=$decision -eq 'suspended' -and $InstallerWaiting
+    return [pscustomobject]@{decision=$decision;waiting=$waiting;canResume=($paused -and -not $waiting)}
+}
 # What the reminder says and offers. A waiting installer points back to the
 # app and hides BitLocker settings, so protection isn't resumed too early.
 function Get-FollowupView([string]$Decision,[bool]$InstallerWaiting,[bool]$CanResume,[string]$Drive) {
     $text=switch ($Decision) {
-        'ask' { 'Windows encryption is off. Would you like to turn BitLocker back on? Start Windows through your final Omarchy boot menu before doing so. Windows settings will guide you through activation and recovery-key backup. Closing this window reminds you at your next sign-in.' }
+        'ask' { 'Windows encryption is off. To turn it back on, first start Windows through your final Omarchy boot menu, then search Windows Settings for Device encryption or BitLocker. Closing this window reminds you at your next sign-in.' }
         'uncertain' { 'Omarchy preparation was interrupted before the encryption change was confirmed. Check Windows encryption settings. Nothing will be re-enabled automatically; this reminder stays until protection is verified or you explicitly dismiss it.' }
         'decrypting' { 'Windows decryption is still running or paused. Wait for it to finish before using the official installer. You can check its progress in Windows settings. The restoration reminder remains active.' }
         'encrypting' { 'Windows encryption is running or paused. It is not yet verified as fully protected. Check progress in Windows settings; this reminder will retire when encryption and protection are both verified.' }
         'suspended' { if ($InstallerWaiting) { 'BitLocker on '+$Drive+' is paused for the Omarchy installer waiting on this PC. Keep it paused until Omarchy is installed. Continue in Omarchy Installer.' } else { 'BitLocker protection on '+$Drive+' is paused. If you finished installing, first start Windows the way you normally will. You can then resume protection. If you cancelled installation, resume it now. Closing this window reminds you next sign-in.' } }
     }
-    $settings=if ($InstallerWaiting) { $null } elseif ($CanResume) { 'Resume protection' } else { 'Open BitLocker settings' }
+    # The only action button. Windows' BitLocker page differs by edition and may
+    # not offer resuming, so other states say where to look instead.
+    $settings=if ($CanResume) { 'Resume protection' } else { $null }
     $decline=switch ($Decision) { 'suspended' { if ($InstallerWaiting) { 'Stop reminders' } else { 'Keep paused' } } 'uncertain' { 'Stop reminders' } default { 'Keep BitLocker off' } }
     # While an installer waits, this reminder is the one that later says to
     # resume protection, so it can't be stopped then (it often shows beside
@@ -304,30 +319,20 @@ function Show-EncryptionFollowup {
     Assert-FollowupPath $root $true; Assert-FollowupPath $PSScriptRoot $true; Assert-FollowupPath $PSCommandPath $false
     $path=Join-Path $PSScriptRoot 'state.json'; $state=Read-FollowupState $path
     if ($state.userSid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or $state.volume.partitionGuid -cne $guid -or $state.scriptSha256 -cne (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Reminder owner or program identity changed.' }
-    $facts=Get-EncryptionFacts $state.volume.volumeId; $decision=Get-FollowupDecision $state $facts
-    $installerWaiting=$decision -eq 'suspended' -and (Test-StagedInstallerWaiting)
+    $facts=Get-EncryptionFacts $state.volume.volumeId
+    $offer=Get-FollowupOffer $state $facts (Test-StagedInstallerWaiting); $decision=$offer.decision
     if ($decision -in @('finished','restored')) {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
-    $canResume=$state.origin -eq 'installer-suspension' -and $state.status -eq 'pending' -and $decision -eq 'suspended' -and -not $installerWaiting
-    $window=New-FollowupForm (Get-FollowupView $decision $installerWaiting $canResume ([string]$facts.driveLetter))
+    $window=New-FollowupForm (Get-FollowupView $decision $offer.waiting $offer.canResume ([string]$facts.driveLetter))
     $form=$window.form
     if ($window.settings) {
         $window.settings.Add_Click({
-            if ($canResume) {
-                try {
-                    if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started the way you normally start it.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
-                    Resume-OwnedProtection $state $path; $form.Close()
-                } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'BitLocker','OK','Error') }
-                return
-            }
-            # Windows owns activation, recovery-key backup and any required consent.
-            $control=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/control.exe'
             try {
-                Start-Process -FilePath $control -ArgumentList '/name Microsoft.BitLockerDriveEncryption' -WindowStyle Normal -ErrorAction Stop
-                $form.Close()
-            } catch { [void][Windows.Forms.MessageBox]::Show('Could not open BitLocker settings. Open Windows Settings and search for Device encryption or BitLocker. The reminder remains active.','Windows encryption','OK','Error') }
+                if ([Windows.Forms.MessageBox]::Show('Resume BitLocker protection now? After installing, do this only once Windows has started the way you normally start it.','Resume protection','YesNo','Question','Button2') -ne 'Yes') { return }
+                Resume-OwnedProtection $state $path (Test-StagedInstallerWaiting); $form.Close()
+            } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'BitLocker','OK','Error') }
         })
     }
     $window.later.Add_Click({$form.Close()})
