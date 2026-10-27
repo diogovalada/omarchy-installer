@@ -72,13 +72,23 @@ it('allows real inspection only in a testing build with a verified ISO',async()=
   await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
   expect(calls.stagedIso).toHaveBeenCalledWith('inspect');
 });
+it('shows how a removal ended, also for Prepare again after a reload',async()=>{
+  for(const action of ['cleanup','again']){
+    state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action,operationId:'id'},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'id',status:'cleaned',message:'The temporary installer was removed. C: grew from 404 to 411.5 GiB over its space; any installed Omarchy was not changed.'}}});
+    const view=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+    await tick();
+    expect(screen.getByRole('status')).toHaveTextContent('C: grew from 404 to 411.5 GiB over its space');
+    view.unmount();
+  }
+});
 it('prepares again only after reviewed cleanup completes',async()=>{
   const op={operationId:'id',status:'copying',diskNumber:0,temporaryBytes:8*1024**3};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[op],recordErrors:[]}}});
   const prepareAgain=vi.fn();
   render(StagedInstaller,{recoveryOnly:true,sourceReady:true,prepareAgain});
   await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
-  expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'id');
+  // Its own action: the space stays free for the new installer.
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('again',null,'id');
   expect(prepareAgain).not.toHaveBeenCalled();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'id',status:'cleaned'}}});
   await tick();
@@ -757,11 +767,15 @@ it('replaces the choose screen with the installer steps while one exists',async(
   expect(screen.queryByRole('button',{name:'Check available space'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Review changes'})).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Prepare again'}));
-  expect(calls.stagedIso).toHaveBeenLastCalledWith('cleanup',null,'11111111-1111-4111-8111-111111111111');
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('again',null,'11111111-1111-4111-8111-111111111111');
 });
 it('offers checking disks after a removal failed elsewhere, such as on the home screen',async()=>{
   state.set({pending:false,snapshot:{stagedTarget:{action:'cleanup',operationId:null},...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
   render(StagedInstaller,{sourceReady:true});
+  await tick();
+  expect(screen.getByRole('button',{name:'Check disks again'})).toBeEnabled();
+  // Prepare again's removal failing counts too.
+  state.set({pending:false,snapshot:{stagedTarget:{action:'again',operationId:null},...card('copying',true).snapshot,status:'failed',error:'The recorded staging disk cannot be identified uniquely.'}});
   await tick();
   expect(screen.getByRole('button',{name:'Check disks again'})).toBeEnabled();
   // After another action fails, retrying it is what helps.
@@ -809,6 +823,10 @@ it('says a removal is under way, or that it did not finish',async()=>{
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.queryByText('Starting Windows later')).not.toBeInTheDocument();
+  // Prepare again's removal shows the same.
+  state.set({pending:false,snapshot:{...card('boot-scheduled',null,true).snapshot,status:'running',stagedTarget:{...stagedTarget,action:'again'}}});
+  await tick();
+  expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();
   state.set({pending:false,snapshot:removing});
   await tick();
   expect(screen.getByRole('heading',{name:'Removing the temporary installer · Disk 0'})).toBeInTheDocument();

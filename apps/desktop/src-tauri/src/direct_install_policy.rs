@@ -13,7 +13,8 @@ pub fn check_destination(destination: &Destination) -> Result<(), String> {
                 | StagedAction::Inspect
                 | StagedAction::Arm
                 | StagedAction::Restart
-                | StagedAction::Firmware,
+                | StagedAction::Firmware
+                | StagedAction::Again,
             ..
         } if !STAGED_ISO_TESTING => Err(STAGED_ISO_BLOCKER.into()),
         Destination::InspectDirect
@@ -73,6 +74,7 @@ mod tests {
             StagedAction::Arm,
             StagedAction::Restart,
             StagedAction::Firmware,
+            StagedAction::Again,
         ] {
             assert_eq!(
                 check_destination(&Destination::StagedIso {

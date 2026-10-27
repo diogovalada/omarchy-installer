@@ -746,7 +746,9 @@ function Invoke-StagingFirmware($State) {
     if ($process.ExitCode -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
     return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }
-function Invoke-StagingCleanup($State) {
+# $ApprovedBytes: the size removal's confirmation showed; anything else grows
+# nothing.
+function Invoke-StagingCleanup($State,[bool]$Reclaim=$false,[long]$ApprovedBytes=0) {
     if ($State.status -eq 'cleaned') { return Get-StagingSummary $State }
     # Validate BOTH partitions before changing either. Missing owned partitions
     # are acceptable on an interrupted retry; replaced GUIDs are never deleted.
@@ -766,8 +768,62 @@ function Invoke-StagingCleanup($State) {
         Remove-OwnedStagingPartition $part $owned $before
         Confirm-StagingDeletion $before $part.DiskNumber $owned
     }
-    $State.status='cleaned'; $State.message='The temporary installer was removed. Its space stays unallocated; Windows and any installed Omarchy were not changed.'+(Get-StagingBitLockerNote $State); Save-StagingState $State
+    # Retried with the deletions while the record still says cleaning.
+    $space=if ($Reclaim) { Invoke-StagingReclaim $State $ApprovedBytes } else { 'Its space stays unallocated; Windows and any installed Omarchy were not changed.' }
+    $State.status='cleaned'; $State.message='The temporary installer was removed. '+$space+(Get-StagingBitLockerNote $State); Save-StagingState $State
     return Get-StagingSummary $State
+}
+# The partition the installer took its space from grows back over the space
+# the installer leaves, up to the next partition or the end of the disk's
+# usable area. Only that partition, only from where it ends now, and only when
+# nothing but free space or the installer's own partitions follow it. Space
+# that came from free space (no shrink) stays unallocated. Read-only.
+function Get-StagingReclaim($State) {
+    if ($null -eq $State.shrink) { return $null }
+    $disks=@(Get-Disk | Where-Object { [string]$_.UniqueId -ceq $State.diskUniqueId -and [long]$_.Size -eq $State.diskSizeBytes -and [string]$_.SerialNumber -ceq $State.serialNumber })
+    if ($disks.Count -ne 1) { return $null }
+    $disk=Get-StagingDisk $disks[0].Number $State.diskUniqueId
+    $parts=@(Get-InspectedPartitions $disk)
+    $grown=@($parts | Where-Object { $_.Guid -and [guid]$_.Guid -eq [guid]$State.shrink.partitionGuid })
+    if ($grown.Count -ne 1 -or [long]$grown[0].Offset -ne [long]$State.shrink.offsetBytes) { return $null }
+    $part=$grown[0]; $end=[long]$part.Offset+[long]$part.Size
+    $owned=@($State.partitions | ForEach-Object { [guid]$_.guid })
+    $others=@($parts | Where-Object { -not $_.Guid -or $owned -notcontains [guid]$_.Guid })
+    $after=@($others | Where-Object { [long]$_.Offset -ge $end } | Sort-Object { [long]$_.Offset })
+    # It must end at or before the installer, with nothing of anyone else's
+    # between them.
+    $installer=[long]$State.partitions[0].offsetBytes
+    if ($end -gt $installer -or ($after.Count -and [long]$after[0].Offset -lt $installer)) { return $null }
+    $layout=Read-StagingLayout $disk.Number
+    $limit=if ($after.Count) { [long]$after[0].Offset } else { [BitConverter]::ToInt64($layout,24)+[BitConverter]::ToInt64($layout,32) }
+    $size=Align-Down ($limit-[long]$part.Offset)
+    if ($size -le [long]$part.Size) { return $null }
+    $name=if ([string]$part.DriveLetter -match '^[A-Za-z]$') { [string]$part.DriveLetter+':' } else { 'Partition '+$part.PartitionNumber }
+    return [ordered]@{diskNumber=[int]$disk.Number;partitionNumber=[int]$part.PartitionNumber;partitionGuid=[string]$part.Guid;name=$name;beforeBytes=[long]$part.Size;afterBytes=$size}
+}
+# Removal gives the space back: grows the partition it came from and says so.
+# Removal already succeeded, so a failed resize only leaves the space
+# unallocated.
+function Invoke-StagingReclaim($State,[long]$ApprovedBytes) {
+    $grow=$null; $resized=$false
+    try {
+        $grow=Get-StagingReclaim $State
+        if ($null -eq $grow) { return 'Its space stays unallocated; Windows and any installed Omarchy were not changed.' }
+        # Only the growth the confirmation showed; a disk changed since then
+        # needs a new look.
+        if ($grow.afterBytes -ne $ApprovedBytes) { return ('Its space stays unallocated: the disk changed after you confirmed, so '+$grow.name+' was not extended. Extend it in Disk Management.') }
+        $part=Get-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -ErrorAction Stop
+        if ([guid]$part.Guid -ne [guid]$grow.partitionGuid) { throw 'The partition changed.' }
+        Resize-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -Size $grow.afterBytes -ErrorAction Stop
+        $resized=$true
+        $part=Get-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -ErrorAction Stop
+        if ([guid]$part.Guid -ne [guid]$grow.partitionGuid -or [long]$part.Size -gt $grow.afterBytes -or [long]$part.Size -lt $grow.afterBytes-1MB) { throw 'Its new size did not verify.' }
+        return ($grow.name+' grew from '+[Math]::Round($grow.beforeBytes/1GB,1)+' to '+[Math]::Round($grow.afterBytes/1GB,1)+' GiB over its space; any installed Omarchy was not changed.')
+    } catch {
+        if ($resized) { return ($grow.name+' was extended over its space, but its new size could not be checked ('+$_.Exception.Message.TrimEnd('.')+'). Check it in Disk Management.') }
+        $name=if ($null -ne $grow) { $grow.name } else { 'the partition it came from' }
+        return ('Its space stays unallocated: '+$name+' could not be extended ('+$_.Exception.Message.TrimEnd('.')+'). Extend it in Disk Management.')
+    }
 }
 # Volumes whose protection was on when preparing were suspended by it; it may
 # have been resumed since, so the advice is conditional. Older records may not

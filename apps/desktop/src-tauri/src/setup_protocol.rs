@@ -115,7 +115,11 @@ pub enum StagedAction {
     /// Arm, then restart Windows into the installer.
     Restart,
     Firmware,
+    /// Remove the installer and give its space back to the partition it was
+    /// taken from.
     Cleanup,
+    /// Remove the installer and keep its space free for a new one.
+    Again,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
