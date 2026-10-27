@@ -80,7 +80,7 @@
       <pre><code>/Windows
     protocol: efi_boot_entry
     entry: Windows Boot Manager</code></pre>
-      <p>Windows then starts after one quick restart, and BitLocker won't ask for its recovery key when Omarchy updates its boot menu. If <code>sudo efibootmgr</code> doesn't list Windows Boot Manager, run <code>limine-scan</code> instead. Omarchy may hide its menu: press any key as soon as your PC starts to show it.</p>
+      <p>Windows then starts after one quick restart, and BitLocker won't ask for its recovery key when Omarchy updates its boot menu. If choosing Windows there shows an error, use the boot menu key instead. Omarchy may hide its menu: press any key within a second of your PC starting to show it. Running <code>omarchy-refresh-limine</code> or <code>omarchy reinstall</code> removes these lines, so add them again afterwards.</p>
       <p>If you replace Windows, the temporary installer stays on the disk.</p>
     </details>
   {/if}
