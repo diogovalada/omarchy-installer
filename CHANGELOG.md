@@ -99,6 +99,11 @@ downloads. Published versions and their artifacts are immutable.
   while the reminder was open.
 - Install without USB (testing builds): the temporary source partition is the
   ISO's size plus 256 MiB instead of 1 GiB, which saves about 750 MB.
+- Install without USB (testing builds): "Starting Windows later" suggests a
+  Limine entry that hands Windows over to the firmware, so BitLocker doesn't ask
+  for its recovery key after Omarchy updates its boot menu. `limine-scan` stays
+  the fallback for PCs without a Windows Boot Manager entry, and the tip says
+  how to show Omarchy's hidden menu.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

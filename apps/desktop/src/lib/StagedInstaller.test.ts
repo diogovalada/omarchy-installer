@@ -678,6 +678,9 @@ it('lets the installer be selected again after a restart and restarts to firmwar
   expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
   expect(screen.getByText('Starting Windows later')).toBeInTheDocument();
+  // The Windows entry hands over to the firmware; limine-scan is the fallback.
+  expect(screen.getByText(/protocol: efi_boot_entry/)).toHaveTextContent('entry: Windows Boot Manager');
+  expect(screen.getByText(/list Windows Boot Manager, run/)).toHaveTextContent('limine-scan instead');
   await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
