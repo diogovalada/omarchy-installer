@@ -104,6 +104,10 @@ downloads. Published versions and their artifacts are immutable.
   for its recovery key after Omarchy updates its boot menu, instead of
   `limine-scan`. It also says how to show Omarchy's hidden menu and that
   refreshing Omarchy's boot menu removes the entry.
+- Install without USB (testing builds): Remove temporary installer gives the
+  space back to the partition it came from, up to installed Omarchy or the
+  disk's end, and its confirmation says how far C: grows. Prepare again keeps
+  the space free for the new installer.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

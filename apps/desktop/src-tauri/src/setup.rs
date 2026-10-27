@@ -1862,6 +1862,7 @@ fn exchange(
                         (MessageDialogKind::Warning, "Restart to firmware settings")
                     }
                     "staged_cleanup" => (MessageDialogKind::Warning, "Remove temporary installer"),
+                    "staged_again" => (MessageDialogKind::Warning, "Remove and prepare again"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
                 let approved = if operation == "source_lease" {
@@ -1933,7 +1934,11 @@ fn exchange(
                 if approved
                     && matches!(
                         operation,
-                        "staged_arm" | "staged_restart" | "staged_firmware" | "staged_cleanup"
+                        "staged_arm"
+                            | "staged_restart"
+                            | "staged_firmware"
+                            | "staged_cleanup"
+                            | "staged_again"
                     )
                 {
                     service.update(app, |inner| {

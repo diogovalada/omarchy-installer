@@ -68,7 +68,7 @@ warn that booting and same-disk installation may fail in the official ISO.
    When a shrink keeps Windows, it can also leave
    at least 32 GiB unallocated for Omarchy right after the temporary installer;
    Windows never creates Omarchy's partitions. The installer sits directly after
-   the shrunk partition so Windows can reclaim it with Extend Volume later.
+   the shrunk partition, so removing it can give the space back.
    Inspection shows the largest unallocated region that will remain. If it is
    below the official installer's 32 GiB minimum, the user sees a warning and
    can make room in the booted installer by deleting an unneeded partition, such
@@ -110,8 +110,11 @@ warn that booting and same-disk installation may fail in the official ISO.
    to resume protection.
 6. On returning to Windows, an existing temporary installer appears automatically.
    Use **Remove temporary installer**, or **Prepare again** in a testing build
-   with a verified download. Preparation again performs reviewed cleanup first,
-   then opens fresh space selection; it never repeats an old allocation silently.
+   with a verified download. Removal grows the shrunk partition back over the
+   free space after it, up to the next partition (installed Omarchy) or the
+   disk's end; its confirmation says how far. Prepare again removes the
+   installer but keeps its space free, then opens fresh space selection; it
+   never repeats an old allocation silently.
    Cleanup remains accessible without the ISO download and requires explicit
    confirmation after independently booting installed Omarchy, or abandoning
    installation. It does not infer Linux success from a Windows boot.
@@ -158,7 +161,12 @@ Firmware cleanup checks the exact saved load option, refuses a reused slot or
 the current boot source, and only clears our own BootNext/order references.
 It preserves unrelated boot entries, including the new permanent Linux entry.
 Owned storage is deleted only after firmware cleanup succeeds. Recovery records
-remain; reclaimed space is unallocated and Windows is not automatically expanded.
+remain. Removal then grows only the recorded shrunk partition, identified by its
+GUID and unchanged offset, and only when nothing but free space or the deleted
+partitions follows it. The new size comes from the layout (next partition or
+the GPT's usable end), not Windows' slow supported-size query. A failed resize
+keeps the removal and leaves the space unallocated. Space taken from free space,
+and Prepare again's space, stays unallocated.
 
 Windows' Storage `Get-Volume` association omits ESPs on the inspected host.
 The provider therefore resolves the partition's volume GUID using `Win32_Volume`,

@@ -167,7 +167,8 @@
   // The target describes the snapshot's own operation, so it counts only while
   // that runs (not while the next command is pending).
   // A removal is under way once its confirmation is approved.
-  $: removingId=setupActive($setup.snapshot?.status) && $setup.snapshot?.stagedTarget?.action==='cleanup' && $setup.snapshot.stagedTarget.confirmed ? $setup.snapshot.stagedTarget.operationId : null;
+  $: removing=['cleanup','again'].includes(lastAction);
+  $: removingId=setupActive($setup.snapshot?.status) && removing && $setup.snapshot?.stagedTarget?.confirmed ? $setup.snapshot.stagedTarget.operationId : null;
   $: underway=(op:StagedOperation) => op.operationId===preparingId ? 'preparing' as const : op.operationId===removingId ? 'removing' as const : null;
   $: if(restarting && !busy && result?.operationId===restarting && result.status==='cleaned') {
     restarting=null; selectedDisk=''; prepareAgain(); inspect();
@@ -206,10 +207,11 @@
   // (not a polling or other error). After other failures, retrying is what
   // helps. The setup store outlives this screen, so the offer carries from
   // the home screen into the flow.
-  $: removalFailed=operations.length>0 && lastAction==='cleanup' && $setup.snapshot?.status==='failed';
+  $: removalFailed=operations.length>0 && removing && $setup.snapshot?.status==='failed';
   function operate(op:StagedOperation,action:'restart'|'arm'|'firmware'|'cleanup'|'again') {
     if(action==='again') restarting=op.operationId;
-    void setup.stagedIso(action==='again' ? 'cleanup' : action,null,op.operationId);
+    // Prepare again removes it but keeps its space free for the new one.
+    void setup.stagedIso(action,null,op.operationId);
   }
   function inspect() {
     inspection=undefined; analyzing=null; reading=true; heldDefault='';

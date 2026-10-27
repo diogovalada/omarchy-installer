@@ -361,6 +361,57 @@ Assert ((Get-StagingBitLockerNote ([pscustomobject]@{bitLocker=$null})) -ceq '')
 [void](Invoke-StagingCleanup $state)
 Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
 
+# Removal gives the space back to the partition it was shrunk from, up to the
+# next partition (installed Omarchy) or the disk's usable end.
+& {
+    $usableEnd=[long]500GB-1MB
+    $layout=New-Object byte[] 48
+    [BitConverter]::GetBytes([long]1MB).CopyTo($layout,24); [BitConverter]::GetBytes($usableEnd-1MB).CopyTo($layout,32)
+    function Read-StagingLayout($Disk) { return ,$layout }
+    $windowsGuid=[guid]::NewGuid().ToString()
+    $script:resized=New-Object 'Collections.Generic.List[string]'; $script:failResize=$false
+    $fresh={
+        $script:parts=@([pscustomobject]@{DiskNumber=7;PartitionNumber=3;Guid=$windowsGuid;GptType='{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}';Offset=[long]1MB;Size=[long]200GB-1MB;DriveLetter='C';IsBoot=$true;IsSystem=$false;AccessPaths=@()})+@(foreach ($p in $owned) { [pscustomobject]@{DiskNumber=7;PartitionNumber=$(if($p.role -eq 'efi'){4}else{5});Guid=$p.guid;GptType=$p.gptType;Offset=$p.offsetBytes;Size=$p.sizeBytes;IsBoot=$false;IsSystem=$false;AccessPaths=@()} })
+        $script:removed.Clear(); $script:resized.Clear()
+    }
+    function Resize-Partition($DiskNumber,$PartitionNumber,$Size) {
+        if ($script:failResize) { throw 'Not enough available capacity.' }
+        $script:resized.Add("$PartitionNumber=$Size"); @($script:parts | Where-Object { $_.PartitionNumber -eq $PartitionNumber })[0].Size=$Size
+    }
+    $shrunk=[pscustomobject]@{schema=1;operationId=[guid]::NewGuid().ToString();diskNumber=7;diskUniqueId='disk-identity';diskSizeBytes=[long]500GB;serialNumber='serial';partitions=$owned;boot=$null;windowsBoot=@{partitionGuid=[guid]::NewGuid().ToString()};status='boot-scheduled';message='';linuxOffsetBytes=[long](200GB+512MB+8GB);linuxBytes=[long]64GB;shrink=[pscustomobject]@{partitionGuid=$windowsGuid;offsetBytes=[long]1MB;driveLetter='C'}}
+    & $fresh
+    # Omarchy was installed after the installer: C: grows up to it.
+    $script:parts+=@([pscustomobject]@{DiskNumber=7;PartitionNumber=6;Guid=[guid]::NewGuid().ToString();GptType='{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}';Offset=[long](200GB+512MB+8GB);Size=[long]2GB;IsBoot=$false;IsSystem=$false;AccessPaths=@()})
+    $grow=Get-StagingReclaim $shrunk
+    Assert ($grow.name -eq 'C:' -and $grow.partitionNumber -eq 3 -and $grow.beforeBytes -eq 200GB-1MB -and $grow.afterBytes -eq 200GB+512MB+8GB-1MB) 'C: must grow exactly up to installed Omarchy.'
+    $shrunk.status='boot-scheduled'
+    $result=Invoke-StagingCleanup $shrunk $true
+    Assert (($script:removed -join ',') -eq '5,4' -and ($script:resized -join ',') -eq ('3='+(200GB+512MB+8GB-1MB))) 'Removal must delete both partitions, then grow C: over their space.'
+    Assert ($shrunk.status -eq 'cleaned' -and $shrunk.message -clike 'The temporary installer was removed. C: grew from * to * GiB over its space; any installed Omarchy was not changed.') "Removal must say how far C: grew: $($shrunk.message)"
+    Assert ($null -eq (Get-StagingReclaim $shrunk)) 'A grown C: has nothing left to reclaim.'
+    # Nothing installed: C: grows over the installer and Omarchy's space, up to the disk's usable end.
+    & $fresh; $shrunk.status='staged'
+    Assert ((Get-StagingReclaim $shrunk).afterBytes -eq $usableEnd-1MB) 'Without Omarchy, C: must grow to the disk usable end.'
+    # A failed resize keeps the removal and says the space stays unallocated.
+    $script:failResize=$true
+    [void](Invoke-StagingCleanup $shrunk $true)
+    $script:failResize=$false
+    Assert ($shrunk.status -eq 'cleaned' -and ($script:removed -join ',') -eq '5,4' -and $script:resized.Count -eq 0 -and $shrunk.message -clike 'The temporary installer was removed. Its space stays unallocated: C: could not be extended (Not enough available capacity). Extend it in Disk Management.') "A failed resize must keep the removal: $($shrunk.message)"
+    # Prepare again keeps the space free.
+    & $fresh; $shrunk.status='staged'
+    [void](Invoke-StagingCleanup $shrunk)
+    Assert ($script:resized.Count -eq 0 -and $shrunk.message -clike '*Its space stays unallocated; Windows*') 'Prepare again must not grow C:.'
+    # Only the partition it came from, only from where it starts, and only
+    # with nothing else in between.
+    & $fresh
+    Assert ($null -eq (Get-StagingReclaim ([pscustomobject]@{shrink=$null;partitions=$owned}))) 'Space taken from free space must stay unallocated.'
+    $script:parts[0].Offset=[long]2MB
+    Assert ($null -eq (Get-StagingReclaim $shrunk)) 'A moved partition must not grow.'
+    $script:parts[0].Offset=[long]1MB; $script:parts[0].Size=[long]199GB
+    $script:parts+=@([pscustomobject]@{DiskNumber=7;PartitionNumber=8;Guid=[guid]::NewGuid().ToString();GptType='{de94bba4-06d1-4d40-a16a-bfd50179d6ac}';Offset=[long]199GB+1MB;Size=[long]512MB;IsBoot=$false;IsSystem=$false;AccessPaths=@()})
+    Assert ($null -eq (Get-StagingReclaim $shrunk)) 'A partition between C: and the installer must stop the growth.'
+}
+
 $temp=Join-Path $env:TEMP ('omarchy-staged-copy-test-'+[guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($temp)
 try {

@@ -186,7 +186,7 @@ pub fn direct_command(
 
 pub fn staged_command(root: &Path, action: &str, request: &Path) -> Result<Command, String> {
     if ![
-        "inspect", "plan", "stage", "status", "arm", "firmware", "cleanup",
+        "inspect", "plan", "stage", "status", "arm", "firmware", "reclaim", "cleanup",
     ]
     .contains(&action)
     {
