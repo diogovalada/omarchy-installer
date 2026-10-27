@@ -115,6 +115,11 @@ warn that booting and same-disk installation may fail in the official ISO.
    Cleanup remains accessible without the ISO download and requires explicit
    confirmation after independently booting installed Omarchy, or abandoning
    installation. It does not infer Linux success from a Windows boot.
+7. With BitLocker kept on, start Windows Boot Manager from the firmware
+   afterwards, not through a Limine chainload entry such as `limine-scan`'s:
+   that puts Limine in Windows' measurements, and a Limine update then asks for
+   the recovery key. See
+   [Starting Windows after a staged install](../../docs/evidence/windows-after-staged-install-2026-10-27.md).
 
 No Docker, WSL or prepared-filesystem construction is used by this provider.
 The prepared-filesystem implementation remains separately retained and disabled.
