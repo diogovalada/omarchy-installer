@@ -99,7 +99,7 @@ try {
             $result=Get-StagingStatus $request
         }
         default {
-            Assert-Fields $request @('operationId','reclaim') @('operationId')
+            Assert-Fields $request @('operationId','reclaim','reclaimBytes') @('operationId')
             $state=Read-StagingState $request.operationId
             $result=switch ($Action) {
                 'arm' { Invoke-StagingArm $state }
@@ -107,7 +107,7 @@ try {
                 # Read-only: how far removal would grow the partition, for its
                 # confirmation.
                 'reclaim' { @{reclaim=$(if ($state.status -ne 'cleaned') { Get-StagingReclaim $state } else { $null })} }
-                default { Invoke-StagingCleanup $state ($request.PSObject.Properties['reclaim'] -and $request.reclaim -eq $true) }
+                default { Invoke-StagingCleanup $state ($request.PSObject.Properties['reclaim'] -and $request.reclaim -eq $true) $(if ($request.PSObject.Properties['reclaimBytes']) { [long]$request.reclaimBytes } else { [long]0 }) }
             }
         }
     }

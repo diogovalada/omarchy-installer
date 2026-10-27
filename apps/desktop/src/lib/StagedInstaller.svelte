@@ -159,7 +159,7 @@
   // The steps card says what to do after preparing or setting the next
   // restart, so only a firmware restart's or a removal's own result shows;
   // a removed installer's card is gone.
-  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup'].includes(lastAction) ? result?.message ?? '' : lastAction!=='stage' ? cancelledNote : '';
+  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup','again'].includes(lastAction) ? result?.message ?? '' : lastAction!=='stage' ? cancelledNote : '';
   // The recorded installer a running command changes: the one its Review
   // prepares, or the one being removed. Others keep their own state, and a
   // disk check changes none.

@@ -746,7 +746,9 @@ function Invoke-StagingFirmware($State) {
     if ($process.ExitCode -ne 0) { throw 'Windows could not restart into firmware settings. Restart and open them with your firmware key instead.' }
     return @{operationId=$State.operationId;status=$State.status;message='Restarting into firmware settings. Turn off Secure Boot, save, and return to Windows. Then select the installer for the next restart.'}
 }
-function Invoke-StagingCleanup($State,[bool]$Reclaim=$false) {
+# $ApprovedBytes: the size removal's confirmation showed; anything else grows
+# nothing.
+function Invoke-StagingCleanup($State,[bool]$Reclaim=$false,[long]$ApprovedBytes=0) {
     if ($State.status -eq 'cleaned') { return Get-StagingSummary $State }
     # Validate BOTH partitions before changing either. Missing owned partitions
     # are acceptable on an interrupted retry; replaced GUIDs are never deleted.
@@ -767,7 +769,7 @@ function Invoke-StagingCleanup($State,[bool]$Reclaim=$false) {
         Confirm-StagingDeletion $before $part.DiskNumber $owned
     }
     # Retried with the deletions while the record still says cleaning.
-    $space=if ($Reclaim) { Invoke-StagingReclaim $State } else { 'Its space stays unallocated; Windows and any installed Omarchy were not changed.' }
+    $space=if ($Reclaim) { Invoke-StagingReclaim $State $ApprovedBytes } else { 'Its space stays unallocated; Windows and any installed Omarchy were not changed.' }
     $State.status='cleaned'; $State.message='The temporary installer was removed. '+$space+(Get-StagingBitLockerNote $State); Save-StagingState $State
     return Get-StagingSummary $State
 }
@@ -802,18 +804,23 @@ function Get-StagingReclaim($State) {
 # Removal gives the space back: grows the partition it came from and says so.
 # Removal already succeeded, so a failed resize only leaves the space
 # unallocated.
-function Invoke-StagingReclaim($State) {
-    $grow=$null
+function Invoke-StagingReclaim($State,[long]$ApprovedBytes) {
+    $grow=$null; $resized=$false
     try {
         $grow=Get-StagingReclaim $State
         if ($null -eq $grow) { return 'Its space stays unallocated; Windows and any installed Omarchy were not changed.' }
+        # Only the growth the confirmation showed; a disk changed since then
+        # needs a new look.
+        if ($grow.afterBytes -ne $ApprovedBytes) { return ('Its space stays unallocated: the disk changed after you confirmed, so '+$grow.name+' was not extended. Extend it in Disk Management.') }
         $part=Get-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -ErrorAction Stop
         if ([guid]$part.Guid -ne [guid]$grow.partitionGuid) { throw 'The partition changed.' }
         Resize-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -Size $grow.afterBytes -ErrorAction Stop
+        $resized=$true
         $part=Get-Partition -DiskNumber $grow.diskNumber -PartitionNumber $grow.partitionNumber -ErrorAction Stop
         if ([guid]$part.Guid -ne [guid]$grow.partitionGuid -or [long]$part.Size -gt $grow.afterBytes -or [long]$part.Size -lt $grow.afterBytes-1MB) { throw 'Its new size did not verify.' }
         return ($grow.name+' grew from '+[Math]::Round($grow.beforeBytes/1GB,1)+' to '+[Math]::Round($grow.afterBytes/1GB,1)+' GiB over its space; any installed Omarchy was not changed.')
     } catch {
+        if ($resized) { return ($grow.name+' was extended over its space, but its new size could not be checked ('+$_.Exception.Message.TrimEnd('.')+'). Check it in Disk Management.') }
         $name=if ($null -ne $grow) { $grow.name } else { 'the partition it came from' }
         return ('Its space stays unallocated: '+$name+' could not be extended ('+$_.Exception.Message.TrimEnd('.')+'). Extend it in Disk Management.')
     }

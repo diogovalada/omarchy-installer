@@ -409,24 +409,44 @@ pub(crate) fn installer_instruction(replaces: Option<&str>) -> String {
     }
 }
 
-/// Removal's confirmation, saying how far the partition the space came from
-/// grows (from the provider's read-only `reclaim`), or that the space stays
-/// unallocated.
-fn cleanup_summary(reclaim: &Value) -> String {
-    const GIB: f64 = 1073741824.0;
-    let space = match (
+/// The growth the provider's read-only `reclaim` offers, if it is one.
+#[derive(Debug, PartialEq)]
+struct Growth {
+    name: String,
+    before: u64,
+    after: u64,
+}
+fn approved_growth(reclaim: &Value) -> Option<Growth> {
+    match (
         reclaim["name"].as_str(),
         reclaim["beforeBytes"].as_u64(),
         reclaim["afterBytes"].as_u64(),
     ) {
         (Some(name), Some(before), Some(after)) if after > before && name.chars().count() <= 32 => {
-            format!(
-                "and {name} grows from {:.1} to {:.1} GiB over their space",
-                before as f64 / GIB,
-                after as f64 / GIB
-            )
+            Some(Growth {
+                name: name.into(),
+                before,
+                after,
+            })
         }
-        _ => "and their space stays unallocated".into(),
+        _ => None,
+    }
+}
+/// Removal's confirmation, saying how far the partition the space came from
+/// grows, or that the space stays unallocated.
+fn cleanup_summary(growth: Option<&Growth>) -> String {
+    const GIB: f64 = 1073741824.0;
+    let space = match growth {
+        Some(Growth {
+            name,
+            before,
+            after,
+        }) => format!(
+            "and {name} grows from {:.1} to {:.1} GiB over their space",
+            *before as f64 / GIB,
+            *after as f64 / GIB
+        ),
+        None => "and their space stays unallocated".into(),
     };
     format!("Remove the temporary installer? Its two partitions and their files are deleted, {space}. Windows and any installed Omarchy stay. Continue once your PC starts Omarchy by itself, or if you're giving up on this installation.")
 }
@@ -1181,17 +1201,22 @@ mod staged_review_tests {
 
     #[test]
     fn removal_says_how_far_the_partition_grows() {
-        let grows = cleanup_summary(
+        let growth = approved_growth(
             &json!({"name":"C:","beforeBytes":404 * GIB,"afterBytes":411 * GIB + GIB / 2}),
         );
-        assert!(grows.contains("deleted, and C: grows from 404.0 to 411.5 GiB over their space."));
+        assert_eq!(
+            growth.as_ref().map(|growth| growth.after),
+            Some(411 * GIB + GIB / 2)
+        );
+        assert!(cleanup_summary(growth.as_ref())
+            .contains("deleted, and C: grows from 404.0 to 411.5 GiB over their space."));
         for nothing in [
             Value::Null,
             json!({"name":"C:","beforeBytes":404 * GIB,"afterBytes":404 * GIB}),
         ] {
-            assert!(cleanup_summary(&nothing)
-                .contains("deleted, and their space stays unallocated."));
+            assert_eq!(approved_growth(&nothing), None);
         }
+        assert!(cleanup_summary(None).contains("deleted, and their space stays unallocated."));
     }
 
     #[test]
@@ -1931,6 +1956,13 @@ fn execute(
                 .as_array()
                 .and_then(|items| items.iter().find(|record| record["operationId"] == id))
                 .ok_or("Recorded staging operation not found")?;
+            // How far removal would grow the partition the space came from;
+            // the removal is bound to exactly this.
+            let growth = if *action == StagedAction::Cleanup {
+                approved_growth(&run("reclaim", &json!({"operationId":id}))?["reclaim"])
+            } else {
+                None
+            };
             let (name, kind, summary) = match action {
                 StagedAction::Arm => ("arm", "staged_arm", "Select the installer for the next restart only? Restart Windows when you're ready. This doesn't restart now or change the normal boot order.".to_owned()),
                 StagedAction::Restart => ("arm", "staged_restart", format!(
@@ -1939,7 +1971,7 @@ fn execute(
                 )),
                 StagedAction::Firmware => ("firmware", "staged_firmware", FIRMWARE_SUMMARY.to_owned()),
                 StagedAction::Again => ("cleanup", "staged_again", "Remove this temporary installer and prepare a new one? Its two partitions and their files are deleted, and their space stays free for the new installer. Windows and any installed Omarchy stay.".to_owned()),
-                StagedAction::Cleanup => ("cleanup", "staged_cleanup", cleanup_summary(&run("reclaim", &json!({"operationId":id}))?["reclaim"])),
+                StagedAction::Cleanup => ("cleanup", "staged_cleanup", cleanup_summary(growth.as_ref())),
                 _ => return Err("Unknown staged installation action".into()),
             };
             confirm(
@@ -1959,9 +1991,10 @@ fn execute(
             // Removal gives the space back; Prepare again keeps it for the new
             // installer.
             let request = match action {
-                StagedAction::Cleanup | StagedAction::Again => {
-                    json!({"operationId":id,"reclaim":*action == StagedAction::Cleanup})
+                StagedAction::Cleanup => {
+                    json!({"operationId":id,"reclaim":true,"reclaimBytes":growth.as_ref().map_or(0, |growth| growth.after)})
                 }
+                StagedAction::Again => json!({"operationId":id,"reclaim":false}),
                 _ => json!({"operationId":id}),
             };
             let mut result = run(name, &request)?;

@@ -72,6 +72,15 @@ it('allows real inspection only in a testing build with a verified ISO',async()=
   await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
   expect(calls.stagedIso).toHaveBeenCalledWith('inspect');
 });
+it('shows how a removal ended, also for Prepare again after a reload',async()=>{
+  for(const action of ['cleanup','again']){
+    state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action,operationId:'id'},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'id',status:'cleaned',message:'The temporary installer was removed. C: grew from 404 to 411.5 GiB over its space; any installed Omarchy was not changed.'}}});
+    const view=render(StagedInstaller,{recoveryOnly:true,sourceReady:true});
+    await tick();
+    expect(screen.getByRole('status')).toHaveTextContent('C: grew from 404 to 411.5 GiB over its space');
+    view.unmount();
+  }
+});
 it('prepares again only after reviewed cleanup completes',async()=>{
   const op={operationId:'id',status:'copying',diskNumber:0,temporaryBytes:8*1024**3};
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[op],recordErrors:[]}}});

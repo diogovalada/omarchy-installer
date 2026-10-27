@@ -385,7 +385,7 @@ Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
     $grow=Get-StagingReclaim $shrunk
     Assert ($grow.name -eq 'C:' -and $grow.partitionNumber -eq 3 -and $grow.beforeBytes -eq 200GB-1MB -and $grow.afterBytes -eq 200GB+512MB+8GB-1MB) 'C: must grow exactly up to installed Omarchy.'
     $shrunk.status='boot-scheduled'
-    $result=Invoke-StagingCleanup $shrunk $true
+    $result=Invoke-StagingCleanup $shrunk $true $grow.afterBytes
     Assert (($script:removed -join ',') -eq '5,4' -and ($script:resized -join ',') -eq ('3='+(200GB+512MB+8GB-1MB))) 'Removal must delete both partitions, then grow C: over their space.'
     Assert ($shrunk.status -eq 'cleaned' -and $shrunk.message -clike 'The temporary installer was removed. C: grew from * to * GiB over its space; any installed Omarchy was not changed.') "Removal must say how far C: grew: $($shrunk.message)"
     Assert ($null -eq (Get-StagingReclaim $shrunk)) 'A grown C: has nothing left to reclaim.'
@@ -394,9 +394,20 @@ Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
     Assert ((Get-StagingReclaim $shrunk).afterBytes -eq $usableEnd-1MB) 'Without Omarchy, C: must grow to the disk usable end.'
     # A failed resize keeps the removal and says the space stays unallocated.
     $script:failResize=$true
-    [void](Invoke-StagingCleanup $shrunk $true)
+    [void](Invoke-StagingCleanup $shrunk $true ($usableEnd-1MB))
     $script:failResize=$false
     Assert ($shrunk.status -eq 'cleaned' -and ($script:removed -join ',') -eq '5,4' -and $script:resized.Count -eq 0 -and $shrunk.message -clike 'The temporary installer was removed. Its space stays unallocated: C: could not be extended (Not enough available capacity). Extend it in Disk Management.') "A failed resize must keep the removal: $($shrunk.message)"
+    # Only the growth the confirmation showed: the disk changed since then.
+    & $fresh; $shrunk.status='staged'
+    [void](Invoke-StagingCleanup $shrunk $true (200GB+512MB+8GB-1MB))
+    Assert ($script:resized.Count -eq 0 -and $shrunk.message -clike '*Its space stays unallocated: the disk changed after you confirmed, so C: was not extended.*') "A changed disk must not grow C: past what was confirmed: $($shrunk.message)"
+    # A resize that went through but can't be checked isn't reported as a failure.
+    & $fresh; $shrunk.status='staged'
+    $script:failCheck=$true
+    function Get-Partition($DiskNumber,$PartitionNumber) { if ($script:failCheck -and $script:resized.Count) { throw 'Storage query failed.' }; return @($script:parts | Where-Object { $_.PartitionNumber -eq $PartitionNumber })[0] }
+    [void](Invoke-StagingCleanup $shrunk $true ($usableEnd-1MB))
+    $script:failCheck=$false
+    Assert ($script:resized.Count -eq 1 -and $shrunk.message -clike '*C: was extended over its space, but its new size could not be checked (Storage query failed). Check it in Disk Management.') "An unchecked resize must not be reported as failed: $($shrunk.message)"
     # Prepare again keeps the space free.
     & $fresh; $shrunk.status='staged'
     [void](Invoke-StagingCleanup $shrunk)
