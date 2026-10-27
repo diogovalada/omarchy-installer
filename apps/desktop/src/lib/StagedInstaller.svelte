@@ -159,7 +159,11 @@
   // The steps card says what to do after preparing or setting the next
   // restart, so only a firmware restart's or a removal's own result shows;
   // a removed installer's card is gone.
-  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup','again'].includes(lastAction) ? result?.message ?? '' : lastAction!=='stage' ? cancelledNote : '';
+  // After removal the card is gone, but the volumes it paused can still be
+  // resumed here, also after a resume was cancelled or failed (its result is
+  // still the removal's).
+  $: resumeOffer=!busy && ['cleanup','resume'].includes(lastAction) && result?.status==='cleaned' && result.bitLockerPaused?.length ? result.operationId ?? null : null;
+  $: resultNote=!busy && $setup.snapshot?.status==='complete' && ['firmware','cleanup','again','resume'].includes(lastAction) ? result?.message ?? '' : lastAction!=='stage' ? cancelledNote : '';
   // The recorded installer a running command changes: the one its Review
   // prepares, or the one being removed. Others keep their own state, and a
   // disk check changes none.
@@ -208,7 +212,7 @@
   // helps. The setup store outlives this screen, so the offer carries from
   // the home screen into the flow.
   $: removalFailed=operations.length>0 && removing && $setup.snapshot?.status==='failed';
-  function operate(op:StagedOperation,action:'restart'|'arm'|'firmware'|'cleanup'|'again') {
+  function operate(op:StagedOperation,action:'restart'|'arm'|'firmware'|'cleanup'|'again'|'resume') {
     if(action==='again') restarting=op.operationId;
     // Prepare again removes it but keeps its space free for the new one.
     void setup.stagedIso(action,null,op.operationId);
@@ -273,7 +277,7 @@
   }
 </script>
 
-{#if !recoveryOnly || operations.length || recordErrors.length || resultNote}
+{#if !recoveryOnly || operations.length || recordErrors.length || resultNote || resumeOffer}
 <section class="staged" aria-label="Temporary installer">
   {#if !recoveryOnly}
     <div class="navigation"><button class="back" disabled={busy} onclick={close}><ArrowLeft size={15}/>Back</button>{#if testing}<span class="badge">Test build</span>{/if}</div>
@@ -383,6 +387,7 @@
   {#if busy && measured && !preparing}<progress value={$setup.snapshot?.bytes ?? 0} max={$setup.snapshot?.totalBytes ?? 0} aria-label="Progress"></progress>{/if}
   {#if busy && $setup.snapshot?.cancelAvailable && !preparing && !requesting && !planning}<button disabled={$setup.pending || $setup.snapshot?.cancelRequested} onclick={()=>{void setup.cancel();}}>{stopLabel}</button>{/if}
   {#if resultNote}<p role="status">{resultNote}</p>{/if}
+  {#if resumeOffer}<p class="beside"><button class="text-action" disabled={busy} onclick={()=>{void setup.stagedIso('resume',null,resumeOffer);}}>Resume BitLocker</button></p>{/if}
   {#if !busy && $setup.snapshot?.bitLocker}<p role="status">{$setup.snapshot.bitLocker.message}</p>{/if}
   <!-- The helper's messages are short and usually say what to do next. -->
   {#if error}<div class="failure" role="alert"><strong>Couldn’t complete this step.</strong><p>{error}</p></div>{/if}

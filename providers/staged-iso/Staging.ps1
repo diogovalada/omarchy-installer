@@ -327,6 +327,8 @@ function Write-StagingSummary {
         $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
         if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
         if ($_.ContainsKey('replaces') -and $_.replaces) { $operation.replaces=$_.replaces }
+        # The card offers Resume BitLocker for these.
+        if ($_.ContainsKey('bitLockerPaused') -and @($_.bitLockerPaused).Count) { $operation.bitLockerPaused=@($_.bitLockerPaused) }
         $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'
@@ -654,6 +656,7 @@ function Get-StagingSummary($State) {
     $summary=@{operationId=$State.operationId;status=$State.status;diskUniqueId=$State.diskUniqueId;diskNumber=$State.diskNumber;linuxOffsetBytes=$State.linuxOffsetBytes;linuxBytes=$State.linuxBytes;message=$State.message;temporaryBytes=512MB+$State.partitions[1].sizeBytes}
     if ($State.status -eq 'boot-scheduled' -and $State.PSObject.Properties['scheduledBootUnixSeconds']) { $summary.scheduledBootUnixSeconds=[long]$State.scheduledBootUnixSeconds }
     $summary.replaces=Get-StagingReplacedName $State
+    $summary.bitLockerPaused=@(Get-StagingPausedVolumes $State | ForEach-Object { Get-StagingVolumeName $_ })
     return $summary
 }
 # The partition the installer must delete to make room: only a shrink that
@@ -825,14 +828,53 @@ function Invoke-StagingReclaim($State,[long]$ApprovedBytes) {
         return ('Its space stays unallocated: '+$name+' could not be extended ('+$_.Exception.Message.TrimEnd('.')+'). Extend it in Disk Management.')
     }
 }
-# Volumes whose protection was on when preparing were suspended by it; it may
-# have been resumed since, so the advice is conditional. Older records may not
-# have the field.
+# Volumes this installer paused and not yet resumed through the app; the
+# reminder or Windows may have resumed them since, so the advice is
+# conditional. Older records may not have the field.
 function Get-StagingBitLockerNote($State) {
-    $volumes=if ($State.PSObject.Properties['bitLocker']) { @($State.bitLocker) } else { @() }
-    $paused=@($volumes | Where-Object { $_ -and $_.PSObject.Properties['protectionStatus'] -and [int]$_.protectionStatus -eq 1 } | ForEach-Object { if ($_.PSObject.Properties['driveLetter'] -and [string]$_.driveLetter) { [string]$_.driveLetter } else { 'a volume' } })
-    if ($paused.Count) { return ' If BitLocker on '+($paused -join ', ')+' is still paused, resume it in Windows.' }
+    $paused=@(Get-StagingPausedVolumes $State | ForEach-Object { Get-StagingVolumeName $_ })
+    if ($paused.Count) { return ' If BitLocker on '+($paused -join ', ')+' is still paused, resume it once Windows starts the way you normally will.' }
     return ''
+}
+# Volumes whose protection was on when preparing, so this installer paused
+# them; none once they were resumed through the app.
+function Get-StagingPausedVolumes($State) {
+    if ($State.PSObject.Properties['bitLockerResumed'] -and $State.bitLockerResumed -eq $true) { return @() }
+    $volumes=if ($State.PSObject.Properties['bitLocker']) { @($State.bitLocker) } else { @() }
+    return @($volumes | Where-Object { $_ -and $_.PSObject.Properties['protectionStatus'] -and [int]$_.protectionStatus -eq 1 })
+}
+function Get-StagingVolumeName($Volume) {
+    if ($Volume.PSObject.Properties['driveLetter'] -and [string]$Volume.driveLetter) { return [string]$Volume.driveLetter }
+    return 'a volume'
+}
+# Resumes BitLocker on the volumes this installer paused, through the sign-in
+# reminder's own resume: only a pause it owns, never while an installer waits.
+# A volume already protected again counts as resumed.
+function Invoke-StagingResume($State) {
+    $volumes=@(Get-StagingPausedVolumes $State)
+    if (-not $volumes.Count) { throw 'This installer has no paused BitLocker volume to resume.' }
+    $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    foreach ($volume in $volumes) {
+        $name=Get-StagingVolumeName $volume
+        if (-not $volume.PSObject.Properties['volumeId'] -or -not $volume.PSObject.Properties['partitionGuid']) { throw ('This record doesn''t identify BitLocker on '+$name+'. Resume it in Windows.') }
+        $facts=Get-EncryptionFacts $volume.volumeId
+        if ($facts.conversion -eq 1 -and $facts.protection -eq 1) { continue }
+        $path=Join-Path (Join-Path (Get-FollowupRoot) ([guid]$volume.partitionGuid).ToString()) 'state.json'
+        if (-not (Test-Path -LiteralPath $path)) { throw ('BitLocker on '+$name+' has no reminder from this installer. Resume it in Windows.') }
+        # The record is read under the reminder's lock, so a choice the
+        # reminder just saved (such as Keep paused) is seen.
+        $lock=Get-EncryptionLock $facts
+        try {
+            $reminder=Read-FollowupState $path
+            if ($reminder.userSid -cne $sid) { throw ('The BitLocker reminder for '+$name+' belongs to another Windows account. Resume it from that account.') }
+            Resume-OwnedProtection $reminder $path (Test-StagedInstallerWaiting)
+        } finally { $lock.Dispose() }
+    }
+    if ($State.PSObject.Properties['bitLockerResumed']) { $State.bitLockerResumed=$true } else { $State | Add-Member -NotePropertyName bitLockerResumed -NotePropertyValue $true }
+    Save-StagingState $State
+    $summary=Get-StagingSummary $State
+    $summary.message='BitLocker protection on '+(@($volumes | ForEach-Object { Get-StagingVolumeName $_ }) -join ', ')+' is on again.'
+    return $summary
 }
 function Read-StagingLayout([int]$Disk) { return ,[Omarchy.DirectX86.NativeDisk]::ReadLayout($Disk) }
 function Remove-OwnedStagingPartition($Part,$Owned,[byte[]]$Before) {

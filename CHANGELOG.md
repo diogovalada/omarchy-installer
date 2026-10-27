@@ -108,6 +108,10 @@ downloads. Published versions and their artifacts are immutable.
   space back to the partition it came from, up to installed Omarchy or the
   disk's end, and its confirmation says how far C: grows. Prepare again keeps
   the space free for the new installer.
+- Install without USB (testing builds): once the installer has started, the
+  card offers Resume BitLocker for the volumes it paused, also right after
+  removal. It goes through the sign-in reminder's own checks, so it refuses
+  while an installer waits.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

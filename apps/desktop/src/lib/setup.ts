@@ -10,7 +10,7 @@ export interface UsbReview { token:string; choiceId:string; mode:'erase'|'preser
 export interface SetupSnapshot {
   stagedTesting?:boolean;
   stagedRecovery?:{operations:StagedOperation[];recordErrors:{operationId:string;message:string}[]}|null;
-  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string;image?:string}|null;
+  stagedIso?:{operations?:StagedOperation[];recordErrors?:{operationId:string;message:string}[];choices?:StagedChoice[];blocked?:StagedBlockedDisk[];disks?:StagedDisk[];minimumLinuxBytes?:number;temporaryBytes?:number;secureBoot?:boolean|null;operationId?:string;status?:string;message?:string;image?:string;bitLockerPaused?:string[]}|null;
   // The running staged action and the recorded installer it acts on; set when
   // a staged command starts, and cleared when any other operation starts.
   // `confirmed` once the user approves the action's confirmation.
@@ -38,7 +38,7 @@ export interface SetupSnapshot {
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
 // `replaces`: the partition to delete in the installer (Replace Windows).
-export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean;replaces?:string|null }
+export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean;replaces?:string|null;bitLockerPaused?:string[] }
 export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;label:string;largestFreeAfterStagingBytes:number;target:Record<string,unknown>;encryption?:StagedEncryption[] }
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
@@ -78,7 +78,7 @@ export const setup = { subscribe:state.subscribe, refresh,
   inspectUsb:(choiceId:string,elevated=false) => command('inspect_usb_choice',{choiceId,elevated}),
   prepare:(action:'firmware'|'runtime') => command('prepare_setup', {action}),
   prepareBitLocker:(reminderOnly:boolean) => command('prepare_bitlocker', {reminderOnly}),
-  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'restart'|'firmware'|'cleanup'|'again',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
+  stagedIso:(action:'inspect'|'stage'|'status'|'arm'|'restart'|'firmware'|'cleanup'|'again'|'resume',selection:Record<string,unknown>|null=null,operationId:string|null=null,resize:StagedResizeQuery|null=null) => command('staged_iso',{action,selection,operationId,resize}),
   reviewUsb:(choiceId:string,mode:'erase'|'preserve') => command('review_usb_setup',{choiceId,mode}),
   dismissUsbReview:() => command('dismiss_usb_review'),
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),

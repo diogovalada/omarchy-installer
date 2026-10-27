@@ -72,6 +72,47 @@ it('allows real inspection only in a testing build with a verified ISO',async()=
   await fireEvent.click(screen.getByRole('button',{name:'Check available space'}));
   expect(calls.stagedIso).toHaveBeenCalledWith('inspect');
 });
+it('offers resuming BitLocker once the installer has started, and after removal',async()=>{
+  const id='11111111-1111-4111-8111-111111111111';
+  const op=(status:string,restarted:boolean,paused:string[])=>({operationId:id,status,diskNumber:0,temporaryBytes:8*1024**3,message:'',restartedSinceScheduled:restarted,bitLockerPaused:paused});
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op('boot-scheduled',false,['C:'])]}}});
+  let view=render(StagedInstaller,{recoveryOnly:true});
+  // Not while the installer waits.
+  expect(screen.queryByRole('button',{name:'Resume BitLocker'})).not.toBeInTheDocument();
+  view.unmount();
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op('boot-scheduled',true,['C:'])]}}});
+  view=render(StagedInstaller,{recoveryOnly:true});
+  expect(screen.getByText(/Resume BitLocker once Windows starts the way you’ll normally start it\./)).toBeInTheDocument();
+  await fireEvent.click(screen.getByRole('button',{name:'Resume BitLocker'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('resume',null,id);
+  view.unmount();
+  // Nothing paused, nothing offered.
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op('boot-scheduled',true,[])]}}});
+  view=render(StagedInstaller,{recoveryOnly:true});
+  expect(screen.queryByRole('button',{name:'Resume BitLocker'})).not.toBeInTheDocument();
+  expect(screen.queryByText(/Resume BitLocker once/)).not.toBeInTheDocument();
+  view.unmount();
+  // After removal the card is gone, but resuming stays one click away.
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action:'cleanup',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:id,status:'cleaned',message:'The temporary installer was removed.',bitLockerPaused:['C:']}}});
+  view=render(StagedInstaller,{recoveryOnly:true});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Resume BitLocker'}));
+  expect(calls.stagedIso).toHaveBeenLastCalledWith('resume',null,id);
+  // A failed or cancelled resume keeps the offer, and its error stays visible.
+  const removed={operationId:id,status:'cleaned',message:'The temporary installer was removed.',bitLockerPaused:['C:']};
+  state.set({pending:false,snapshot:{status:'failed',error:'The BitLocker reminder is busy. Try again.',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:removed}});
+  await tick();
+  expect(screen.getByRole('alert')).toHaveTextContent('The BitLocker reminder is busy.');
+  expect(screen.getByRole('button',{name:'Resume BitLocker'})).toBeEnabled();
+  state.set({pending:false,snapshot:{status:'cancelled',message:'Nothing was changed.',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:removed}});
+  await tick();
+  expect(screen.getByRole('button',{name:'Resume BitLocker'})).toBeEnabled();
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:id,status:'cleaned',message:'BitLocker protection on C: is on again.',bitLockerPaused:[]}}});
+  await tick();
+  expect(screen.getByRole('status')).toHaveTextContent('BitLocker protection on C: is on again.');
+  expect(screen.queryByRole('button',{name:'Resume BitLocker'})).not.toBeInTheDocument();
+  view.unmount();
+});
 it('shows how a removal ended, also for Prepare again after a reload',async()=>{
   for(const action of ['cleanup','again']){
     state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action,operationId:'id'},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:'id',status:'cleaned',message:'The temporary installer was removed. C: grew from 404 to 411.5 GiB over its space; any installed Omarchy was not changed.'}}});
@@ -721,7 +762,7 @@ it('offers a restart while the selected restart is pending, then suggests remova
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedRecovery:{operations:[{...op,restartedSinceScheduled:true}],recordErrors:[]}}});
   await tick();
   expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
-  expect(screen.getByText('Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.')).toBeInTheDocument();
+  expect(screen.getByText('Does your PC now start Omarchy by itself? Then remove the temporary installer.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Remove temporary installer'})).toHaveClass('primary');
   expect(screen.getByRole('button',{name:'Start installer again on next restart'})).not.toHaveClass('primary');
 });
@@ -732,7 +773,7 @@ it('shows only the current step of a prepared installer, with one primary button
     [card('staged',true),'Turn off Secure Boot','Restart into your PC’s firmware settings, then:','Restart to firmware settings',false],
     [card('arming',false),'Start the installer','Restart into the installer when you’re ready.','Restart into the installer',true],
     [card('boot-scheduled',false),'Install Omarchy','The installer opens at your next restart.','Restart into the installer',true],
-    [card('boot-scheduled',false,true),'Clean up','Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.','Remove temporary installer',false]
+    [card('boot-scheduled',false,true),'Clean up','Does your PC now start Omarchy by itself? Then remove the temporary installer.','Remove temporary installer',false]
   ];
   for(const [snapshot,step,text,primary,instruction] of cases) {
     state.set(snapshot);

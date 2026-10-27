@@ -87,7 +87,9 @@ warn that booting and same-disk installation may fail in the official ISO.
    Windows/target volumes, without decrypting. Register a per-volume sign-in
    reminder first; existing suspensions are not adopted. OS suspension is
    indefinite (DisableCount=0); data volumes omit DisableCount. The user explicitly
-   resumes through the reminder after Windows boots through the final boot path.
+   resumes through the reminder, or the app's Resume BitLocker once the
+   installer has started, after Windows boots through the final boot path. Both
+   use the reminder's resume and its checks.
    Copy the original ISO files to NTFS, hashing each while copying and
    comparing a readback; no live filesystem or installer code is patched. NTFS
    supports the large squashfs file. Copying reports progress and can be stopped;

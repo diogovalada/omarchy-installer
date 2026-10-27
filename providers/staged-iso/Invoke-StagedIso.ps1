@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][ValidateSet('inspect','plan','stage','status','arm','firmware','reclaim','cleanup')][string]$Action,
+param([Parameter(Mandatory=$true)][ValidateSet('inspect','plan','stage','status','arm','firmware','reclaim','cleanup','resume')][string]$Action,
       [Parameter(Mandatory=$true)][string]$RequestPath,
       [switch]$TestingBuild)
 Set-StrictMode -Version Latest
@@ -103,6 +103,10 @@ try {
             $state=Read-StagingState $request.operationId
             $result=switch ($Action) {
                 'arm' { Invoke-StagingArm $state }
+                # Through the sign-in reminder's own resume and checks.
+                'resume' {
+                    & { param($State,[string]$WorkerPath) . $WorkerPath -LibraryOnly; Invoke-StagingResume $State } $state (Join-Path $PSScriptRoot '../windows-bitlocker/BitLockerSetup.ps1')
+                }
                 'firmware' { Invoke-StagingFirmware $state }
                 # Read-only: how far removal would grow the partition, for its
                 # confirmation.

@@ -318,6 +318,17 @@ fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
         {
             return None;
         }
+        // Volumes it paused, named in the card and its confirmation.
+        if !operation["bitLockerPaused"].is_null() {
+            let paused = operation["bitLockerPaused"].as_array()?;
+            if paused.len() > 16
+                || paused
+                    .iter()
+                    .any(|name| name.as_str().map_or(true, |name| name.chars().count() > 16))
+            {
+                return None;
+            }
+        }
     }
     for error in errors {
         uuid::Uuid::parse_str(error["operationId"].as_str()?).ok()?;
@@ -1863,6 +1874,7 @@ fn exchange(
                     }
                     "staged_cleanup" => (MessageDialogKind::Warning, "Remove temporary installer"),
                     "staged_again" => (MessageDialogKind::Warning, "Remove and prepare again"),
+                    "staged_resume" => (MessageDialogKind::Info, "Resume BitLocker"),
                     _ => (MessageDialogKind::Warning, "Continue"),
                 };
                 let approved = if operation == "source_lease" {
@@ -1939,6 +1951,7 @@ fn exchange(
                             | "staged_firmware"
                             | "staged_cleanup"
                             | "staged_again"
+                            | "staged_resume"
                     )
                 {
                     service.update(app, |inner| {
@@ -2334,6 +2347,16 @@ mod usb_review_tests {
         for invalid in [json!(7), json!("x".repeat(65))] {
             replacing["operations"][0]["replaces"] = invalid;
             std::fs::write(&path, serde_json::to_vec(&replacing).unwrap()).unwrap();
+            assert!(read_staging_summary(&path).is_none());
+        }
+        // Paused BitLocker volumes are short names, if present.
+        let mut paused = summary.clone();
+        paused["operations"][0]["bitLockerPaused"] = json!(["C:"]);
+        std::fs::write(&path, serde_json::to_vec(&paused).unwrap()).unwrap();
+        assert_eq!(read_staging_summary(&path), Some(paused.clone()));
+        for invalid in [json!("C:"), json!([7]), json!(["x".repeat(17)])] {
+            paused["operations"][0]["bitLockerPaused"] = invalid;
+            std::fs::write(&path, serde_json::to_vec(&paused).unwrap()).unwrap();
             assert!(read_staging_summary(&path).is_none());
         }
     }
