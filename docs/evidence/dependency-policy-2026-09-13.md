@@ -39,3 +39,21 @@ Reassess the exception before adding private-key operations or another use of
 pgp/rsa, and when updating either dependency. Prefer a patched compatible version
 when one becomes available. Do not reuse this exception as a general approval
 for RSA signing/decryption or claim that the dependency itself is unaffected.
+
+## October 2026 advisories
+
+Four advisories published in October failed the dependency check.
+
+- **Updated:** rustls-webpki 0.103.16 (RUSTSEC-2026-0382, distrusted
+  intermediates), webpki-roots 1.0.11 (RUSTSEC-2026-0381, distrusted emSign
+  roots) and tokio 1.54.1 (RUSTSEC-2026-0386, `AsyncFd` I/O safety), in both the
+  workspace and the desktop app's lockfile. The webpki-roots license exception
+  and notice now name 1.0.11; its LICENSE file is identical to 1.0.9's.
+- **RUSTSEC-2026-0387** (timing variability in crypto-bigint): crypto-bigint
+  0.5.5 comes only through pgp's elliptic-curve support. The fix is in 0.7.6,
+  but pgp 0.21.0, the latest release, still requires elliptic-curve 0.13 and so
+  crypto-bigint 0.5. The release client only verifies signatures with the
+  embedded public key, so no secret value reaches these operations, the same
+  reasoning as for RUSTSEC-2023-0071 above. It is recorded as a second explicit
+  exception. Reassess it under the same conditions, and drop it once pgp moves
+  to a patched crypto-bigint.
