@@ -450,7 +450,7 @@ try {
     function Get-ShrinkCandidate { return @{eligible=$true;maximumAllocationBytes=[long]100GB;volumeId='volume';driveLetter='C'} }
     function Get-InspectedPartitions { return @($windowsPart) }
     function Assert-Path($Path) { return $Path }
-    $staging=[long](512MB+7GB)
+    $staging=[long](512MB+6GB+256MB)
     $request=[pscustomobject]@{sourceIsoPath='C:\omarchy.iso';sourceSha256=('a'*64);sourceLength=[long]6GB;diskNumber=0;diskUniqueId='plan-disk';targetKind='shrink';shrinkPartitionNumber=3;shrinkPartitionGuid=$windowsPart.Guid;linuxBytes=[long]40GB}
     $plan=Get-StagingPlan $request
     Assert ($plan.linuxBytes -eq 40GB -and $plan.shrink.allocationBytes -eq $staging+40GB) 'Space for Omarchy was not added to the shrink.'

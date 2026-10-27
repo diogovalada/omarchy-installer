@@ -36,6 +36,10 @@ function Assert-StagingEncryption([int]$DiskNumber) {
         if ($volume.protectionStatus -ne 0) { throw 'BitLocker protection is active. Review preparation again before writing or selecting installer startup.' }
     }
 }
+# The source partition holds the ISO's files, which add up to slightly less
+# than the ISO. NTFS on a volume this size needs under 100 MiB (mostly its
+# 64 MiB log), so 256 MiB of headroom is enough; the copy check keeps 128 MiB.
+function Get-StagingDataBytes([long]$IsoBytes) { return Align-Up ($IsoBytes+256MB) }
 function Start-StagingSuspension($Plan,[uint32]$AuthenticatedPid) {
     $current=@(Get-StagingEncryption $Plan.diskNumber)
     Assert-BitLockerUnchanged @($Plan.bitLocker) $current
@@ -77,7 +81,7 @@ function Assert-StagingFree($Disk,[long]$Start,[long]$Size) {
 # each disk and before measuring.
 function Get-StagingChoices($Release,$Resize=$null,[string]$CancelPath='') {
     $Stoppable=[bool]$CancelPath
-    $choices=@(); $blocked=@(); $disks=@(); $overhead=512MB+(Align-Up ([long]$Release.sizeBytes+1GB))
+    $choices=@(); $blocked=@(); $disks=@(); $overhead=512MB+(Get-StagingDataBytes $Release.sizeBytes)
     $script:minimumBytes=[long]$overhead
     if ($null -ne $Resize) {
         Assert-Fields $Resize @('diskNumber','diskUniqueId','partitionNumber','partitionGuid') @('diskNumber','diskUniqueId','partitionNumber','partitionGuid')
@@ -264,7 +268,7 @@ function Get-StagingPlan($Request) {
     # Windows is kept. Only a reviewed shrink can create it.
     $linux=if ($Request.PSObject.Properties['linuxBytes']) { [long]$Request.linuxBytes } else { [long]0 }
     if ($linux -ne 0 -and ($Request.targetKind -ne 'shrink' -or $linux -lt $release.minimumLinuxBytes -or $linux % 1MB -ne 0)) { throw 'Invalid space for Omarchy.' }
-    $data=Align-Up ([long]$release.sizeBytes+1GB); $staging=512MB+$data; $total=$staging+$linux; $shrink=$null
+    $data=Get-StagingDataBytes $release.sizeBytes; $staging=512MB+$data; $total=$staging+$linux; $shrink=$null
     $script:minimumBytes=[long]$total
     if ($Request.targetKind -eq 'free') {
         $start=[long]$Request.startOffsetBytes; Assert-StagingFree $disk $start $total
@@ -554,7 +558,7 @@ function Invoke-StagingWrite($Plan,[uint32]$AuthenticatedPid,[string]$CancelPath
         foreach ($needed in @($Plan.release.kernelPath,$Plan.release.initrdPath,'arch/x86_64/airootfs.sfs','arch/x86_64/airootfs.sha512')) {
             if (@($files | Where-Object { $_.path -ceq $needed }).Count -ne 1) { throw "Required official ISO file is missing: $needed" }
         }
-        if (($files | Measure-Object sizeBytes -Sum).Sum -gt $Plan.partitions[1].sizeBytes-512MB) { throw 'Extracted ISO exceeds the planned staging capacity.' }
+        if (($files | Measure-Object sizeBytes -Sum).Sum -gt $Plan.partitions[1].sizeBytes-128MB) { throw 'Extracted ISO exceeds the planned staging capacity.' }
         # Measured before anything changes, so a limit that went stale since
         # planning fails with nothing changed, not after BitLocker is paused.
         $minimum=if ($null -ne $Plan.shrink) { Get-StagingShrinkPreflight $Plan } else { [long]0 }

@@ -95,6 +95,8 @@ downloads. Published versions and their artifacts are immutable.
   and no longer opens Windows' BitLocker page, which may not offer resuming.
   Resume is checked again when clicked, in case an installer was prepared
   while the reminder was open.
+- Install without USB (testing builds): the temporary source partition is the
+  ISO's size plus 256 MiB instead of 1 GiB, which saves about 750 MB.
 
 ## [0.1.0-preview.4] - 2026-09-13
 
