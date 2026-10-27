@@ -35,7 +35,7 @@ are retained in [the asset directory](apps/desktop/src/assets/omarchy/README.md)
 Omarchy's upstream copyright is David Heinemeier Hansson; JetBrains Mono is
 distributed under the SIL Open Font License. The app remains a community project.
 
-## webpki-roots 1.0.9
+## webpki-roots 1.0.11
 
 The application includes certificate trust-anchor data from webpki-roots.
 Source: https://github.com/rustls/webpki-roots

@@ -7,6 +7,8 @@ downloads. Published versions and their artifacts are immutable.
 
 - Update rustls to 0.23.46 for the TLS advisories RUSTSEC-2026-0346 to
   RUSTSEC-2026-0349.
+- Update rustls-webpki to 0.103.16, webpki-roots to 1.0.11 and tokio to 1.54.1
+  for RUSTSEC-2026-0381, RUSTSEC-2026-0382 and RUSTSEC-2026-0386.
 - Install without USB (testing builds): choose space on a to-scale disk map.
   Selecting a partition explains it in one line; an "All partitions" table
   gives exact sizes. A non-Windows partition is named by its drive letter in
