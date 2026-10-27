@@ -106,9 +106,21 @@ Other planned improvements:
 - **Reclaim space after direct installation:** let users optionally remove the
   original OS and its partitions, leaving the space unallocated or using it to
   expand Omarchy's home storage.
-- **Bootloader options for direct installation:** let users show or hide the
-  OS selection menu, choose the default OS and set the countdown. Check what
+- **Choose what starts by default:** once Omarchy is installed next to
+  Windows, show which system starts by default and let users switch it by
+  reordering the firmware's boot order. Also offer a one-time restart into the
+  other system, so nobody needs the boot menu key. The app already writes
+  firmware boot entries for the temporary installer, and BitLocker's default
+  TPM checks don't include the boot order. Later, let users show or hide the OS
+  selection menu and set the countdown for direct installation. Check what
   Omarchy MX Mac currently supports.
+- **Remove Omarchy and return to Windows:** a reviewed action, like preparing,
+  that deletes Omarchy's partitions and firmware boot entry, makes Windows the
+  default again and extends C: over the freed space. It would only delete
+  partitions entirely inside the space the app set aside for Omarchy, refuse
+  when the layout differs from what it recorded, and show manual steps for
+  installations it didn't make. The design depends on whether Omarchy's
+  installer creates its own EFI partition or uses Windows' one.
 - **Resize non-native partitions:** investigate resizing ext4/Btrfs partitions
   from Windows or macOS, APFS partitions from Windows or Linux, and other
   combinations of host operating systems and filesystems.
@@ -137,7 +149,11 @@ installation. Today users add it manually with `limine-scan` or use the
 computer's boot menu ([omarchy#7867](https://github.com/omacom/omarchy/issues/7867)).
 Omarchy already enables automatic bootloader discovery in
 [limine-entry-tool](https://gitlab.com/Zesko/limine-entry-tool), but it only
-searches Limine's own EFI partition, not the separate Windows one.
+searches Limine's own EFI partition, not the separate Windows one. With
+BitLocker on, that entry should hand over to the firmware's Windows Boot
+Manager (Limine's `efi_boot_entry`) rather than chainload it. Otherwise each
+Limine update asks for the recovery key; see
+[starting Windows after a staged install](docs/evidence/windows-after-staged-install-2026-10-27.md).
 
 ## Development
 
