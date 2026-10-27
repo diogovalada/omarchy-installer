@@ -451,6 +451,20 @@ fn cleanup_summary(growth: Option<&Growth>) -> String {
     format!("Remove the temporary installer? Its two partitions and their files are deleted, {space}. Windows and any installed Omarchy stay. Continue once your PC starts Omarchy by itself, or if you're giving up on this installation.")
 }
 
+/// Resuming BitLocker's confirmation, naming the volumes the installer paused.
+fn resume_summary(paused: &Value) -> String {
+    let names: Vec<&str> = paused
+        .as_array()
+        .map(|names| names.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let volumes = if names.is_empty() {
+        "the volumes this installer paused".to_owned()
+    } else {
+        names.join(", ")
+    };
+    format!("Resume BitLocker protection on {volumes} now? Do this once Windows starts the way you'll normally start it. If you'll turn Secure Boot back on, do that first.")
+}
+
 fn restart_windows() -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -1197,6 +1211,15 @@ mod staged_review_tests {
             assert!(installer_instruction(Some(name))
                 .ends_with(&format!(", and delete {name} when it asks for more space.")));
         }
+    }
+
+    #[test]
+    fn resuming_names_the_paused_volumes() {
+        assert!(
+            resume_summary(&json!(["C:"])).starts_with("Resume BitLocker protection on C: now?")
+        );
+        assert!(resume_summary(&Value::Null)
+            .starts_with("Resume BitLocker protection on the volumes this installer paused now?"));
     }
 
     #[test]
@@ -1972,6 +1995,7 @@ fn execute(
                 StagedAction::Firmware => ("firmware", "staged_firmware", FIRMWARE_SUMMARY.to_owned()),
                 StagedAction::Again => ("cleanup", "staged_again", "Remove this temporary installer and prepare a new one? Its two partitions and their files are deleted, and their space stays free for the new installer. Windows and any installed Omarchy stay.".to_owned()),
                 StagedAction::Cleanup => ("cleanup", "staged_cleanup", cleanup_summary(growth.as_ref())),
+                StagedAction::Resume => ("resume", "staged_resume", resume_summary(&record["bitLockerPaused"])),
                 _ => return Err("Unknown staged installation action".into()),
             };
             confirm(

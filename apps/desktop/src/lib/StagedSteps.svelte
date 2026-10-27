@@ -11,7 +11,7 @@
   // Set while a running command prepares or removes this installer.
   export let underway:'preparing'|'removing'|null=null;
   export let act:(action:Action)=>void=()=>{};
-  type Action='restart'|'arm'|'firmware'|'cleanup'|'again';
+  type Action='restart'|'arm'|'firmware'|'cleanup'|'again'|'resume';
   // Shown before restarting, since the app can't be seen from the installer.
   // A replaced partition (Replace Windows) is deleted there to make room.
   $: installer=`In the installer, choose the disk marked “installer disk, free space only”, then “Free space install”${op.replaces ? `, and delete ${op.replaces} when it asks for more space` : ''}.`;
@@ -20,7 +20,7 @@
     '',
     'Restart into the installer when you’re ready.',
     'The installer opens at your next restart.',
-    'Does your PC now start Omarchy by itself? Then remove the temporary installer. Resume BitLocker when Windows reminds you.'
+    'Does your PC now start Omarchy by itself? Then remove the temporary installer.'
   ];
   $: ready=['staged','arming','boot-scheduled'].includes(op.status);
   // Without a command on it, an unfinished status was interrupted; an
@@ -32,14 +32,17 @@
   $: current=!ready ? -1 : scheduled ? (op.restartedSinceScheduled ? 3 : 2) : secureBoot ? 0 : 1;
   $: steps=[secureBoot==null ? "Turn off Secure Boot if it's on" : 'Turn off Secure Boot','Start the installer','Install Omarchy','Clean up'];
   // Startup selection and firmware restarts exist only in testing builds.
-  $: available={restart:testing && ready,arm:testing && ready,firmware:testing && ready && secureBoot!==false,cleanup:true,again:canPrepareAgain} as Record<Action,boolean>;
+  // BitLocker can be resumed once the installer has started, never while
+  // it waits.
+  $: paused=op.bitLockerPaused?.length ? op.bitLockerPaused : [];
+  $: available={restart:testing && ready,arm:testing && ready,firmware:testing && ready && secureBoot!==false,cleanup:true,again:canPrepareAgain,resume:current===3 && paused.length>0} as Record<Action,boolean>;
   // Restarting into the installer also retries a selection whose restart
   // hasn't happened (step 2).
   $: primary=underway ? null : ([current===0 ? 'firmware' : current===1 || current===2 ? 'restart' : 'cleanup'] as Action[]).find(action=>available[action]) ?? null;
   // Starting the installer comes last while it can't help yet: before
   // Secure Boot is off, or once it is already set for the next restart.
-  $: secondary=((current===0 ? ['cleanup','again','arm'] : current===1 ? ['arm','firmware','cleanup','again'] : current===2 ? ['firmware','cleanup','again'] : ['firmware','cleanup','again','arm']) as Action[]).filter(action=>!underway && available[action] && action!==primary);
-  $: labels={restart:'Restart into the installer',arm:scheduled ? 'Start installer again on next restart' : 'Set for next restart only',firmware:'Restart to firmware settings',cleanup:'Remove temporary installer',again:'Prepare again'} as Record<Action,string>;
+  $: secondary=((current===0 ? ['cleanup','again','arm'] : current===1 ? ['arm','firmware','cleanup','again'] : current===2 ? ['firmware','cleanup','again'] : ['resume','firmware','cleanup','again','arm']) as Action[]).filter(action=>!underway && available[action] && action!==primary);
+  $: labels={restart:'Restart into the installer',arm:scheduled ? 'Start installer again on next restart' : 'Set for next restart only',firmware:'Restart to firmware settings',cleanup:'Remove temporary installer',again:'Prepare again',resume:'Resume BitLocker'} as Record<Action,string>;
 </script>
 
 <article aria-label={`Temporary installer on Disk ${op.diskNumber}`}>
@@ -61,7 +64,7 @@
       </ol>
       <p>If the firmware warns that BitLocker may ask for a recovery key, you can continue: this app paused BitLocker.</p>
       <p>Windows then starts again and this app reopens, so you can start the installer. Windows may ask you to set up your PIN again, so make sure you can sign in another way, such as your password or your Microsoft account’s recovery email or phone.</p>
-    {:else}<p>{TEXT[current]}</p>{/if}
+    {:else}<p>{TEXT[current]}{#if current===3 && paused.length} Resume BitLocker once Windows starts the way you’ll normally start it.{/if}</p>{/if}
     {#if current===1 || current===2}<p>{installer}</p>{/if}
   {:else}
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>

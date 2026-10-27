@@ -120,6 +120,8 @@ pub enum StagedAction {
     Cleanup,
     /// Remove the installer and keep its space free for a new one.
     Again,
+    /// Resume BitLocker on the volumes the installer paused.
+    Resume,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

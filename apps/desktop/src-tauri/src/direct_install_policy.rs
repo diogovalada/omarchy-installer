@@ -87,7 +87,11 @@ mod tests {
                 STAGED_ISO_TESTING
             );
         }
-        for action in [StagedAction::Status, StagedAction::Cleanup] {
+        for action in [
+            StagedAction::Status,
+            StagedAction::Cleanup,
+            StagedAction::Resume,
+        ] {
             assert!(check_destination(&Destination::StagedIso {
                 action,
                 selection: None,
