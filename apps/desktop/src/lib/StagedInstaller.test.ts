@@ -98,6 +98,15 @@ it('offers resuming BitLocker once the installer has started, and after removal'
   await tick();
   await fireEvent.click(screen.getByRole('button',{name:'Resume BitLocker'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('resume',null,id);
+  // A failed or cancelled resume keeps the offer, and its error stays visible.
+  const removed={operationId:id,status:'cleaned',message:'The temporary installer was removed.',bitLockerPaused:['C:']};
+  state.set({pending:false,snapshot:{status:'failed',error:'The BitLocker reminder is busy. Try again.',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:removed}});
+  await tick();
+  expect(screen.getByRole('alert')).toHaveTextContent('The BitLocker reminder is busy.');
+  expect(screen.getByRole('button',{name:'Resume BitLocker'})).toBeEnabled();
+  state.set({pending:false,snapshot:{status:'cancelled',message:'Nothing was changed.',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:removed}});
+  await tick();
+  expect(screen.getByRole('button',{name:'Resume BitLocker'})).toBeEnabled();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedTarget:{action:'resume',operationId:id},stagedRecovery:{operations:[],recordErrors:[]},stagedIso:{operationId:id,status:'cleaned',message:'BitLocker protection on C: is on again.',bitLockerPaused:[]}}});
   await tick();
   expect(screen.getByRole('status')).toHaveTextContent('BitLocker protection on C: is on again.');

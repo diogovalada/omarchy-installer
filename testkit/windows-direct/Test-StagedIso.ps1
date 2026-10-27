@@ -70,7 +70,7 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
         foreach ($id in @($valid,$missing,$invalid)) { [void][IO.Directory]::CreateDirectory((Join-Path $recordsRoot $id)) }
         # Replacing Windows, so the app's summary names it for the installer.
         $windowsLetter=([IO.Path]::GetPathRoot([Environment]::GetFolderPath('Windows'))).Substring(0,1)
-        $record=@{schema=1;operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=0;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB});targetKind='shrink';shrink=@{driveLetter=$windowsLetter;partitionNumber=3}}
+        $record=@{schema=1;bitLocker=@(@{driveLetter='C:';protectionStatus=1});operationId=$valid;status='copying';diskUniqueId='fixture';diskNumber=0;linuxOffsetBytes=1MB;linuxBytes=0;message='Interrupted';partitions=@(@{},@{sizeBytes=8GB});targetKind='shrink';shrink=@{driveLetter=$windowsLetter;partitionNumber=3}}
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$valid/state.json"),($record | ConvertTo-Json -Depth 5))
         [IO.File]::WriteAllText((Join-Path $recordsRoot "$invalid/state.json"),'{')
         $status=Get-StagingStatus (ConvertFrom-Json '{}')
@@ -82,6 +82,7 @@ Reject { Assert-Fields (ConvertFrom-Json '{}') @('operationId') @('operationId')
         $index=Read-Json (Join-Path $recordsRoot 'summary.json')
         Assert ($index.operations.Count -eq 1 -and $index.recordErrors.Count -eq 2) 'Passive summary omitted pending work.'
         Assert ($index.operations[0].replaces -ceq 'Windows') 'The app summary lost the partition to delete in the installer.'
+        Assert ((@($index.operations[0].bitLockerPaused) -join ',') -ceq 'C:') 'The app summary lost the paused BitLocker volumes.'
         $acl=Get-Acl -LiteralPath (Join-Path $recordsRoot 'summary.json')
         $readers=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
         Assert ($readers.Count -eq 1 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 -and ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -eq 0) 'Discovery summary must grant users read access only.'
@@ -434,11 +435,12 @@ Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
         $script:calls=New-Object 'Collections.Generic.List[string]'
         $script:protected=@{}; $script:reminderSid=$sid; $script:waiting=$false
         function Get-FollowupRoot { return $root }
-        function Read-FollowupState($Path) { return [pscustomobject]@{userSid=$script:reminderSid;path=$Path} }
+        function Read-FollowupState($Path) { $script:calls.Add('read'); return [pscustomobject]@{userSid=$script:reminderSid;path=$Path} }
         function Get-EncryptionFacts($VolumeId) { return [pscustomobject]@{volumeId=$VolumeId;conversion=1;protection=$(if ($script:protected[$VolumeId]) {1} else {0})} }
         function Get-EncryptionLock($Facts) { $script:calls.Add('lock '+$Facts.volumeId); return [pscustomobject]@{} | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $script:calls.Add('unlock') } -PassThru }
         function Test-StagedInstallerWaiting { return $script:waiting }
-        function Resume-OwnedProtection($State,$Path,$InstallerWaiting) { if ($InstallerWaiting) { throw 'An Omarchy installer is waiting on this PC. Keep BitLocker paused until Omarchy is installed.' }; $script:calls.Add('resume '+(Split-Path -Leaf (Split-Path -Parent $Path))) }
+        $script:failVolume=''
+        function Resume-OwnedProtection($State,$Path,$InstallerWaiting) { if ((Split-Path -Leaf (Split-Path -Parent $Path)) -eq $script:failVolume) { throw 'Protection could not be verified.' }; if ($InstallerWaiting) { throw 'An Omarchy installer is waiting on this PC. Keep BitLocker paused until Omarchy is installed.' }; $script:calls.Add('resume '+(Split-Path -Leaf (Split-Path -Parent $Path))) }
         function Save-StagingState($State) { $script:calls.Add('save') }
         $record={ [pscustomobject]@{operationId='o';status='boot-scheduled';diskUniqueId='d';diskNumber=0;linuxOffsetBytes=0;linuxBytes=0;message='';partitions=@(@{},@{sizeBytes=8GB});bitLocker=@([pscustomobject]@{driveLetter='C:';volumeId='vc';partitionGuid=$cGuid;protectionStatus=1},[pscustomobject]@{driveLetter='D:';volumeId='vd';partitionGuid=$dGuid;protectionStatus=0})} }
         $state=& $record
@@ -448,13 +450,23 @@ Assert ($script:removed.Count -eq 2) 'Repeated cleanup must be idempotent.'
         Assert (-not $state.PSObject.Properties['bitLockerResumed']) 'A refused resume was recorded.'
         $script:waiting=$false; $script:calls.Clear()
         $result=Invoke-StagingResume $state
-        Assert (($script:calls -join ',') -eq "lock vc,resume $cGuid,unlock,save") "Only the paused volume must be resumed, under its lock: $($script:calls -join ',')"
+        Assert (($script:calls -join ',') -eq "lock vc,read,resume $cGuid,unlock,save") "Only the paused volume must be resumed, its reminder read under its lock: $($script:calls -join ',')"
         Assert ($result.message -ceq 'BitLocker protection on C: is on again.' -and @($result.bitLockerPaused).Count -eq 0 -and (Get-StagingBitLockerNote $state) -ceq '') 'A resumed volume must stop being offered or mentioned.'
         Reject { Invoke-StagingResume $state } 'Resuming twice must say there is nothing to resume.'
         # Already protected again (the reminder or Windows resumed it): nothing to do but record it.
         $state=& $record; $script:protected['vc']=$true; $script:calls.Clear()
         [void](Invoke-StagingResume $state)
         Assert (($script:calls -join ',') -eq 'save') 'An already protected volume must not be resumed again.'
+        $script:protected['vc']=$false
+        # Two paused volumes, the second failing: nothing is recorded, and a
+        # retry resumes only what is still paused.
+        $state=& $record; $state.bitLocker[1].protectionStatus=1
+        $script:failVolume=$dGuid
+        Reject { Invoke-StagingResume $state } 'A failing second volume was hidden.'
+        Assert (-not $state.PSObject.Properties['bitLockerResumed'] -and (@((Get-StagingSummary $state).bitLockerPaused) -join ',') -eq 'C:,D:') 'A partial resume was recorded as complete.'
+        $script:protected['vc']=$true; $script:failVolume=''; $script:calls.Clear()
+        [void](Invoke-StagingResume $state)
+        Assert (($script:calls -join ',') -eq "lock vd,read,resume $dGuid,unlock,save") "A retry must resume only the volume still paused: $($script:calls -join ',')"
         $script:protected['vc']=$false
         # Another account's reminder, or none, is refused.
         $state=& $record; $script:reminderSid='S-1-5-21-0-0-0-500'

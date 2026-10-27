@@ -327,6 +327,8 @@ function Write-StagingSummary {
         $operation=@{operationId=$_.operationId;status=$_.status;diskNumber=$_.diskNumber;temporaryBytes=$_.temporaryBytes}
         if ($_.ContainsKey('scheduledBootUnixSeconds')) { $operation.scheduledBootUnixSeconds=$_.scheduledBootUnixSeconds }
         if ($_.ContainsKey('replaces') -and $_.replaces) { $operation.replaces=$_.replaces }
+        # The card offers Resume BitLocker for these.
+        if ($_.ContainsKey('bitLockerPaused') -and @($_.bitLockerPaused).Count) { $operation.bitLockerPaused=@($_.bitLockerPaused) }
         $operation
     });recordErrors=$status.recordErrors}
     $path=Join-Path (Get-StagingRoot) 'summary.json'
@@ -859,10 +861,14 @@ function Invoke-StagingResume($State) {
         if ($facts.conversion -eq 1 -and $facts.protection -eq 1) { continue }
         $path=Join-Path (Join-Path (Get-FollowupRoot) ([guid]$volume.partitionGuid).ToString()) 'state.json'
         if (-not (Test-Path -LiteralPath $path)) { throw ('BitLocker on '+$name+' has no reminder from this installer. Resume it in Windows.') }
-        $reminder=Read-FollowupState $path
-        if ($reminder.userSid -cne $sid) { throw ('The BitLocker reminder for '+$name+' belongs to another Windows account. Resume it from that account.') }
+        # The record is read under the reminder's lock, so a choice the
+        # reminder just saved (such as Keep paused) is seen.
         $lock=Get-EncryptionLock $facts
-        try { Resume-OwnedProtection $reminder $path (Test-StagedInstallerWaiting) } finally { $lock.Dispose() }
+        try {
+            $reminder=Read-FollowupState $path
+            if ($reminder.userSid -cne $sid) { throw ('The BitLocker reminder for '+$name+' belongs to another Windows account. Resume it from that account.') }
+            Resume-OwnedProtection $reminder $path (Test-StagedInstallerWaiting)
+        } finally { $lock.Dispose() }
     }
     if ($State.PSObject.Properties['bitLockerResumed']) { $State.bitLockerResumed=$true } else { $State | Add-Member -NotePropertyName bitLockerResumed -NotePropertyValue $true }
     Save-StagingState $State
