@@ -72,7 +72,15 @@
   {#if ready && !underway}
     <details>
       <summary>Starting Windows later</summary>
-      <p>Omarchy starts by default after installing. To open Windows, use your computer's boot menu key (often F12, F11 or Esc), or run <code>limine-scan</code> in Omarchy once and choose Windows Boot Manager to add it to the menu.</p>
+      <p>Omarchy starts by default after installing. To open Windows, press your computer's boot menu key as it starts (often F12, F11 or Esc) and choose Windows Boot Manager.</p>
+      <!-- An entry that hands over to the firmware's Windows Boot Manager, not
+           limine-scan's chainload: with Secure Boot off, BitLocker measures a
+           chainloading Limine, so each Limine update would ask for the key. -->
+      <p>To add Windows to Omarchy's menu instead, add these lines at the end of <code>/boot/limine.conf</code> in Omarchy:</p>
+      <pre><code>/Windows
+    protocol: efi_boot_entry
+    entry: Windows Boot Manager</code></pre>
+      <p>Windows then starts after one quick restart, and BitLocker won't ask for its recovery key when Omarchy updates its boot menu. If choosing Windows there shows an error, use the boot menu key instead. Omarchy may hide its menu: tap the space bar repeatedly while your PC starts until it appears. Running <code>omarchy-refresh-limine</code> or <code>omarchy reinstall</code> removes these lines, so add them again afterwards.</p>
       <p>If you replace Windows, the temporary installer stays on the disk.</p>
     </details>
   {/if}
@@ -94,7 +102,7 @@
   button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;margin:6px 0 4px;padding:10px 14px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface-raised);color:var(--text);font-size:11px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
   .primary{background:var(--accent);border-color:var(--accent);color:var(--surface-deep);font-weight:700}.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
   details{margin:10px 0 0;font-size:11px;color:var(--text-dim);line-height:1.8}summary{cursor:pointer;padding:4px 0}details p{font-size:11px}
-  .how{margin:-4px 0 4px}.how-to{margin:0 0 8px;padding-left:20px;font-size:12px;line-height:1.8;color:var(--text-muted)}.how-to strong{color:var(--text)}code{padding:0 4px;border-radius:3px;background:var(--surface-raised);font-size:11px;color:var(--text)}
+  .how{margin:-4px 0 4px}.how-to{margin:0 0 8px;padding-left:20px;font-size:12px;line-height:1.8;color:var(--text-muted)}.how-to strong{color:var(--text)}code{padding:0 4px;border-radius:3px;background:var(--surface-raised);font-size:11px;color:var(--text)}pre{margin:0 0 8px;padding:8px 10px;border-radius:4px;background:var(--surface-raised);overflow-x:auto}pre code{padding:0;background:none;line-height:1.6}
   .secondary{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
   .text-action{min-height:0;margin:0;padding:0;border:0;background:transparent;color:var(--accent);font-size:11px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){color:var(--accent-hover)}
   @media(max-width:550px){article{padding:16px}}

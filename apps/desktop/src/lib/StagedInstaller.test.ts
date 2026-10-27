@@ -678,6 +678,9 @@ it('lets the installer be selected again after a restart and restarts to firmwar
   expect(screen.getByRole('heading',{name:'Temporary installer · Disk 0'})).toBeInTheDocument();
   expect(screen.getByText('Clean up')).toHaveAttribute('aria-current','step');
   expect(screen.getByText('Starting Windows later')).toBeInTheDocument();
+  // The Windows entry hands over to the firmware instead of chainloading.
+  expect(document.querySelector('pre code')?.textContent).toBe('/Windows\n    protocol: efi_boot_entry\n    entry: Windows Boot Manager');
+  expect(screen.queryByText(/limine-scan/)).not.toBeInTheDocument();
   await fireEvent.click(screen.getByRole('button',{name:'Start installer again on next restart'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('arm',null,op.operationId);
   await fireEvent.click(screen.getByRole('button',{name:'Restart to firmware settings'}));
