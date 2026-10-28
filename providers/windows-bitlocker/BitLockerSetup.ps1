@@ -247,13 +247,25 @@ function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::Ge
         return $false
     } catch { return $false }
 }
-# The app leaves this event while it shows a temporary installer, whose card
-# offers the same choices, and reopens at sign-in while one exists; the logon
-# trigger's minute of delay gives it time. The reminder then stays quiet.
+# The app leaves this event while it shows a temporary installer that paused
+# BitLocker, whose card offers the same choices, and reopens at sign-in while
+# one exists; the logon trigger's minute of delay gives it time.
 function Test-AppFollowupOpen([string]$Name='Local\OmarchyInstallerFollowUp') {
     $handle=$null
     try { if ([Threading.EventWaitHandle]::TryOpenExisting($Name,[Security.AccessControl.EventWaitHandleRights]::Synchronize,[ref]$handle)) { $handle.Dispose(); return $true } } catch { }
     return $false
+}
+# Whether an unremoved installer lists this volume as paused, so its card
+# covers this reminder. Display-only summary; unreadable means no.
+function Test-AppCoversVolume([string]$Drive,[string]$Path=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OmarchyStagedInstaller/summary.json')) {
+    try {
+        if (-not $Drive -or -not (Test-Path -LiteralPath $Path)) { return $false }
+        $summary=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        foreach ($operation in @($summary.operations)) {
+            if ($operation.PSObject.Properties['bitLockerPaused'] -and @($operation.bitLockerPaused) -contains $Drive) { return $true }
+        }
+        return $false
+    } catch { return $false }
 }
 # Which view the reminder shows and whether it offers Resume. A pause whose
 # receipt was interrupted (a crash between suspending and recording it) still
@@ -333,7 +345,8 @@ function Show-EncryptionFollowup {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
-    if (Test-AppFollowupOpen) { return }
+    # Quiet only for a volume the app's card covers.
+    if ((Test-AppFollowupOpen) -and (Test-AppCoversVolume ([string]$facts.driveLetter))) { return }
     $window=New-FollowupForm (Get-FollowupView $decision $offer.waiting $offer.canResume ([string]$facts.driveLetter))
     $form=$window.form
     if ($window.settings) {

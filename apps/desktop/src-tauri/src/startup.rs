@@ -166,15 +166,18 @@ mod platform {
         // so the entry is this app's, whichever copy wrote it.
         if state.reopen != Some(reopen) {
             state.registered = if reopen {
+                // Read first: the entry may be what started this run, and a
+                // startup program shouldn't rewrite the key that launched it.
                 std::env::current_exe()
                     .map_err(|e| e.to_string())
                     .and_then(|exe| {
-                        write_string(
-                            HKEY_CURRENT_USER,
-                            RUN_KEY,
-                            VALUE_NAME,
-                            &format!("\"{}\" --reopened", exe.display()),
-                        )
+                        let command = format!("\"{}\" --reopened", exe.display());
+                        if read_string(HKEY_CURRENT_USER, RUN_KEY, VALUE_NAME).as_deref()
+                            == Some(command.as_str())
+                        {
+                            return Ok(());
+                        }
+                        write_string(HKEY_CURRENT_USER, RUN_KEY, VALUE_NAME, &command)
                     })
                     .is_ok()
             } else {

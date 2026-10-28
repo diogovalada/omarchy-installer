@@ -262,6 +262,15 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'An inter
     $event=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::ManualReset,$name)
     try { Assert (Test-AppFollowupOpen $name) 'The app showing its card must quiet the reminder.' } finally { $event.Dispose() }
     Assert (-not (Test-AppFollowupOpen $name)) 'Once the app closes, the reminder must show again.'
+    # Only a volume an unremoved installer lists as paused is covered.
+    $summary=Join-Path $env:TEMP ('omarchy-covered-summary-'+[guid]::NewGuid().ToString('N')+'.json')
+    try {
+        Assert (-not (Test-AppCoversVolume 'C:' $summary)) 'A missing summary covered a volume.'
+        [IO.File]::WriteAllText($summary,(@{operations=@(@{status='staged';bitLockerPaused=@('D:')})} | ConvertTo-Json -Depth 4))
+        Assert ((Test-AppCoversVolume 'D:' $summary) -and -not (Test-AppCoversVolume 'C:' $summary)) 'Only the paused volume the card lists must be covered.'
+        [IO.File]::WriteAllText($summary,'not json')
+        Assert (-not (Test-AppCoversVolume 'D:' $summary)) 'An unreadable summary covered a volume.'
+    } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
 }
 # The window builds twice in one process under strict mode (the DPI type is
 # added once), starts on the safe button, and tabs left to right.
