@@ -345,8 +345,10 @@ function Show-EncryptionFollowup {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
-    # Quiet only for a volume the app's card covers.
-    if ((Test-AppFollowupOpen) -and (Test-AppCoversVolume ([string]$facts.driveLetter))) { return }
+    # Quiet only for a pause the app's card covers: this volume, still a
+    # pause (not turned off or decrypting since), which the card resumes or
+    # waits on.
+    if ($decision -eq 'suspended' -and (Test-AppFollowupOpen) -and (Test-AppCoversVolume ([string]$facts.driveLetter))) { return }
     $window=New-FollowupForm (Get-FollowupView $decision $offer.waiting $offer.canResume ([string]$facts.driveLetter))
     $form=$window.form
     if ($window.settings) {
