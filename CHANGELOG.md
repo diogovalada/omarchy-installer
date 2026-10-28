@@ -117,6 +117,8 @@ downloads. Published versions and their artifacts are immutable.
   and a reopened start only asks for administrator access when an action needs
   it. The BitLocker reminder waits a minute after sign-in and stays quiet while
   the app shows the installer, so the two don't appear together.
+- Install without USB (testing builds): the Clean up step no longer runs its
+  BitLocker sentence into the previous one.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

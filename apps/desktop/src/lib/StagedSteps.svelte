@@ -37,6 +37,8 @@
   // BitLocker can be resumed once the installer has started, never while
   // it waits.
   $: paused=op.bitLockerPaused?.length ? op.bitLockerPaused : [];
+  // Built as one string: Svelte drops a block's leading space.
+  $: stepText=TEXT[current]+(current===3 && paused.length ? ' Resume BitLocker once Windows starts the way you’ll normally start it.' : '');
   $: available={restart:testing && ready,arm:testing && ready,firmware:testing && ready && secureBoot!==false,cleanup:true,again:canPrepareAgain,resume:current===3 && paused.length>0} as Record<Action,boolean>;
   // Restarting into the installer also retries a selection whose restart
   // hasn't happened (step 2).
@@ -66,7 +68,7 @@
       </ol>
       <p>If the firmware warns that BitLocker may ask for a recovery key, you can continue: this app paused BitLocker.</p>
       <p>Windows then starts again and this app reopens, so you can start the installer. Windows may ask you to set up your PIN again, so make sure you can sign in another way, such as your password or your Microsoft account’s recovery email or phone.</p>
-    {:else}<p>{TEXT[current]}{#if current===3 && paused.length} Resume BitLocker once Windows starts the way you’ll normally start it.{/if}</p>{/if}
+    {:else}<p>{stepText}</p>{/if}
     {#if current===1 || current===2}<p>{installer}</p>{/if}
   {:else}
     <p>Remove the temporary installer. Windows and any installed Omarchy stay.</p>

@@ -82,7 +82,7 @@ it('offers resuming BitLocker once the installer has started, and after removal'
   view.unmount();
   state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op('boot-scheduled',true,['C:'])]}}});
   view=render(StagedInstaller,{recoveryOnly:true});
-  expect(screen.getByText(/Resume BitLocker once Windows starts the way you’ll normally start it\./)).toBeInTheDocument();
+  expect(screen.getByText(/Resume BitLocker once Windows starts/)).toHaveTextContent(/^Does your PC now start Omarchy by itself\? Then remove the temporary installer\. Resume BitLocker once Windows starts the way you’ll normally start it\.$/);
   await fireEvent.click(screen.getByRole('button',{name:'Resume BitLocker'}));
   expect(calls.stagedIso).toHaveBeenLastCalledWith('resume',null,id);
   view.unmount();

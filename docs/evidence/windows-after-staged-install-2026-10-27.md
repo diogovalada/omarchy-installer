@@ -77,9 +77,12 @@ encryption on later. `limine-scan` lets you rename an entry; the `entry:` line
 must keep the firmware's original description.
 
 This is a change for whatever writes the entry, not for this app, which doesn't
-edit Limine's menu. The plan is an issue at `limine-entry-tool` presenting the
-three options, and a comment on omarchy#7867 (below) asking that fixes keep
-entries of every kind. The app's last step recommends the `efi_boot_entry`
+edit Limine's menu. Omarchy chooses and wires these tools (Limine and
+`limine-entry-tool` are separate projects), so the plan is an issue at
+omacom/omarchy presenting the options (document the entry, have Omarchy add it
+per PC, or ask `limine-entry-tool` for an option), and a comment on
+omarchy#7867 (below) asking that fixes keep entries of every kind. An issue at
+`limine-entry-tool` follows only if Omarchy prefers the tool to change. The app's last step recommends the `efi_boot_entry`
 entry, with `limine-scan` when the PC has no Windows Boot Manager entry.
 
 ## Omarchy behaviour that affects the Windows entry
@@ -163,7 +166,7 @@ if a reminder fix is ever about safety.
 
 ## Follow-ups
 
-- Post the `limine-entry-tool` issue and the omarchy#7867 comment.
+- Post the Omarchy issue and the omarchy#7867 comment.
 - Revisit when Omarchy boots with Secure Boot on. BitLocker can then bind to
   PCR 7 (Secure Boot policy and signers) instead of binary hashes. Whether a
   third-party-signed loader in front of Windows keeps that binding needs
