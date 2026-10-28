@@ -156,7 +156,7 @@ function Register-EncryptionReminder($Facts,[string]$Mode) {
     $xml=@"
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>Ask about Windows encryption after Omarchy preparation. Does not automatically enable encryption.</Description></RegistrationInfo>
-  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$sid</UserId></LogonTrigger></Triggers>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$sid</UserId><Delay>PT1M</Delay></LogonTrigger></Triggers>
   <Principals><Principal id="Owner"><UserId>$sid</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
   <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><ExecutionTimeLimit>PT1H</ExecutionTimeLimit></Settings>
   <Actions Context="Owner"><Exec><Command>$xmlExe</Command><Arguments>$xmlArguments</Arguments></Exec></Actions>
@@ -247,6 +247,14 @@ function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::Ge
         return $false
     } catch { return $false }
 }
+# The app leaves this event while it shows a temporary installer, whose card
+# offers the same choices, and reopens at sign-in while one exists; the logon
+# trigger's minute of delay gives it time. The reminder then stays quiet.
+function Test-AppFollowupOpen([string]$Name='Local\OmarchyInstallerFollowUp') {
+    $handle=$null
+    try { if ([Threading.EventWaitHandle]::TryOpenExisting($Name,[Security.AccessControl.EventWaitHandleRights]::Synchronize,[ref]$handle)) { $handle.Dispose(); return $true } } catch { }
+    return $false
+}
 # Which view the reminder shows and whether it offers Resume. A pause whose
 # receipt was interrupted (a crash between suspending and recording it) still
 # shows and resumes as a pause, behind the same confirmation: the reminder was
@@ -325,6 +333,7 @@ function Show-EncryptionFollowup {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
+    if (Test-AppFollowupOpen) { return }
     $window=New-FollowupForm (Get-FollowupView $decision $offer.waiting $offer.canResume ([string]$facts.driveLetter))
     $form=$window.form
     if ($window.settings) {

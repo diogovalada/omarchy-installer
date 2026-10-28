@@ -1,7 +1,7 @@
 //! What the desktop process (not the elevated helper) reads and writes in the
 //! signed-in user's Windows session: Secure Boot's state, which Windows shows
-//! to standard users, and a one-time entry that reopens the app at the next
-//! sign-in after the firmware restart.
+//! to standard users, a one-time entry that reopens the app at the next
+//! sign-in, and the follow-up while a temporary installer exists.
 
 /// Secure Boot as Windows reports it; `None` when the PC doesn't say (legacy
 /// BIOS, or the value can't be read). For display only: arming the installer
@@ -22,6 +22,67 @@ pub fn cancel_reopen(command: &str) {
     platform::cancel_reopen(command)
 }
 
+/// While the app shows a temporary installer, a named event keeps the
+/// BitLocker sign-in reminder quiet, since the card offers the same choices;
+/// and unless that installer opted out, the app reopens at each sign-in.
+/// Called with every recovery summary; acts only on changes.
+pub fn follow_up(shown: bool, reopen: bool) {
+    platform::follow_up(shown, reopen)
+}
+
+/// The firmware restart wrote or removed its own reopen entry; the next
+/// `follow_up` registers again if it should.
+pub fn forget_reopen() {
+    platform::forget_reopen()
+}
+
+/// Started by the reopen entry at sign-in.
+pub fn reopened() -> bool {
+    std::env::args().any(|arg| arg == "--reopened")
+}
+
+/// Installers whose card said "Don't open at sign-in".
+pub fn opted_out() -> Vec<String> {
+    platform::opted_out()
+}
+
+pub fn set_reopen(operation_id: &str, reopen: bool) -> Result<(), String> {
+    platform::set_reopen(operation_id, reopen)
+}
+
+/// The opt-out list after one installer changes its choice: IDs separated by
+/// semicolons, without duplicates, and at most six of them (the oldest go),
+/// which keeps it within the registry helper's 260 characters.
+fn updated_opt_outs(current: &str, operation_id: &str, reopen: bool) -> String {
+    let mut ids: Vec<&str> = current
+        .split(';')
+        .filter(|id| !id.is_empty() && *id != operation_id)
+        .collect();
+    if !reopen {
+        ids.push(operation_id);
+    }
+    let skip = ids.len().saturating_sub(6);
+    ids[skip..].join(";")
+}
+
+#[cfg(test)]
+mod opt_out_tests {
+    #[test]
+    fn opting_out_and_back_in_edits_only_that_installer() {
+        let list = super::updated_opt_outs("", "a", false);
+        assert_eq!(list, "a");
+        let list = super::updated_opt_outs(&list, "b", false);
+        assert_eq!(super::updated_opt_outs(&list, "b", false), "a;b");
+        assert_eq!(super::updated_opt_outs(&list, "a", true), "b");
+        let many: Vec<String> = (0..10).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+        let full = many.iter().fold(String::new(), |list, id| {
+            super::updated_opt_outs(&list, id, false)
+        });
+        assert_eq!(full, many[4..].join(";"));
+        assert!(full.encode_utf16().count() <= 260);
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use std::ffi::OsStr;
@@ -31,6 +92,10 @@ mod platform {
     const SECURE_BOOT_KEY: &str = r"SYSTEM\CurrentControlSet\Control\SecureBoot\State";
     const RUN_ONCE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\RunOnce";
     const VALUE_NAME: &str = "OmarchyInstaller";
+    const SETTINGS_KEY: &str = r"Software\OmarchyInstaller";
+    const OPT_OUT_VALUE: &str = "NoReopen";
+    // Its counterpart in BitLockerSetup.ps1 (Test-AppFollowupOpen).
+    const FOLLOW_UP_EVENT: &str = r"Local\OmarchyInstallerFollowUp";
     // RunOnce runs commands of up to 260 characters.
     const MAX_COMMAND: usize = 260;
 
@@ -50,6 +115,62 @@ mod platform {
     }
     pub fn cancel_reopen(command: &str) {
         delete_value_if(HKEY_CURRENT_USER, RUN_ONCE_KEY, VALUE_NAME, command);
+    }
+
+    // The event handle (as a number, so the state can be static) and the
+    // reopen entry this copy wrote.
+    struct FollowUp {
+        event: usize,
+        command: Option<String>,
+    }
+    static FOLLOW_UP: std::sync::Mutex<FollowUp> = std::sync::Mutex::new(FollowUp {
+        event: 0,
+        command: None,
+    });
+
+    pub fn follow_up(shown: bool, reopen: bool) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::CreateEventW;
+        let Ok(mut state) = FOLLOW_UP.lock() else {
+            return;
+        };
+        if shown && state.event == 0 {
+            // A failure leaves it 0, so the next summary tries again.
+            state.event =
+                unsafe { CreateEventW(std::ptr::null(), 1, 0, wide(FOLLOW_UP_EVENT).as_ptr()) }
+                    as usize;
+        } else if !shown && state.event != 0 {
+            unsafe { CloseHandle(state.event as _) };
+            state.event = 0;
+        }
+        if reopen && state.command.is_none() {
+            state.command = reopen_at_sign_in().ok();
+        } else if !reopen {
+            if let Some(command) = state.command.take() {
+                cancel_reopen(&command);
+            }
+        }
+    }
+    pub fn forget_reopen() {
+        if let Ok(mut state) = FOLLOW_UP.lock() {
+            state.command = None;
+        }
+    }
+    pub fn opted_out() -> Vec<String> {
+        read_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE)
+            .map(|list| {
+                list.split(';')
+                    .filter(|id| !id.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    pub fn set_reopen(operation_id: &str, reopen: bool) -> Result<(), String> {
+        let current =
+            read_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE).unwrap_or_default();
+        let list = super::updated_opt_outs(&current, operation_id, reopen);
+        write_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE, &list)
     }
 
     pub(super) fn read_dword(root: HKEY, key: &str, name: &str) -> Option<u32> {
@@ -197,4 +318,12 @@ mod platform {
         Err("Reopening at sign-in requires Windows".into())
     }
     pub fn cancel_reopen(_: &str) {}
+    pub fn follow_up(_: bool, _: bool) {}
+    pub fn forget_reopen() {}
+    pub fn opted_out() -> Vec<String> {
+        Vec::new()
+    }
+    pub fn set_reopen(_: &str, _: bool) -> Result<(), String> {
+        Err("Reopening at sign-in requires Windows".into())
+    }
 }

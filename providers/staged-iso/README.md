@@ -110,7 +110,13 @@ warn that booting and same-disk installation may fail in the official ISO.
    its permanent boot menu. The installer can be selected again after an attempt.
    While an installer waits to be selected, the BitLocker reminder does not offer
    to resume protection.
-6. On returning to Windows, an existing temporary installer appears automatically.
+6. On returning to Windows, an existing temporary installer appears automatically:
+   while one exists, the app reopens at each sign-in (a RunOnce entry it
+   renews each run) unless its card says **Don't open at sign-in**. A reopened
+   start asks for administrator access only when an action needs it. While the
+   app shows the card, it holds a named event, and the BitLocker reminder, which
+   now waits a minute after sign-in, stays quiet; without the app it shows as
+   before.
    Use **Remove temporary installer**, or **Prepare again** in a testing build
    with a verified download. Removal grows the shrunk partition back over the
    free space after it, up to the next partition (installed Omarchy) or the

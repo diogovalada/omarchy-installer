@@ -338,6 +338,24 @@ fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
     mark_restarts(&mut summary, current_boot_unix_seconds());
     Some(summary)
 }
+// Each unremoved installer says whether the app reopens for it at sign-in.
+// Returns whether any installer is shown, and whether any of them reopens.
+#[cfg(any(windows, test))]
+fn mark_reopens(summary: &mut Value, opted_out: &[String]) -> (bool, bool) {
+    let (mut shown, mut reopen) = (false, false);
+    for operation in summary["operations"].as_array_mut().into_iter().flatten() {
+        if operation["status"] == "cleaned" {
+            continue;
+        }
+        let reopens = operation["operationId"]
+            .as_str()
+            .is_some_and(|id| !opted_out.iter().any(|opted| opted == id));
+        operation["reopens"] = Value::Bool(reopens);
+        shown = true;
+        reopen |= reopens;
+    }
+    (shown, reopen)
+}
 // Arming records the Windows boot it happened in. A later boot means the
 // selected restart has happened, so the card can move on to removal.
 #[cfg(any(windows, test))]
@@ -391,6 +409,14 @@ impl Setup {
                     .and_then(|root| {
                         read_staging_summary(&root.join("OmarchyStagedInstaller/summary.json"))
                     });
+            let opted_out = crate::startup::opted_out();
+            let (shown, reopen) = snapshot
+                .staged_recovery
+                .as_mut()
+                .map_or((false, false), |recovery| {
+                    mark_reopens(recovery, &opted_out)
+                });
+            crate::startup::follow_up(shown, reopen);
             snapshot.secure_boot = crate::startup::secure_boot();
             Ok(snapshot)
         }
@@ -1449,7 +1475,9 @@ pub fn start_admin_session(
     app: tauri::AppHandle,
     setup: State<'_, Setup>,
 ) -> Result<Snapshot, String> {
-    if KEEP_SESSION {
+    // Reopened at sign-in: a prompt there looks alarming and trains people to
+    // accept it, so the first action asks instead.
+    if KEEP_SESSION && !crate::startup::reopened() {
         let service = setup.inner().clone();
         std::thread::spawn(move || {
             let Ok(mut session) = service.session.try_lock() else {
@@ -1469,6 +1497,19 @@ pub fn start_admin_session(
             service.update(&app, |inner| inner.snapshot.admin = Some(admin.into()));
         });
     }
+    setup.snapshot()
+}
+
+/// The card's "Don't open at sign-in" (and back): whether the app reopens at
+/// sign-in for this installer.
+#[tauri::command]
+pub fn staged_reopen(
+    operation_id: String,
+    reopen: bool,
+    setup: State<'_, Setup>,
+) -> Result<Snapshot, String> {
+    uuid::Uuid::parse_str(&operation_id).map_err(|_| "Invalid staging operation ID")?;
+    crate::startup::set_reopen(&operation_id, reopen)?;
     setup.snapshot()
 }
 
@@ -1940,6 +1981,7 @@ fn exchange(
                 if !approved && operation == "staged_firmware" {
                     if let Some(command) = reopen.take() {
                         crate::startup::cancel_reopen(&command);
+                        crate::startup::forget_reopen();
                     }
                 }
                 // The app shows a staged action as under way once confirmed.
@@ -2040,6 +2082,7 @@ fn exchange(
                 // Secure Boot was already off, so the PC doesn't restart.
                 if let Some(command) = reopen.as_deref().filter(|_| result["secureBoot"] == false) {
                     crate::startup::cancel_reopen(command);
+                    crate::startup::forget_reopen();
                 }
                 if let Some(path) = &exported_path {
                     result["receiptPath"] = json!(path);
@@ -2064,6 +2107,7 @@ fn exchange(
                 // usually the restart.
                 if let Some(command) = reopen.as_deref().filter(|_| !restarting) {
                     crate::startup::cancel_reopen(command);
+                    crate::startup::forget_reopen();
                 }
                 return Err(value["message"]
                     .as_str()
@@ -2359,6 +2403,28 @@ mod usb_review_tests {
             std::fs::write(&path, serde_json::to_vec(&paused).unwrap()).unwrap();
             assert!(read_staging_summary(&path).is_none());
         }
+    }
+    #[test]
+    fn unremoved_installers_say_whether_the_app_reopens_for_them() {
+        let (kept, opted) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let mut summary = json!({"operations":[
+            {"operationId":kept,"status":"staged"},
+            {"operationId":opted,"status":"boot-scheduled"},
+            {"operationId":uuid::Uuid::new_v4().to_string(),"status":"cleaned"}
+        ]});
+        assert_eq!(mark_reopens(&mut summary, &[opted.clone()]), (true, true));
+        assert_eq!(summary["operations"][0]["reopens"], json!(true));
+        assert_eq!(summary["operations"][1]["reopens"], json!(false));
+        assert!(summary["operations"][2]["reopens"].is_null());
+        let mut quiet = json!({"operations":[{"operationId":opted,"status":"staged"}]});
+        assert_eq!(mark_reopens(&mut quiet, &[opted]), (true, false));
+        assert_eq!(
+            mark_reopens(&mut json!({"operations":[]}), &[]),
+            (false, false)
+        );
     }
     #[test]
     fn scheduled_operations_are_marked_once_windows_restarts() {

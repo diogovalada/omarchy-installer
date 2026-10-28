@@ -11,6 +11,8 @@
   // Set while a running command prepares or removes this installer.
   export let underway:'preparing'|'removing'|null=null;
   export let act:(action:Action)=>void=()=>{};
+  // Whether the app reopens at sign-in for this installer (Windows).
+  export let reopen:(open:boolean)=>void=()=>{};
   type Action='restart'|'arm'|'firmware'|'cleanup'|'again'|'resume';
   // Shown before restarting, since the app can't be seen from the installer.
   // A replaced partition (Replace Windows) is deleted there to make room.
@@ -90,6 +92,8 @@
   {#if secondary.length}
     <div class="secondary">{#each secondary as action}<button class="text-action" disabled={busy} onclick={()=>act(action)}>{labels[action]}</button>{/each}</div>
   {/if}
+  <!-- The app reopens at each sign-in while this installer exists. -->
+  {#if typeof op.reopens==='boolean' && !underway}<p class="reopen"><button class="text-action" disabled={busy} onclick={()=>reopen(!op.reopens)}>{op.reopens ? 'Don’t open at sign-in' : 'Open at sign-in'}</button></p>{/if}
 </article>
 
 <style>
@@ -107,6 +111,7 @@
   details{margin:10px 0 0;font-size:11px;color:var(--text-dim);line-height:1.8}summary{cursor:pointer;padding:4px 0}details p{font-size:11px}
   .how{margin:-4px 0 4px}.how-to{margin:0 0 8px;padding-left:20px;font-size:12px;line-height:1.8;color:var(--text-muted)}.how-to strong{color:var(--text)}code{padding:0 4px;border-radius:3px;background:var(--surface-raised);font-size:11px;color:var(--text)}pre{margin:0 0 8px;padding:8px 10px;border-radius:4px;background:var(--surface-raised);overflow-x:auto}pre code{padding:0;background:none;line-height:1.6}
   .secondary{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+  .reopen{margin:10px 0 0}.reopen .text-action{color:var(--text-dim)}
   .text-action{min-height:0;margin:0;padding:0;border:0;background:transparent;color:var(--accent);font-size:11px;text-decoration:underline;text-underline-offset:3px}.text-action:hover:not(:disabled){color:var(--accent-hover)}
   @media(max-width:550px){article{padding:16px}}
 </style>

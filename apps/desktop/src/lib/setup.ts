@@ -38,7 +38,7 @@ export interface SetupSnapshot {
   receipt: { receiptPath?: string; recordWarning?: string; receipt?: { mode?:'preserve'; message?:string; backupPath?:string; eject?: { status: string; message: string }; bitLockerRestoration?: { required: boolean; verified: boolean } } } | null;
 }
 // `replaces`: the partition to delete in the installer (Replace Windows).
-export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean;replaces?:string|null;bitLockerPaused?:string[] }
+export interface StagedOperation { operationId:string;status:string;diskNumber:number;linuxBytes:number;temporaryBytes:number;message:string;restartedSinceScheduled?:boolean;replaces?:string|null;bitLockerPaused?:string[];reopens?:boolean }
 export interface StagedChoice { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;label:string;largestFreeAfterStagingBytes:number;target:Record<string,unknown>;encryption?:StagedEncryption[] }
 export interface StagedEncryption { driveLetter:string;isOsVolume:boolean;conversionStatus:number;protectionStatus:number;lockStatus:number }
 export interface StagedBlockedDisk { diskNumber:number;diskUniqueId:string;diskSizeBytes?:number;reason:string;encryption?:StagedEncryption[] }
@@ -84,6 +84,7 @@ export const setup = { subscribe:state.subscribe, refresh,
   start:(choiceId:string, allocationBytes?:number, deleteConfirmation?:string, bootMenu?:BootMenu, usbMode?:'erase'|'preserve',usbReviewToken?:string) => command('start_setup', {choiceId,allocationBytes:allocationBytes===undefined?null:String(allocationBytes),deleteConfirmation:deleteConfirmation ?? null,bootMenu:bootMenu ?? null,usbMode:usbMode ?? null,usbReviewToken:usbReviewToken ?? null}),
   respondStagedReview:(approved:boolean) => command('respond_staged_review',{approved}),
   startAdminSession:() => command('start_admin_session'),
+  stagedReopen:(operationId:string,reopen:boolean) => command('staged_reopen',{operationId,reopen}),
   // Not a user action: no pending state, and nothing to report if it can't start.
   backgroundCheck:() => isTauri() ? invoke('staged_background_check').then(()=>undefined,()=>undefined) : Promise.resolve(),
   cancel:() => command('cancel_setup') };
