@@ -28,8 +28,10 @@ done, and makes removal give the space back.
   when clicked. A prompt at every sign-in looks alarming and trains people to
   accept it.
 - **No two windows:** the reminder waits a minute after sign-in and stays quiet
-  while the app shows a temporary installer. The app leaves a named event for
-  that; if the app didn't open, the reminder shows as before.
+  while the app shows a temporary installer that paused BitLocker, so the card
+  can offer what the reminder would. The app leaves a named event for that; if
+  the app didn't open, or its installer paused nothing (Prepare again after a
+  pause), the reminder shows as before.
 - **Resume BitLocker from the app,** on the card once the installer has
   started, and after removal. Same rules as the reminder (only a pause this
   installer made, never while an installer waits) through the same function.
@@ -61,8 +63,11 @@ done, and makes removal give the space back.
      if you will.
 3. **Reopen at sign-in:**
    - Desktop: while the recovery summary lists an unremoved installer that
-     isn't opted out, keep the RunOnce entry and the named event; otherwise
-     remove both. The firmware restart keeps its own registration.
+     isn't opted out, keep a Run entry (written once per change, never from
+     the run it starts); while one that paused BitLocker is shown, hold the
+     named event. The firmware restart adds its one-time RunOnce entry only
+     when the Run entry isn't in place, so the app never starts twice. The card
+     offers the opt-out only when the entry is really registered.
    - A `--reopened` start skips the launch-time administrator request.
    - Reminder: the logon trigger gets a one-minute delay, and the reminder
      returns without showing while the event exists.
