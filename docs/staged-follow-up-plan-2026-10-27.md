@@ -87,3 +87,38 @@ the reopened start. Then one VM run of the stack on `OmarchyStagedTest`
 - Refreshing old reminders' scripts (see the run's notes).
 - Editing Limine's menu from the app; boot management and removing Omarchy stay
   in future work.
+
+## VM run (2026-10-28)
+
+On `OmarchyStagedTest` (BitLocker on), built from `main` @ 003570a, every check
+passed. The run's report is in `staged-vm-handoff/vm/follow-up-run/`.
+
+- **Source partition:** 6178 MiB, the ISO's 5921.9 MiB plus 256 MiB.
+- **Reopening:** both reopened starts asked for no administrator access at
+  launch; the first action did. The firmware restart added no RunOnce entry
+  while the Run entry was in place, and only one copy of the app ever ran.
+- **The reminder:** it ran about a minute after each sign-in and stayed quiet
+  while the app's card covered C:. After **Don't open at sign-in** it showed,
+  offering Resume protection.
+- **Removal:** the confirmation came after about 20 seconds and said "C: grows
+  from 56.1 to 126.7 GiB". C: came back to exactly its original size, still
+  encrypted and paused, and the Run entry and firmware entry were gone.
+- **Resume BitLocker:** protection came back on, the reminder retired, and
+  nothing appeared at the next sign-in.
+- **Prepare again:** C: stayed 56.1 GiB, and the new check offered the freed
+  70.5 GiB.
+- Four prompts in five app runs, each at a normal launch or a reopened run's
+  first action.
+
+Fixed afterwards: the Clean up text lost the space before "Resume BitLocker",
+since Svelte drops a block's leading space.
+
+Left as they are:
+- the disk map rounds the installer up (6.6 GiB) where Review rounds to the
+  nearest (6.5 GiB), on purpose: the map never understates what's needed;
+- while Resume's confirmation is open the removal result is hidden behind it;
+  cancelling brings it back;
+- a reopened start shows the official release instead of a local test ISO
+  picked earlier, which doesn't affect the card;
+- the reminder's folder stays after it retires, as a record.
+
