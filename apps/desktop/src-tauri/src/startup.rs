@@ -1,7 +1,7 @@
 //! What the desktop process (not the elevated helper) reads and writes in the
 //! signed-in user's Windows session: Secure Boot's state, which Windows shows
-//! to standard users, and a one-time entry that reopens the app at the next
-//! sign-in after the firmware restart.
+//! to standard users, a one-time entry that reopens the app at the next
+//! sign-in, and the follow-up while a temporary installer exists.
 
 /// Secure Boot as Windows reports it; `None` when the PC doesn't say (legacy
 /// BIOS, or the value can't be read). For display only: arming the installer
@@ -22,6 +22,82 @@ pub fn cancel_reopen(command: &str) {
     platform::cancel_reopen(command)
 }
 
+/// While the app shows a temporary installer that paused BitLocker, a named
+/// event keeps the BitLocker sign-in reminder quiet, since the card offers the
+/// same choices. While an installer hasn't opted out, a Run entry reopens the
+/// app at each sign-in. Called with every recovery summary; acts only on
+/// changes. Returns whether the Run entry is in place.
+pub fn follow_up(quiet_reminder: bool, reopen: bool) -> bool {
+    platform::follow_up(quiet_reminder, reopen)
+}
+
+/// Whether the follow-up's Run entry already reopens the app at sign-in, so
+/// the firmware restart needn't add its own one-time entry (two would start
+/// two copies).
+pub fn reopens_at_sign_in() -> bool {
+    platform::reopens_at_sign_in()
+}
+
+/// Started by the reopen entry at sign-in.
+pub fn reopened() -> bool {
+    std::env::args().any(|arg| arg == "--reopened")
+}
+
+/// Installers whose card said "Don't open at sign-in".
+pub fn opted_out() -> Vec<String> {
+    platform::opted_out()
+}
+
+/// `existing`: the installers that still exist, so removed ones are dropped.
+pub fn set_reopen(operation_id: &str, reopen: bool, existing: &[String]) -> Result<(), String> {
+    platform::set_reopen(operation_id, reopen, existing)
+}
+
+/// The opt-out list after one installer changes its choice: IDs separated by
+/// semicolons, only of installers that still exist, without duplicates. At
+/// most six (the oldest go), which keeps it within the registry helper's 260
+/// characters; more installers than that never exist at once.
+fn updated_opt_outs(
+    current: &str,
+    operation_id: &str,
+    reopen: bool,
+    existing: &[String],
+) -> String {
+    let mut ids: Vec<&str> = current
+        .split(';')
+        .filter(|id| *id != operation_id && existing.iter().any(|kept| kept == id))
+        .collect();
+    if !reopen {
+        ids.push(operation_id);
+    }
+    let skip = ids.len().saturating_sub(6);
+    ids[skip..].join(";")
+}
+
+#[cfg(test)]
+mod opt_out_tests {
+    #[test]
+    fn opting_out_and_back_in_edits_only_that_installer() {
+        let existing: Vec<String> = ["a", "b"].map(String::from).to_vec();
+        let list = super::updated_opt_outs("", "a", false, &existing);
+        assert_eq!(list, "a");
+        let list = super::updated_opt_outs(&list, "b", false, &existing);
+        assert_eq!(super::updated_opt_outs(&list, "b", false, &existing), "a;b");
+        assert_eq!(super::updated_opt_outs(&list, "a", true, &existing), "b");
+        // Removed installers drop out instead of crowding out existing ones.
+        assert_eq!(
+            super::updated_opt_outs("old;a", "b", false, &existing),
+            "a;b"
+        );
+        let many: Vec<String> = (0..10).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+        let full = many.iter().fold(String::new(), |list, id| {
+            super::updated_opt_outs(&list, id, false, &many)
+        });
+        assert_eq!(full, many[4..].join(";"));
+        assert!(full.encode_utf16().count() <= 260);
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use std::ffi::OsStr;
@@ -30,7 +106,12 @@ mod platform {
 
     const SECURE_BOOT_KEY: &str = r"SYSTEM\CurrentControlSet\Control\SecureBoot\State";
     const RUN_ONCE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\RunOnce";
+    const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const VALUE_NAME: &str = "OmarchyInstaller";
+    const SETTINGS_KEY: &str = r"Software\OmarchyInstaller";
+    const OPT_OUT_VALUE: &str = "NoReopen";
+    // Its counterpart in BitLockerSetup.ps1 (Test-AppFollowupOpen).
+    const FOLLOW_UP_EVENT: &str = r"Local\OmarchyInstallerFollowUp";
     // RunOnce runs commands of up to 260 characters.
     const MAX_COMMAND: usize = 260;
 
@@ -50,6 +131,90 @@ mod platform {
     }
     pub fn cancel_reopen(command: &str) {
         delete_value_if(HKEY_CURRENT_USER, RUN_ONCE_KEY, VALUE_NAME, command);
+    }
+
+    // The event handle (as a number, so the state can be static), the Run
+    // entry last asked for, and whether it is in place.
+    struct FollowUp {
+        event: usize,
+        reopen: Option<bool>,
+        registered: bool,
+    }
+    static FOLLOW_UP: std::sync::Mutex<FollowUp> = std::sync::Mutex::new(FollowUp {
+        event: 0,
+        reopen: None,
+        registered: false,
+    });
+
+    pub fn follow_up(quiet_reminder: bool, reopen: bool) -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::CreateEventW;
+        let Ok(mut state) = FOLLOW_UP.lock() else {
+            return false;
+        };
+        if quiet_reminder && state.event == 0 {
+            // A failure leaves it 0, so the next summary tries again.
+            state.event =
+                unsafe { CreateEventW(std::ptr::null(), 1, 0, wide(FOLLOW_UP_EVENT).as_ptr()) }
+                    as usize;
+        } else if !quiet_reminder && state.event != 0 {
+            unsafe { CloseHandle(state.event as _) };
+            state.event = 0;
+        }
+        // A Run entry, unlike RunOnce, stays until removed, so it's written
+        // once per change. Every copy of the app reads the same installers,
+        // so the entry is this app's, whichever copy wrote it.
+        if state.reopen != Some(reopen) {
+            state.registered = if reopen {
+                // Read first: the entry may be what started this run, and a
+                // startup program shouldn't rewrite the key that launched it.
+                std::env::current_exe()
+                    .map_err(|e| e.to_string())
+                    .and_then(|exe| {
+                        let command = format!("\"{}\" --reopened", exe.display());
+                        if read_string(HKEY_CURRENT_USER, RUN_KEY, VALUE_NAME).as_deref()
+                            == Some(command.as_str())
+                        {
+                            return Ok(());
+                        }
+                        write_string(HKEY_CURRENT_USER, RUN_KEY, VALUE_NAME, &command)
+                    })
+                    .is_ok()
+            } else {
+                unsafe {
+                    RegDeleteKeyValueW(
+                        HKEY_CURRENT_USER,
+                        wide(RUN_KEY).as_ptr(),
+                        wide(VALUE_NAME).as_ptr(),
+                    );
+                }
+                false
+            };
+            state.reopen = Some(reopen);
+        }
+        state.registered
+    }
+    pub fn reopens_at_sign_in() -> bool {
+        FOLLOW_UP
+            .lock()
+            .map(|state| state.registered)
+            .unwrap_or(false)
+    }
+    pub fn opted_out() -> Vec<String> {
+        read_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE)
+            .map(|list| {
+                list.split(';')
+                    .filter(|id| !id.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    pub fn set_reopen(operation_id: &str, reopen: bool, existing: &[String]) -> Result<(), String> {
+        let current =
+            read_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE).unwrap_or_default();
+        let list = super::updated_opt_outs(&current, operation_id, reopen, existing);
+        write_string(HKEY_CURRENT_USER, SETTINGS_KEY, OPT_OUT_VALUE, &list)
     }
 
     pub(super) fn read_dword(root: HKEY, key: &str, name: &str) -> Option<u32> {
@@ -197,4 +362,16 @@ mod platform {
         Err("Reopening at sign-in requires Windows".into())
     }
     pub fn cancel_reopen(_: &str) {}
+    pub fn follow_up(_: bool, _: bool) -> bool {
+        false
+    }
+    pub fn reopens_at_sign_in() -> bool {
+        false
+    }
+    pub fn opted_out() -> Vec<String> {
+        Vec::new()
+    }
+    pub fn set_reopen(_: &str, _: bool, _: &[String]) -> Result<(), String> {
+        Err("Reopening at sign-in requires Windows".into())
+    }
 }

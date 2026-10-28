@@ -338,6 +338,42 @@ fn read_staging_summary(path: &std::path::Path) -> Option<Value> {
     mark_restarts(&mut summary, current_boot_unix_seconds());
     Some(summary)
 }
+// The unremoved installers: whether one that paused BitLocker is shown (the
+// card offers what the reminder would, so it stays quiet), and whether one
+// hasn't opted out of reopening the app at sign-in.
+#[cfg(any(windows, test))]
+fn follow_up_wanted(summary: &Value, opted_out: &[String]) -> (bool, bool) {
+    let (mut quiet_reminder, mut reopen) = (false, false);
+    for operation in summary["operations"].as_array().into_iter().flatten() {
+        if operation["status"] == "cleaned" {
+            continue;
+        }
+        quiet_reminder |= operation["bitLockerPaused"]
+            .as_array()
+            .is_some_and(|paused| !paused.is_empty());
+        reopen |= operation["operationId"]
+            .as_str()
+            .is_some_and(|id| !opted_out.iter().any(|opted| opted == id));
+    }
+    (quiet_reminder, reopen)
+}
+// Each unremoved installer says whether the app reopens for it at sign-in:
+// false once opted out, true while the Run entry is in place, and nothing
+// when it couldn't be registered, so the card promises nothing.
+#[cfg(any(windows, test))]
+fn mark_reopens(summary: &mut Value, opted_out: &[String], registered: bool) {
+    for operation in summary["operations"].as_array_mut().into_iter().flatten() {
+        if operation["status"] == "cleaned" {
+            continue;
+        }
+        let opted = operation["operationId"]
+            .as_str()
+            .is_some_and(|id| opted_out.iter().any(|opted| opted == id));
+        if opted || registered {
+            operation["reopens"] = Value::Bool(!opted);
+        }
+    }
+}
 // Arming records the Windows boot it happened in. A later boot means the
 // selected restart has happened, so the card can move on to removal.
 #[cfg(any(windows, test))]
@@ -391,6 +427,17 @@ impl Setup {
                     .and_then(|root| {
                         read_staging_summary(&root.join("OmarchyStagedInstaller/summary.json"))
                     });
+            let opted_out = crate::startup::opted_out();
+            let (quiet_reminder, reopen) = snapshot
+                .staged_recovery
+                .as_ref()
+                .map_or((false, false), |recovery| {
+                    follow_up_wanted(recovery, &opted_out)
+                });
+            let registered = crate::startup::follow_up(quiet_reminder, reopen);
+            if let Some(recovery) = snapshot.staged_recovery.as_mut() {
+                mark_reopens(recovery, &opted_out, registered);
+            }
             snapshot.secure_boot = crate::startup::secure_boot();
             Ok(snapshot)
         }
@@ -1449,7 +1496,9 @@ pub fn start_admin_session(
     app: tauri::AppHandle,
     setup: State<'_, Setup>,
 ) -> Result<Snapshot, String> {
-    if KEEP_SESSION {
+    // Reopened at sign-in: a prompt there looks alarming and trains people to
+    // accept it, so the first action asks instead.
+    if KEEP_SESSION && !crate::startup::reopened() {
         let service = setup.inner().clone();
         std::thread::spawn(move || {
             let Ok(mut session) = service.session.try_lock() else {
@@ -1469,6 +1518,28 @@ pub fn start_admin_session(
             service.update(&app, |inner| inner.snapshot.admin = Some(admin.into()));
         });
     }
+    setup.snapshot()
+}
+
+/// The card's "Don't open at sign-in" (and back): whether the app reopens at
+/// sign-in for this installer.
+#[tauri::command]
+pub fn staged_reopen(
+    operation_id: String,
+    reopen: bool,
+    setup: State<'_, Setup>,
+) -> Result<Snapshot, String> {
+    uuid::Uuid::parse_str(&operation_id).map_err(|_| "Invalid staging operation ID")?;
+    let existing: Vec<String> = setup
+        .snapshot()?
+        .staged_recovery
+        .as_ref()
+        .and_then(|recovery| recovery["operations"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|operation| operation["operationId"].as_str().map(String::from))
+        .collect();
+    crate::startup::set_reopen(&operation_id, reopen, &existing)?;
     setup.snapshot()
 }
 
@@ -1856,8 +1927,13 @@ fn exchange(
                 // dialog, since the helper restarts right after approval; if it
                 // can't be written, the dialog says so and the restart goes on.
                 let summary = if operation == "staged_firmware" {
-                    reopen = crate::startup::reopen_at_sign_in().ok();
-                    firmware_summary(summary, reopen.is_some())
+                    // The follow-up's Run entry already reopens it; a second,
+                    // one-time entry would start two copies.
+                    let following = crate::startup::reopens_at_sign_in();
+                    if !following {
+                        reopen = crate::startup::reopen_at_sign_in().ok();
+                    }
+                    firmware_summary(summary, following || reopen.is_some())
                 } else {
                     summary.to_owned()
                 };
@@ -2359,6 +2435,39 @@ mod usb_review_tests {
             std::fs::write(&path, serde_json::to_vec(&paused).unwrap()).unwrap();
             assert!(read_staging_summary(&path).is_none());
         }
+    }
+    #[test]
+    fn unremoved_installers_say_whether_the_app_reopens_for_them() {
+        let (kept, opted) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let mut summary = json!({"operations":[
+            {"operationId":kept,"status":"staged"},
+            {"operationId":opted,"status":"boot-scheduled"},
+            {"operationId":uuid::Uuid::new_v4().to_string(),"status":"cleaned"}
+        ]});
+        let opted_out = [opted.clone()];
+        // Nothing paused BitLocker, so the reminder isn't quieted.
+        assert_eq!(follow_up_wanted(&summary, &opted_out), (false, true));
+        summary["operations"][1]["bitLockerPaused"] = json!(["C:"]);
+        assert_eq!(follow_up_wanted(&summary, &opted_out), (true, true));
+        mark_reopens(&mut summary, &opted_out, true);
+        assert_eq!(summary["operations"][0]["reopens"], json!(true));
+        assert_eq!(summary["operations"][1]["reopens"], json!(false));
+        assert!(summary["operations"][2]["reopens"].is_null());
+        // Unregistered (say, the path is too long): only the opt-out shows.
+        let mut unregistered = summary.clone();
+        unregistered["operations"][0]["reopens"] = Value::Null;
+        mark_reopens(&mut unregistered, &opted_out, false);
+        assert!(unregistered["operations"][0]["reopens"].is_null());
+        assert_eq!(unregistered["operations"][1]["reopens"], json!(false));
+        let quiet = json!({"operations":[{"operationId":opted,"status":"staged"}]});
+        assert_eq!(follow_up_wanted(&quiet, &opted_out), (false, false));
+        assert_eq!(
+            follow_up_wanted(&json!({"operations":[]}), &[]),
+            (false, false)
+        );
     }
     #[test]
     fn scheduled_operations_are_marked_once_windows_restarts() {

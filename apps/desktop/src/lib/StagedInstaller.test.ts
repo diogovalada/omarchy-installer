@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StagedInstaller from './StagedInstaller.svelte';
 import { setup } from './setup';
-const calls=vi.hoisted(()=>({stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn(),backgroundCheck:vi.fn()}));
+const calls=vi.hoisted(()=>({stagedReopen:vi.fn(),stagedIso:vi.fn(),prepareBitLocker:vi.fn(),respondStagedReview:vi.fn(),cancel:vi.fn(),startAdminSession:vi.fn(),backgroundCheck:vi.fn()}));
 vi.mock('./setup',async importOriginal=>{
   const actual=await importOriginal<typeof import('./setup')>();
   const {writable}=await import('svelte/store');
@@ -111,6 +111,23 @@ it('offers resuming BitLocker once the installer has started, and after removal'
   await tick();
   expect(screen.getByRole('status')).toHaveTextContent('BitLocker protection on C: is on again.');
   expect(screen.queryByRole('button',{name:'Resume BitLocker'})).not.toBeInTheDocument();
+  view.unmount();
+});
+it('lets an installer stop or restart reopening the app at sign-in',async()=>{
+  const id='11111111-1111-4111-8111-111111111111';
+  const op=(reopens?:boolean)=>({operationId:id,status:'staged',diskNumber:0,temporaryBytes:8*1024**3,message:'',...(reopens===undefined ? {} : {reopens})});
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op(true)]}}});
+  const view=render(StagedInstaller,{recoveryOnly:true});
+  await fireEvent.click(screen.getByRole('button',{name:'Don’t open at sign-in'}));
+  expect(calls.stagedReopen).toHaveBeenLastCalledWith(id,false);
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op(false)]}}});
+  await tick();
+  await fireEvent.click(screen.getByRole('button',{name:'Open at sign-in'}));
+  expect(calls.stagedReopen).toHaveBeenLastCalledWith(id,true);
+  // Outside Windows the summary doesn't say, so nothing is offered.
+  state.set({pending:false,snapshot:{status:'complete',stagedTesting:true,stagedIso:{operations:[op()]}}});
+  await tick();
+  expect(screen.queryByRole('button',{name:/open at sign-in/i})).not.toBeInTheDocument();
   view.unmount();
 });
 it('shows how a removal ended, also for Prepare again after a reload',async()=>{

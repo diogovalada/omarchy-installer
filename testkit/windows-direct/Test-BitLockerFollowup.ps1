@@ -58,7 +58,7 @@ $state.status='pending'
     }
     $folder | Add-Member ScriptMethod RegisterTask {
         param($Name,$Xml,$Flags,$Sid,$Password,$Logon,$Security)
-        $fixture.events.Add('register')
+        $fixture.events.Add('register'); $fixture.xml=$Xml
         if ($fixture.failure -eq 'register') { throw 'Mock task registration failure' }
         $xmlTask=([xml]$Xml).Task
         $triggers=[pscustomobject]@{Count=1;value=[pscustomobject]@{UserId=$Sid}}
@@ -113,6 +113,8 @@ $state.status='pending'
         $retry=Register-EncryptionReminder $facts 'suspend'
         Assert ($retry.state.status -eq 'armed' -and $null -ne $fixture.task) 'Interrupted registration was not recovered'
         Assert (($fixture.events -join ',') -eq 'connect,delete,connect,register') 'Retry failed to reconcile the previous task before registration'
+        # A minute after sign-in, so a reopening app is up first.
+        Assert (([xml]$fixture.xml).Task.Triggers.LogonTrigger.Delay -eq 'PT1M') 'The reminder must wait a minute after sign-in.'
 
         $existing=Read-FollowupState $statePath; $existing.status='pending'
         Write-FollowupState $statePath $existing
@@ -251,6 +253,24 @@ Assert (($script:events -join ',') -eq 'resume,write-restored,remove') 'An inter
     Assert ((Get-FollowupView 'ask' $false $false 'C:').decline -ceq 'Keep BitLocker off') 'Asking lost Keep BitLocker off.'
     $decrypting=Get-FollowupView 'decrypting' $false $false 'C:'
     Assert (-not $decrypting.declineEnabled -and $decrypting.later -ceq 'Remind me next time') 'Decryption allowed stopping reminders.'
+}
+# While the app shows a temporary installer it leaves a named event, and the
+# reminder stays quiet.
+& {
+    $name='Local\OmarchyInstallerFollowUpTest-'+[guid]::NewGuid().ToString('N')
+    Assert (-not (Test-AppFollowupOpen $name)) 'Without the app, the reminder must show.'
+    $event=New-Object Threading.EventWaitHandle($false,[Threading.EventResetMode]::ManualReset,$name)
+    try { Assert (Test-AppFollowupOpen $name) 'The app showing its card must quiet the reminder.' } finally { $event.Dispose() }
+    Assert (-not (Test-AppFollowupOpen $name)) 'Once the app closes, the reminder must show again.'
+    # Only a volume an unremoved installer lists as paused is covered.
+    $summary=Join-Path $env:TEMP ('omarchy-covered-summary-'+[guid]::NewGuid().ToString('N')+'.json')
+    try {
+        Assert (-not (Test-AppCoversVolume 'C:' $summary)) 'A missing summary covered a volume.'
+        [IO.File]::WriteAllText($summary,(@{operations=@(@{status='staged';bitLockerPaused=@('D:')})} | ConvertTo-Json -Depth 4))
+        Assert ((Test-AppCoversVolume 'D:' $summary) -and -not (Test-AppCoversVolume 'C:' $summary)) 'Only the paused volume the card lists must be covered.'
+        [IO.File]::WriteAllText($summary,'not json')
+        Assert (-not (Test-AppCoversVolume 'D:' $summary)) 'An unreadable summary covered a volume.'
+    } finally { if (Test-Path -LiteralPath $summary) { [IO.File]::Delete($summary) } }
 }
 # The window builds twice in one process under strict mode (the DPI type is
 # added once), starts on the safe button, and tabs left to right.

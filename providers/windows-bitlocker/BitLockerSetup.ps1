@@ -156,7 +156,7 @@ function Register-EncryptionReminder($Facts,[string]$Mode) {
     $xml=@"
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>Ask about Windows encryption after Omarchy preparation. Does not automatically enable encryption.</Description></RegistrationInfo>
-  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$sid</UserId></LogonTrigger></Triggers>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$sid</UserId><Delay>PT1M</Delay></LogonTrigger></Triggers>
   <Principals><Principal id="Owner"><UserId>$sid</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
   <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><ExecutionTimeLimit>PT1H</ExecutionTimeLimit></Settings>
   <Actions Context="Owner"><Exec><Command>$xmlExe</Command><Arguments>$xmlArguments</Arguments></Exec></Actions>
@@ -247,6 +247,26 @@ function Test-StagedInstallerWaiting([string]$Path=(Join-Path ([Environment]::Ge
         return $false
     } catch { return $false }
 }
+# The app leaves this event while it shows a temporary installer that paused
+# BitLocker, whose card offers the same choices, and reopens at sign-in while
+# one exists; the logon trigger's minute of delay gives it time.
+function Test-AppFollowupOpen([string]$Name='Local\OmarchyInstallerFollowUp') {
+    $handle=$null
+    try { if ([Threading.EventWaitHandle]::TryOpenExisting($Name,[Security.AccessControl.EventWaitHandleRights]::Synchronize,[ref]$handle)) { $handle.Dispose(); return $true } } catch { }
+    return $false
+}
+# Whether an unremoved installer lists this volume as paused, so its card
+# covers this reminder. Display-only summary; unreadable means no.
+function Test-AppCoversVolume([string]$Drive,[string]$Path=(Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OmarchyStagedInstaller/summary.json')) {
+    try {
+        if (-not $Drive -or -not (Test-Path -LiteralPath $Path)) { return $false }
+        $summary=Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        foreach ($operation in @($summary.operations)) {
+            if ($operation.PSObject.Properties['bitLockerPaused'] -and @($operation.bitLockerPaused) -contains $Drive) { return $true }
+        }
+        return $false
+    } catch { return $false }
+}
 # Which view the reminder shows and whether it offers Resume. A pause whose
 # receipt was interrupted (a crash between suspending and recording it) still
 # shows and resumes as a pause, behind the same confirmation: the reminder was
@@ -325,6 +345,10 @@ function Show-EncryptionFollowup {
         if ($decision -eq 'restored') { $state.status='restored'; Write-FollowupState $path $state }
         Remove-EncryptionReminder $guid; return
     }
+    # Quiet only for a pause the app's card covers: this volume, still a
+    # pause (not turned off or decrypting since), which the card resumes or
+    # waits on.
+    if ($decision -eq 'suspended' -and (Test-AppFollowupOpen) -and (Test-AppCoversVolume ([string]$facts.driveLetter))) { return }
     $window=New-FollowupForm (Get-FollowupView $decision $offer.waiting $offer.canResume ([string]$facts.driveLetter))
     $form=$window.form
     if ($window.settings) {

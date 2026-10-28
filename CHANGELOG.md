@@ -112,6 +112,11 @@ downloads. Published versions and their artifacts are immutable.
   card offers Resume BitLocker for the volumes it paused, also right after
   removal. It goes through the sign-in reminder's own checks, so it refuses
   while an installer waits.
+- Install without USB (testing builds): while a temporary installer exists,
+  the app reopens at each sign-in, unless its card says Don't open at sign-in,
+  and a reopened start only asks for administrator access when an action needs
+  it. The BitLocker reminder waits a minute after sign-in and stays quiet while
+  the app shows the installer, so the two don't appear together.
 
 ## [0.1.0-preview.4] - 2026-09-13
 

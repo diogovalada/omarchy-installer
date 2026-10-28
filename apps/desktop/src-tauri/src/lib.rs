@@ -68,6 +68,7 @@ pub fn run() {
             setup::start_setup,
             setup::cancel_setup,
             setup::start_admin_session,
+            setup::staged_reopen,
             setup::staged_background_check,
             setup::respond_staged_review,
             apple_setup::apple_setup_status,

@@ -379,7 +379,7 @@
   {#each operations as op (op.operationId)}
     <!-- While preparing, the panel above stands in for the new installer's card. -->
     {#if !(preparing && op.operationId===preparingId)}
-      <StagedSteps {op} secureBoot={$setup.secureBoot ?? inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)}/>
+      <StagedSteps {op} secureBoot={$setup.secureBoot ?? inspection?.secureBoot} {testing} canPrepareAgain={testing && sourceReady} {busy} underway={underway(op)} act={action=>operate(op,action)} reopen={open=>{void setup.stagedReopen(op.operationId,open);}}/>
     {/if}
   {/each}
   {#if !recoveryOnly && removalFailed && !checkingBeside && !review && !preparing}<p class="beside"><button class="text-action" disabled={busy || !testing || !sourceReady} onclick={checkBeside}>Check disks again</button></p>{/if}
