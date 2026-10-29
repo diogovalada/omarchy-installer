@@ -91,6 +91,7 @@ macOS. On Apple Silicon Macs, it will reuse the installation backend from
 [Omarchy MX Mac](https://github.com/maralcbr/omarchy-mx-mac) through the same
 interface. Completing and testing that integration, and adding direct
 installation from Linux, are planned next steps.
+See the [design for installing without USB from Linux and Intel Macs](docs/no-usb-linux-intel-mac-2026-10-29.md).
 
 Other planned improvements:
 
