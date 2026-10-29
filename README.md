@@ -60,11 +60,11 @@ See the [support matrix](docs/support-matrix.md) for testing status and
 Development and physical testing status, grouped by the operating system running
 the app. Implementation details are listed in the support matrix above.
 
-❌ In Development · ⚠️ Needs Testing · ✅ Tested
+❌ In Development · ⚠️ Needs Testing · 🟡 Tested, needs an upstream change · ✅ Tested
 
 | Host operating system | USB | No USB (direct installation) |
 | --- | --- | --- |
-| Windows | ✅ Tested | ❌ In Development |
+| Windows | ✅ Tested | 🟡 Tested, needs [omarchy-iso#187](https://github.com/omacom/omarchy-iso/pull/187) |
 | macOS — Intel (x86_64) | ⚠️ Needs Testing | ❌ In Development |
 | macOS — Apple Silicon (ARM64) | ⚠️ Needs Testing | ❌ In Development |
 | Linux | ⚠️ Needs Testing | ❌ In Development |
@@ -72,6 +72,13 @@ the app. Implementation details are listed in the support matrix above.
 Windows USB testing covers erase-and-write preparation, full image readback and
 EFI boot-file verification on a physical USB drive. Booting and completing an
 installation, and the keep-existing-files method, remain untested.
+
+Windows installation without USB was tested in a Hyper-V VM and on a physical
+laptop with BitLocker on: preparing, restarting into the installer, installing
+Omarchy beside Windows and removing the temporary installer. It needs an Omarchy
+ISO with [omarchy-iso#187](https://github.com/omacom/omarchy-iso/pull/187),
+because the official installer refuses a disk with any BitLocker volume, even a
+paused one.
 
 macOS USB creation is implemented for Intel and Apple Silicon. Verification of
 the macOS packages passed in CI; physical USB testing remains pending. Apple Silicon
