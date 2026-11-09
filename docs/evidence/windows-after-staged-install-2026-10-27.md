@@ -78,9 +78,9 @@ must keep the firmware's original description.
 
 This is a change for whatever writes the entry, not for this app, which doesn't
 edit Limine's menu. Omarchy chooses and wires these tools (Limine and
-`limine-entry-tool` are separate projects), so the plan is an issue at
-omacom/omarchy presenting the options (document the entry, have Omarchy add it
-per PC, or ask `limine-entry-tool` for an option), and a comment on
+`limine-entry-tool` are separate projects), so we opened
+[omarchy#16927](https://github.com/omacom/omarchy/issues/16927) presenting the options (document the entry, have Omarchy add it
+per PC, or ask `limine-entry-tool` for an option), and commented on
 omarchy#7867 (below) asking that fixes keep entries of every kind. An issue at
 `limine-entry-tool` follows only if Omarchy prefers the tool to change. The app's last step recommends the `efi_boot_entry`
 entry, with `limine-scan` when the PC has no Windows Boot Manager entry.
@@ -91,7 +91,10 @@ entry, with `limine-scan` when the PC has no Windows Boot Manager entry.
   ([omarchy#7867](https://github.com/omacom/omarchy/issues/7867), confirmed on
   2026-10-08). It rebuilds `/boot/limine.conf` from a template without entries;
   `omarchy reinstall` runs it too. The entry has to be added again afterwards.
-  The fix waits on a maintainer decision about which entries a rewrite keeps.
+  [omarchy#17300](https://github.com/omacom/omarchy/pull/17300), open and
+  awaiting the maintainer's review since 2026-11-01, keeps every entry that
+  isn't this installation's, whatever its `protocol`, so it covers the
+  `efi_boot_entry` entry.
 - **Omarchy 4.5 hides Limine's menu**
   ([omarchy#16367](https://github.com/omacom/omarchy/issues/16367), open). Its
   migration sets `timeout: 1` and `quiet: yes`, so the menu only appears when a
@@ -166,7 +169,10 @@ if a reminder fix is ever about safety.
 
 ## Follow-ups
 
-- Post the Omarchy issue and the omarchy#7867 comment.
+- When omarchy#17300 is released, remove the warning about
+  `omarchy-refresh-limine` and `omarchy reinstall` from the app's "Starting
+  Windows later" tip (`StagedSteps.svelte`).
+- Watch omarchy#16927 for a reply (none as of 2026-11-09).
 - Revisit when Omarchy boots with Secure Boot on. BitLocker can then bind to
   PCR 7 (Secure Boot policy and signers) instead of binary hashes. Whether a
   third-party-signed loader in front of Windows keeps that binding needs
