@@ -62,7 +62,8 @@ Describe support by storage capability, not by distro.
 | XFS, multi-device btrfs, RAID, thin pools, unusual stacks | Only existing free space. Don't shrink automatically. |
 | Legacy BIOS, MBR, 32-bit UEFI | Out of scope; the same-disk installer requires UEFI and GPT. |
 
-**Maintenance boot.** A small Linux environment does all the shrinking:
+**Maintenance boot.** A small Linux environment does all the shrinking (see
+[the alternatives to evaluate first](#to-evaluate-before-building-the-maintenance-image)):
 
 1. While the host runs: download and verify the ISO into the host filesystem,
    record the storage stack and the reviewed changes, and put the maintenance
@@ -144,6 +145,79 @@ shrinkable space, remains a gap.
 - **Out of scope at first**: Fusion Drive, RAID, multiple physical stores,
   hybrid-MBR Boot Camp, 32-bit EFI Macs, and macOS older than 10.13.6.
 
+## To evaluate before building the maintenance image
+
+Not decided. These are notes from looking at how
+[nixos-anywhere](https://github.com/nix-community/nixos-anywhere) installs NixOS
+over SSH (2026-11-04). The question they raise is how to get off the system
+disk so it can be shrunk. There are three ways:
+
+| | Image on the ESP and a firmware restart (current plan) | `kexec` into an image in RAM | Shrinking during shutdown |
+| --- | --- | --- | --- |
+| Own kernel to maintain | Yes | Yes | No |
+| Space on the ESP | 100–300 MiB | None | None |
+| Firmware entries | One temporary | None | None |
+| Screen and keyboard | Normal boot | Riskiest: firmware doesn't set the hardware up again | Expected to keep working: same kernel, still running |
+| LUKS password | Typed at a text prompt | Typed at a text prompt | Expected to stay unlocked; if needed, asked in the app first and kept in RAM only |
+| Needs systemd | No | No | Yes |
+
+**What nixos-anywhere does.** It uses `kexec` to jump from the running Linux
+into a NixOS installer in RAM, with no firmware restart. Then `disko` destroys
+and recreates the filesystems, and it installs. It needs
+[1–1.5 GB RAM](https://github.com/nix-community/nixos-anywhere/blob/main/docs/requirements.md)
+(its docs disagree) and
+[Secure Boot off](https://github.com/nix-community/nixos-images). What's
+relevant here:
+
+- **`kexec`** needs nothing on the ESP and no firmware entry, which would remove
+  the small-ESP exclusion. But nixos-anywhere drives machines over SSH and
+  doesn't support Wi-Fi, so nothing depends on the screen, while a laptop has to
+  show progress and may need a password. Its docs don't cover hangs. Nothing
+  has been written to the disk at that point, so powering off should bring the
+  old system back.
+- **Carrying data into the RAM environment:** it carries SSH keys and network
+  settings over from the old system. Ours would carry the reviewed plan.
+- **Wiping from RAM, then downloading the system:** a possible way to close the
+  gap of replacing a Linux that can't shrink. A failed download would leave no
+  OS, and Wi-Fi settings would have to come along.
+- **`disko`** isn't useful here: it creates and formats, nothing we read says it
+  shrinks, and Omarchy's installer does its own partitioning.
+
+**Shrinking during shutdown.** If `/run/initramfs/shutdown` is executable,
+[systemd](https://systemd.io/INITRD_INTERFACE/) switches to that RAM environment
+at shutdown, with the old root still mounted at `/oldroot`, and
+[runs it](https://github.com/systemd/systemd/blob/main/src/shutdown/shutdown.c).
+The hook exists to detach complex storage. Ours would unmount `/oldroot`, check
+and shrink each layer with bundled static tools, and restart. Linux then starts
+normally with free space, and the app continues as it does when free space
+already exists, so the RAM environment only shrinks and preparing the installer
+stays in the app. It's still two restarts. If the old root can't be unmounted,
+nothing has changed and it just restarts.
+
+What could break it:
+
+1. We found no precedent for shrinking through this hook, only
+   [older](https://www.ivarch.com/blogs/oss/2007/01/resize-a-live-root-fs-a-howto.shtml)
+   [guides](https://prosauce.org/blog/2018/7/23/online-filesystem-or-disk-changes-on-embedded-hardware)
+   that move the system into RAM by hand.
+2. systemd leaves the hardware watchdog armed at this stage (10 minutes by
+   default, to confirm). A long shrink has to turn it off, or the machine could
+   reset in the middle of a resize.
+3. Fedora's dracut and Arch's mkinitcpio use the same path (to confirm), so it
+   has to coexist with them.
+4. Text may not reliably show at that stage (Plymouth, NVIDIA). A blank screen
+   during a long shrink would look like a hang.
+5. Processes can keep the old root busy, and a separate encrypted `/home` is
+   already closed by then.
+6. Distros without systemd would still need the image on the ESP, or decline.
+
+`systemctl soft-reboot` with `/run/nextroot/` is a similar mechanism that also
+keeps the kernel running, but it needs a new root with a service manager.
+
+First test: a VM with Ubuntu on LUKS, LVM and ext4, shrinking during shutdown
+and checking that it boots back. Then an independent review before changing the
+design.
+
 ## Later
 
 - Linux: shrinking single-device btrfs online, saving one reboot.
@@ -163,7 +237,11 @@ shrinkable space, remains a gap.
 1. A release containing omarchy-iso#187 (installing into free space while
    protecting the installer source and ESPs), qualified against the real ISO.
 2. On Intel Macs: `EFI/BOOT/BOOTX64.EFI` on Omarchy's ESP, maintained across
-   updates.
+   updates. Limine's `ENABLE_LIMINE_FALLBACK` setting does this, but the fork
+   turns it off for free-space installs (`enable_fallback` in
+   `phases_impl.py`). A
+   [report from a 2015 MacBook Pro](https://github.com/omacom/omarchy/issues/7867#issuecomment-5397153472)
+   confirms the Option-key picker follows that file, not `BootOrder`.
 
 Shrinking, unlocking, staging, boot scheduling and cleanup stay in the app.
 
